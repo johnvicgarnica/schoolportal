@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "node build-check.js",
+    "build": "vite build",
     "lint": "tsc --noEmit",
-    "start": "node server.ts"
+    "start": "tsx server.ts"
   },
   "dependencies": {
     "@google/genai": "2.13.0",
@@ -16,11 +16,15 @@
     "firebase": "12.16.0",
     "lucide-react": "0.546.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/express": "4.17.25",
     "@types/node": "22.20.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "tailwindcss": "^4.3.3",
     "tsx": "4.23.1",
     "typescript": "5.8.3",
     "vite": "6.4.3"
