@@ -1499,7 +1499,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       </div>
 
       {/* SECTION SELECTOR TABS: DLL, TOS, and TQ */}
-      <div className="bg-white p-2 sm:p-2.5 rounded-3xl border border-slate-200 shadow-2xs">
+      <div className="bg-[#141c2c] p-2.5 sm:p-3 rounded-3xl border border-[#24334b] shadow-2xs">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
           <div className="grid grid-cols-3 gap-1.5 sm:gap-2 flex-1">
             {CATEGORIES.map((cat) => {
@@ -1514,14 +1514,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   }}
                   className={`px-3 py-3 rounded-2xl font-sans font-bold text-xs sm:text-sm transition-all duration-200 flex flex-col sm:flex-row items-center justify-center space-y-1 sm:space-y-0 sm:space-x-2 cursor-pointer border ${
                     isActive
-                      ? `${cat.activeBg} border-transparent shadow-md scale-[1.01]`
-                      : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border-slate-200/70'
+                      ? `${cat.activeBg} border-transparent shadow-md scale-[1.01] text-white`
+                      : 'bg-[#0d1524] text-slate-200 hover:text-white hover:bg-[#1a2638] border-[#24334b]'
                   }`}
                 >
                   <span className="text-base">{cat.icon}</span>
                   <div className="text-center sm:text-left">
                     <span className="font-extrabold uppercase tracking-wider">{cat.name}</span>
-                    <span className={`hidden md:inline ml-1 text-xs opacity-90 font-normal ${isActive ? 'text-white' : 'text-slate-500'}`}>
+                    <span className={`hidden md:inline ml-1 text-xs opacity-90 font-normal ${isActive ? 'text-white' : 'text-slate-400'}`}>
                       • {cat.fullName}
                     </span>
                   </div>
@@ -1531,9 +1531,9 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           </div>
 
           {/* Cloud Sync & Last Saved Indicator */}
-          <div className="flex items-center justify-between sm:justify-end space-x-3 px-2 py-1 text-xs font-mono text-slate-500">
-            <div className="flex items-center space-x-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl font-bold">
-              <Cloud className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+          <div className="flex items-center justify-between sm:justify-end space-x-3 px-2 py-1 text-xs font-mono text-slate-400">
+            <div className="flex items-center space-x-1.5 text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-3 py-1.5 rounded-xl font-bold">
+              <Cloud className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
               <span>Firebase Cloud Sync</span>
             </div>
             {lastSavedTimestamp && (
@@ -1545,19 +1545,19 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         </div>
 
         {/* Current Active Category Description Banner */}
-        <div className="mt-2.5 pt-2.5 border-t border-slate-100 px-2 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-600 font-mono gap-2">
+        <div className="mt-2.5 pt-2.5 border-t border-[#24334b] px-2 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-300 font-mono gap-2">
           <div className="flex items-center space-x-2">
-            <span className="font-bold text-slate-900">{currentCategory.name}:</span>
-            <span>{currentCategory.fullName} — {currentCategory.shortDescription}</span>
+            <span className="font-bold text-slate-100">{currentCategory.name}:</span>
+            <span className="text-slate-300">{currentCategory.fullName} — {currentCategory.shortDescription}</span>
           </div>
-          <div className="text-slate-500 font-medium">
+          <div className="text-slate-400 font-medium">
             {isWeeklyCategory ? (
               <>
-                Active: <span className="font-bold text-blue-600">{currentTerm.name}</span> • <span className="font-bold text-indigo-600">Weeks 1 to {currentTermWeeks}</span>
+                Active: <span className="font-bold text-blue-400">{currentTerm.name}</span> • <span className="font-bold text-indigo-400">Weeks 1 to {currentTermWeeks}</span>
               </>
             ) : (
               <>
-                Checklist: <span className="font-bold text-purple-700">Term 1 {currentCategory.name}</span>, <span className="font-bold text-purple-700">Term 2 {currentCategory.name}</span>, <span className="font-bold text-purple-700">Term 3 {currentCategory.name}</span>
+                Checklist: <span className="font-bold text-purple-400">Term 1 {currentCategory.name}</span>, <span className="font-bold text-purple-400">Term 2 {currentCategory.name}</span>, <span className="font-bold text-purple-400">Term 3 {currentCategory.name}</span>
               </>
             )}
           </div>
@@ -1568,22 +1568,22 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       {isAdmin && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           {/* Metric 1: Overall Compliance */}
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
               <span>{currentCategory.name} Compliance</span>
-              <div className="p-1.5 bg-blue-50 text-blue-600 rounded-xl">
+              <div className="p-1.5 bg-blue-500/20 text-blue-400 rounded-xl">
                 <BarChart3 className="w-4 h-4" />
               </div>
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
                 {stats.overallPercentage}%
               </span>
-              <span className="text-xs text-slate-500 font-mono">
+              <span className="text-xs text-slate-400 font-mono">
                 ({stats.totalCompleted}/{stats.totalPossible} {isWeeklyCategory ? 'wks' : 'terms'})
               </span>
             </div>
-            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div className="w-full bg-[#0d1524] rounded-full h-2 overflow-hidden border border-[#24334b]">
               <div
                 className="bg-blue-600 h-full rounded-full transition-all duration-500"
                 style={{ width: `${stats.overallPercentage}%` }}
@@ -1592,104 +1592,104 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           </div>
 
           {/* Metric 2: Registered Faculty */}
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
               <span>Registered Faculty</span>
-              <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-xl">
+              <div className="p-1.5 bg-indigo-500/20 text-indigo-400 rounded-xl">
                 <Users className="w-4 h-4" />
               </div>
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
                 {stats.totalFaculty}
               </span>
-              <span className="text-xs text-slate-500 font-mono">teachers</span>
+              <span className="text-xs text-slate-400 font-mono">teachers</span>
             </div>
-            <p className="text-[11px] text-slate-500 truncate">
+            <p className="text-[11px] text-slate-400 truncate">
               JHS & SHS Teachers
             </p>
           </div>
 
           {/* Metric 3: Checked Clean */}
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
               <span>Checked (Clean)</span>
-              <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-xl">
+              <div className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
                 <CheckCircle2 className="w-4 h-4" />
               </div>
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 font-mono">
+              <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono">
                 {stats.totalCleanChecked}
               </span>
-              <span className="text-xs text-slate-500 font-mono">
+              <span className="text-xs text-slate-400 font-mono">
                 / {stats.totalCompleted} submitted
               </span>
             </div>
-            <p className="text-[11px] text-emerald-700 font-mono font-medium truncate">
+            <p className="text-[11px] text-emerald-300 font-mono font-medium truncate">
               {stats.completedFacultyCount} teacher(s) 100% compliant ({isWeeklyCategory ? `Weeks 1–${currentTermWeeks}` : 'Terms 1, 2 & 3'})
             </p>
           </div>
 
           {/* Metric 4: With Comments (Corrections) */}
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
               <span>With Comments</span>
-              <div className="p-1.5 bg-amber-50 text-amber-600 rounded-xl">
+              <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-xl">
                 <MessageSquare className="w-4 h-4" />
               </div>
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-amber-600 font-mono">
+              <span className="text-2xl sm:text-3xl font-extrabold text-amber-400 font-mono">
                 {stats.totalWithComments}
               </span>
-              <span className="text-xs text-slate-500 font-mono">
+              <span className="text-xs text-slate-400 font-mono">
                 deliverables
               </span>
             </div>
-            <p className="text-[11px] text-amber-700 truncate font-mono font-medium">
+            <p className="text-[11px] text-amber-300 truncate font-mono font-medium">
               {stats.facultyWithCommentsCount} faculty member(s) have corrections
             </p>
           </div>
 
           {/* Metric 5: Incomplete (Lacking Requirements) */}
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
               <span>Incomplete (Lacking)</span>
-              <div className="p-1.5 bg-rose-50 text-rose-600 rounded-xl">
+              <div className="p-1.5 bg-rose-500/20 text-rose-400 rounded-xl">
                 <AlertCircle className="w-4 h-4" />
               </div>
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-rose-600 font-mono">
+              <span className="text-2xl sm:text-3xl font-extrabold text-rose-400 font-mono">
                 {stats.totalIncomplete}
               </span>
-              <span className="text-xs text-slate-500 font-mono">
+              <span className="text-xs text-slate-400 font-mono">
                 lacking
               </span>
             </div>
-            <p className="text-[11px] text-rose-700 truncate font-mono font-medium">
+            <p className="text-[11px] text-rose-300 truncate font-mono font-medium">
               {stats.facultyWithIncompleteCount} faculty member(s) have lacking items
             </p>
           </div>
 
           {/* Metric 6: Late Submissions */}
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200 shadow-2xs space-y-2 col-span-2 sm:col-span-1">
-            <div className="flex items-center justify-between text-slate-500 text-xs font-mono font-medium">
+          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2 col-span-2 sm:col-span-1">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
               <span>Late Submissions</span>
-              <div className="p-1.5 bg-orange-50 text-orange-600 rounded-xl">
+              <div className="p-1.5 bg-orange-500/20 text-orange-400 rounded-xl">
                 <Clock className="w-4 h-4" />
               </div>
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-orange-600 font-mono">
+              <span className="text-2xl sm:text-3xl font-extrabold text-orange-400 font-mono">
                 {stats.totalLate}
               </span>
-              <span className="text-xs text-slate-500 font-mono">
+              <span className="text-xs text-slate-400 font-mono">
                 late
               </span>
             </div>
-            <p className="text-[11px] text-orange-700 truncate font-mono font-medium">
+            <p className="text-[11px] text-orange-300 truncate font-mono font-medium">
               {stats.facultyWithLateCount} faculty member(s) have late deliveries
             </p>
           </div>
@@ -1698,19 +1698,19 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       {/* NON-ADMIN FACULTY HIGHLIGHT CARD (When Directory Table is Hidden) */}
       {!isAdmin && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center space-x-2">
                 <span className="text-xl">🌟</span>
-                <h3 className="text-base font-bold text-slate-900 font-sans">
+                <h3 className="text-base font-bold text-slate-100 font-sans">
                   My {currentCategory.fullName} ({currentCategory.name}) Submission Status
                 </h3>
                 <span className="bg-blue-600 text-white text-[11px] font-mono px-2.5 py-0.5 rounded-full font-bold">
                   {currentUser.name}
                 </span>
               </div>
-              <p className="text-xs text-slate-600 font-mono">
+              <p className="text-xs text-slate-300 font-mono">
                 {isWeeklyCategory
                   ? `${currentTerm.name} instructional progress. Green indicates verified with no comments; Amber indicates corrections requested; Red indicates lacking requirements; Orange indicates late submission.`
                   : `Academic terms progress for ${currentCategory.name} (Term 1, Term 2, Term 3). Check below for review status and feedback.`}
@@ -1719,14 +1719,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
             <div className="flex items-center space-x-4">
               <div className="text-right">
-                <div className="text-2xl font-extrabold text-blue-700 font-mono">
+                <div className="text-2xl font-extrabold text-blue-400 font-mono">
                   {myStatus.itemsSubmitted} / {totalItemCount} {isWeeklyCategory ? 'Weeks' : 'Terms'}
                 </div>
-                <div className="text-xs text-slate-500 font-mono font-bold">
+                <div className="text-xs text-slate-400 font-mono font-bold">
                   {myStatus.percentage}% Complete
                 </div>
               </div>
-              <div className="w-14 h-14 rounded-2xl bg-white border border-blue-200 flex items-center justify-center font-bold text-blue-700 shadow-2xs text-lg font-mono">
+              <div className="w-14 h-14 rounded-2xl bg-[#0d1524] border border-blue-500/30 flex items-center justify-center font-bold text-blue-400 shadow-2xs text-lg font-mono">
                 {myStatus.percentage}%
               </div>
             </div>
@@ -1734,35 +1734,35 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
           {/* Breakdown summary pills */}
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <div className="flex items-center space-x-1.5 px-3 py-1 bg-emerald-100/80 text-emerald-800 rounded-xl text-xs font-mono font-bold border border-emerald-300">
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-mono font-bold border border-emerald-500/40">
               <Check className="w-3.5 h-3.5 stroke-[3]" />
               <span>{myStatus.cleanCheckedCount} Checked (No Comments)</span>
             </div>
-            <div className="flex items-center space-x-1.5 px-3 py-1 bg-amber-100/80 text-amber-900 rounded-xl text-xs font-mono font-bold border border-amber-300">
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-amber-500/20 text-amber-300 rounded-xl text-xs font-mono font-bold border border-amber-500/40">
               <MessageSquare className="w-3.5 h-3.5 fill-current" />
               <span>{myStatus.withCommentsCount} With Comments</span>
             </div>
             {myStatus.incompleteCount > 0 && (
-              <div className="flex items-center space-x-1.5 px-3 py-1 bg-rose-100/80 text-rose-900 rounded-xl text-xs font-mono font-bold border border-rose-300">
-                <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+              <div className="flex items-center space-x-1.5 px-3 py-1 bg-rose-500/20 text-rose-300 rounded-xl text-xs font-mono font-bold border border-rose-500/40">
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
                 <span>{myStatus.incompleteCount} Incomplete (Lacking)</span>
               </div>
             )}
             {myStatus.lateCount > 0 && (
-              <div className="flex items-center space-x-1.5 px-3 py-1 bg-orange-100/80 text-orange-900 rounded-xl text-xs font-mono font-bold border border-orange-300">
-                <Clock className="w-3.5 h-3.5 text-orange-600" />
+              <div className="flex items-center space-x-1.5 px-3 py-1 bg-orange-500/20 text-orange-300 rounded-xl text-xs font-mono font-bold border border-orange-500/40">
+                <Clock className="w-3.5 h-3.5 text-orange-400" />
                 <span>{myStatus.lateCount} Late</span>
               </div>
             )}
-            <div className="flex items-center space-x-1.5 px-3 py-1 bg-white text-slate-600 rounded-xl text-xs font-mono font-bold border border-slate-200">
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-[#0d1524] text-slate-300 rounded-xl text-xs font-mono font-bold border border-[#24334b]">
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               <span>{myStatus.pendingCount} Pending</span>
             </div>
           </div>
 
           {/* Item Checkmarks Visualizer for this Faculty Member */}
-          <div className="pt-3 border-t border-blue-100 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-mono font-bold text-slate-600 mr-2">Deliverable Statuses:</span>
+          <div className="pt-3 border-t border-[#24334b] flex flex-wrap items-center gap-2">
+            <span className="text-xs font-mono font-bold text-slate-300 mr-2">Deliverable Statuses:</span>
             {columnItems.map((col, idx) => {
               const status = myStatus.itemsStatuses[idx] || (myStatus.items[idx] ? 'checked' : 'unchecked');
               const comment = myStatus.itemsComments[idx] || '';
@@ -1854,11 +1854,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               return (
                 <div
                   key={col.key}
-                  className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-white text-slate-400 border-slate-200"
+                  className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-[#0d1524] text-slate-300 border-[#24334b]"
                   title={`${col.fullLabel}: Pending`}
                 >
                   <span>{col.headerLabel}</span>
-                  <Clock className="w-3 h-3 text-slate-300" />
+                  <Clock className="w-3 h-3 text-slate-400" />
                   <span className="text-[10px] text-slate-400 font-medium">Pending</span>
                 </div>
               );
@@ -1867,13 +1867,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
           {/* Prominent Admin Incomplete / Lacking Feedback Panel */}
           {myStatus.incompleteCount > 0 && (
-            <div className="mt-3 pt-3 border-t border-rose-200/80 bg-rose-500/10 rounded-2xl p-4 border border-rose-300/60 space-y-2.5">
+            <div className="mt-3 pt-3 border-t border-[#24334b] bg-rose-500/10 rounded-2xl p-4 border border-rose-500/30 space-y-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2 text-rose-950 font-bold text-xs font-mono">
-                  <AlertCircle className="w-4 h-4 text-rose-600" />
+                <div className="flex items-center space-x-2 text-rose-300 font-bold text-xs font-mono">
+                  <AlertCircle className="w-4 h-4 text-rose-400" />
                   <span>Lacking Submission Requirements ({myStatus.incompleteCount} item{myStatus.incompleteCount > 1 ? 's' : ''} marked Incomplete):</span>
                 </div>
-                <span className="text-[11px] font-mono text-rose-900 bg-rose-200/80 px-2.5 py-0.5 rounded-full font-bold">
+                <span className="text-[11px] font-mono text-rose-200 bg-rose-500/30 px-2.5 py-0.5 rounded-full font-bold border border-rose-500/40">
                   Missing Requirements
                 </span>
               </div>
@@ -1882,24 +1882,24 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   if (myStatus.itemsStatuses[idx] !== 'incomplete') return null;
                   const commentText = myStatus.itemsComments[idx];
                   return (
-                    <div key={col.key} className="bg-white/95 border border-rose-200 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
+                    <div key={col.key} className="bg-[#0d1524] border border-rose-500/40 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-rose-950 flex items-center space-x-1.5">
+                        <span className="font-bold text-rose-300 flex items-center space-x-1.5">
                           <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />
                           <span>{col.fullLabel}</span>
                         </span>
-                        <span className="text-[10px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-bold text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded-full border border-rose-500/40">
                           Incomplete / Lacking
                         </span>
                       </div>
-                      <p className="text-slate-700 pl-3 border-l-2 border-rose-400 text-xs italic">
+                      <p className="text-slate-300 pl-3 border-l-2 border-rose-400 text-xs italic">
                         "{commentText || 'The submitted deliverable is lacking required parts, competencies, attachments, or signatures.'}"
                       </p>
                     </div>
                   );
                 })}
               </div>
-              <p className="text-[11px] text-rose-900 font-mono pt-1">
+              <p className="text-[11px] text-rose-300 font-mono pt-1">
                 ⚠️ <strong>Action Needed:</strong> Please provide the missing components and upload your complete file to your personal Faculty Folder.
               </p>
             </div>
@@ -1907,13 +1907,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
           {/* Prominent Admin Comments Feedback Panel */}
           {myStatus.withCommentsCount > 0 && (
-            <div className="mt-3 pt-3 border-t border-amber-200/80 bg-amber-500/10 rounded-2xl p-4 border border-amber-300/60 space-y-2.5">
+            <div className="mt-3 pt-3 border-t border-[#24334b] bg-amber-500/10 rounded-2xl p-4 border border-amber-500/30 space-y-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2 text-amber-950 font-bold text-xs font-mono">
-                  <MessageSquare className="w-4 h-4 text-amber-600" />
+                <div className="flex items-center space-x-2 text-amber-300 font-bold text-xs font-mono">
+                  <MessageSquare className="w-4 h-4 text-amber-400" />
                   <span>Administrator Comments & Corrections ({myStatus.withCommentsCount} item{myStatus.withCommentsCount > 1 ? 's' : ''}):</span>
                 </div>
-                <span className="text-[11px] font-mono text-amber-900 bg-amber-200/80 px-2.5 py-0.5 rounded-full font-bold">
+                <span className="text-[11px] font-mono text-amber-300 bg-amber-500/20 px-2.5 py-0.5 rounded-full font-bold border border-amber-500/40">
                   Action Required
                 </span>
               </div>
@@ -1922,24 +1922,24 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   if (myStatus.itemsStatuses[idx] !== 'with-comments') return null;
                   const commentText = myStatus.itemsComments[idx];
                   return (
-                    <div key={col.key} className="bg-white/95 border border-amber-200 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
+                    <div key={col.key} className="bg-[#0d1524] border border-amber-500/40 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-amber-950 flex items-center space-x-1.5">
+                        <span className="font-bold text-amber-300 flex items-center space-x-1.5">
                           <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
                           <span>{col.fullLabel}</span>
                         </span>
-                        <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/40">
                           With Comments
                         </span>
                       </div>
-                      <p className="text-slate-700 pl-3 border-l-2 border-amber-400 text-xs italic">
+                      <p className="text-slate-300 pl-3 border-l-2 border-amber-400 text-xs italic">
                         "{commentText || 'Please review this submission and coordinate with the administrator for corrections.'}"
                       </p>
                     </div>
                   );
                 })}
               </div>
-              <p className="text-[11px] text-amber-900 font-mono pt-1">
+              <p className="text-[11px] text-amber-300 font-mono pt-1">
                 💡 <strong>Next Step:</strong> Please apply the necessary corrections and re-upload your revised file to your personal faculty folder.
               </p>
             </div>
@@ -1947,13 +1947,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
           {/* Prominent Admin Late Submissions Panel */}
           {myStatus.lateCount > 0 && (
-            <div className="mt-3 pt-3 border-t border-orange-200/80 bg-orange-500/10 rounded-2xl p-4 border border-orange-300/60 space-y-2.5">
+            <div className="mt-3 pt-3 border-t border-[#24334b] bg-orange-500/10 rounded-2xl p-4 border border-orange-500/30 space-y-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2 text-orange-950 font-bold text-xs font-mono">
-                  <Clock className="w-4 h-4 text-orange-600" />
+                <div className="flex items-center space-x-2 text-orange-300 font-bold text-xs font-mono">
+                  <Clock className="w-4 h-4 text-orange-400" />
                   <span>Late Submissions Recorded ({myStatus.lateCount} item{myStatus.lateCount > 1 ? 's' : ''}):</span>
                 </div>
-                <span className="text-[11px] font-mono text-orange-900 bg-orange-200/80 px-2.5 py-0.5 rounded-full font-bold">
+                <span className="text-[11px] font-mono text-orange-300 bg-orange-500/20 px-2.5 py-0.5 rounded-full font-bold border border-orange-500/40">
                   Submitted Late
                 </span>
               </div>
@@ -1962,24 +1962,24 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   if (myStatus.itemsStatuses[idx] !== 'late') return null;
                   const commentText = myStatus.itemsComments[idx];
                   return (
-                    <div key={col.key} className="bg-white/95 border border-orange-200 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
+                    <div key={col.key} className="bg-[#0d1524] border border-orange-500/40 rounded-xl p-3 text-xs font-mono space-y-1 shadow-2xs">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-orange-950 flex items-center space-x-1.5">
+                        <span className="font-bold text-orange-300 flex items-center space-x-1.5">
                           <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" />
                           <span>{col.fullLabel}</span>
                         </span>
-                        <span className="text-[10px] font-bold text-orange-800 bg-orange-100 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-bold text-orange-300 bg-orange-500/20 px-2 py-0.5 rounded-full border border-orange-500/40">
                           Late Submission
                         </span>
                       </div>
-                      <p className="text-slate-700 pl-3 border-l-2 border-orange-400 text-xs italic">
+                      <p className="text-slate-300 pl-3 border-l-2 border-orange-400 text-xs italic">
                         "{commentText || 'Deliverable was received past the scheduled deadline.'}"
                       </p>
                     </div>
                   );
                 })}
               </div>
-              <p className="text-[11px] text-orange-900 font-mono pt-1">
+              <p className="text-[11px] text-orange-300 font-mono pt-1">
                 ⏰ <strong>Reminder:</strong> Please ensure upcoming deliverables are submitted on time according to the department schedule.
               </p>
             </div>
@@ -1987,8 +1987,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
           {/* Clean Compliance Banner */}
           {myStatus.itemsSubmitted > 0 && myStatus.withCommentsCount === 0 && myStatus.incompleteCount === 0 && myStatus.lateCount === 0 && (
-            <div className="mt-3 pt-3 border-t border-emerald-100 bg-emerald-50/70 rounded-2xl p-3 border border-emerald-200 flex items-center space-x-2 text-xs font-mono text-emerald-900">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <div className="mt-3 pt-3 border-t border-[#24334b] bg-emerald-500/10 rounded-2xl p-3 border border-emerald-500/30 flex items-center space-x-2 text-xs font-mono text-emerald-300">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>
                 All <strong>{myStatus.itemsSubmitted}</strong> of your submitted {currentCategory.name} records are <strong>Checked on-time with no comments</strong> (clean compliance). Great job!
               </span>
@@ -1999,19 +1999,19 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       {/* SECTION 1: FACULTY SUBMISSION DIRECTORY (ADMINISTRATOR ONLY) */}
       {isAdmin ? (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-xs overflow-hidden">
           {/* Controls & Filter Bar */}
-          <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/70 space-y-3">
+          <div className="p-4 sm:p-5 border-b border-[#24334b] bg-[#0f1725] space-y-3">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div className="flex items-center space-x-2.5">
                 <div className={`w-9 h-9 rounded-2xl ${currentCategory.activeBg} text-white flex items-center justify-center font-bold text-base shadow-sm`}>
                   {currentCategory.icon}
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 font-sans">
+                  <h3 className="text-base font-bold text-slate-100 font-sans">
                     {currentCategory.fullName} ({currentCategory.name}) Faculty Submission Directory
                   </h3>
-                  <p className="text-xs text-slate-500 font-mono">
+                  <p className="text-xs text-slate-400 font-mono">
                     {isWeeklyCategory
                       ? `Check each week (W1 – W${currentTermWeeks}) to record instructional submissions for all faculty members.`
                       : `Check Term 1 ${currentCategory.name}, Term 2 ${currentCategory.name}, and Term 3 ${currentCategory.name} for all faculty members.`}
@@ -2023,24 +2023,24 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 {/* Auto-Save Live Badge */}
                 <div
-                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-2xl text-xs font-mono font-bold select-none shadow-2xs"
+                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-2xl text-xs font-mono font-bold select-none shadow-2xs"
                   title="Checkbox changes are automatically and immediately synced to Firebase Firestore in real-time"
                 >
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   <span>Auto-Save Active</span>
                 </div>
 
                 {/* Specific Column Save Dropdown */}
-                <div className="flex items-center space-x-1 bg-white border border-slate-200 p-1 rounded-2xl shadow-2xs">
-                  <span className="text-[11px] font-mono font-bold text-slate-500 pl-2">Save:</span>
+                <div className="flex items-center space-x-1 bg-[#0d1524] border border-[#24334b] p-1 rounded-2xl shadow-2xs">
+                  <span className="text-[11px] font-mono font-bold text-slate-400 pl-2">Save:</span>
                   <select
                     value={selectedItemToSave}
                     onChange={(e) => setSelectedItemToSave(Number(e.target.value))}
                     aria-label="Select item to save"
-                    className="bg-transparent text-xs font-mono font-bold text-slate-800 px-2 py-1 cursor-pointer focus:outline-hidden"
+                    className="bg-transparent text-xs font-mono font-bold text-slate-100 px-2 py-1 cursor-pointer focus:outline-hidden"
                   >
                     {columnItems.map((col, i) => (
-                      <option key={col.key} value={i}>
+                      <option key={col.key} value={i} className="bg-[#0d1524] text-slate-100">
                         {col.fullLabel}
                       </option>
                     ))}
@@ -2088,13 +2088,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Search faculty by name, surname, or email..."
-                  className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full pl-9 pr-4 py-2 bg-[#0d1524] border border-[#24334b] rounded-xl text-xs font-mono text-slate-100 placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 {searchTerm && (
                   <button
                     type="button"
                     onClick={() => setSearchTerm('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-mono"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs font-mono"
                   >
                     ✕
                   </button>
@@ -2106,11 +2106,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   value={departmentFilter}
                   onChange={(e) => setDepartmentFilter(e.target.value)}
                   aria-label="Filter by Department or Strand"
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  className="w-full px-3 py-2 bg-[#0d1524] border border-[#24334b] rounded-xl text-xs font-mono text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer"
                 >
-                  <option value="all">All Departments / Strands</option>
+                  <option value="all" className="bg-[#0d1524] text-slate-100">All Departments / Strands</option>
                   {departments.map((dept) => (
-                    <option key={dept} value={dept}>
+                    <option key={dept} value={dept} className="bg-[#0d1524] text-slate-100">
                       {dept}
                     </option>
                   ))}
@@ -2125,7 +2125,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   className={`flex-1 min-w-[50px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'all'
                       ? 'bg-blue-600 text-white'
-                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      : 'bg-[#0d1524] text-slate-300 border border-[#24334b] hover:bg-[#1a2638] hover:text-white'
                   }`}
                 >
                   All ({allFaculty.length})
@@ -2136,7 +2136,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   className={`flex-1 min-w-[50px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'complete'
                       ? 'bg-emerald-600 text-white'
-                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      : 'bg-[#0d1524] text-slate-300 border border-[#24334b] hover:bg-[#1a2638] hover:text-white'
                   }`}
                 >
                   Done ({stats.completedFacultyCount})
@@ -2147,7 +2147,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   className={`flex-1 min-w-[55px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'with-comments'
                       ? 'bg-amber-600 text-white'
-                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      : 'bg-[#0d1524] text-slate-300 border border-[#24334b] hover:bg-[#1a2638] hover:text-white'
                   }`}
                 >
                   Comments ({stats.facultyWithCommentsCount})
@@ -2158,7 +2158,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   className={`flex-1 min-w-[55px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'incomplete'
                       ? 'bg-rose-600 text-white'
-                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      : 'bg-[#0d1524] text-slate-300 border border-[#24334b] hover:bg-[#1a2638] hover:text-white'
                   }`}
                 >
                   Incomplete ({stats.facultyWithIncompleteCount})
@@ -2169,7 +2169,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   className={`flex-1 min-w-[50px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'late'
                       ? 'bg-orange-600 text-white'
-                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      : 'bg-[#0d1524] text-slate-300 border border-[#24334b] hover:bg-[#1a2638] hover:text-white'
                   }`}
                 >
                   Late ({stats.facultyWithLateCount})
@@ -2180,7 +2180,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   className={`flex-1 min-w-[50px] py-2 text-center rounded-xl font-bold transition-all cursor-pointer ${
                     statusFilter === 'in-progress'
                       ? 'bg-slate-700 text-white'
-                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      : 'bg-[#0d1524] text-slate-300 border border-[#24334b] hover:bg-[#1a2638] hover:text-white'
                   }`}
                 >
                   Pending
@@ -2193,31 +2193,31 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[700px]">
               <thead>
-                <tr className="bg-slate-100/90 text-slate-700 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-slate-200">
+                <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
                   <th className="py-3 px-4 w-60 sm:w-72">Faculty Member</th>
                   <th className="py-3 px-3 w-36 sm:w-44">Department</th>
                   {/* Dynamic Headers (Weeks or Term 1, Term 2, Term 3) with Quick Save Action */}
                   {columnItems.map((col) => (
                     <th
                       key={col.key}
-                      className={`py-2.5 px-2 text-center border-l border-slate-200/60 ${
+                      className={`py-2.5 px-2 text-center border-l border-[#24334b] ${
                         isWeeklyCategory ? 'w-12' : 'w-32'
                       }`}
                       title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
                     >
                       <div className="flex flex-col items-center justify-center">
-                        <span className={`text-[11px] font-extrabold ${isWeeklyCategory ? 'text-blue-700' : 'text-purple-800'}`}>
+                        <span className={`text-[11px] font-extrabold ${isWeeklyCategory ? 'text-blue-400' : 'text-purple-400'}`}>
                           {col.headerLabel}
                         </span>
                         <button
                           type="button"
                           onClick={() => handleSaveItemToFirebase(col.index)}
                           disabled={isSavingIndex === col.index}
-                          className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-100 transition-all cursor-pointer"
+                          className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
                           title={`Save ${col.fullLabel} data to Firebase`}
                         >
                           {isSavingIndex === col.index ? (
-                            <RefreshCw className="w-3 h-3 animate-spin text-blue-600" />
+                            <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
                           ) : (
                             <Save className="w-3 h-3" />
                           )}
@@ -2225,25 +2225,25 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                       </div>
                     </th>
                   ))}
-                  <th className="py-3 px-3 text-center w-28 border-l border-slate-200">
+                  <th className="py-3 px-3 text-center w-28 border-l border-[#24334b]">
                     Progress
                   </th>
                   <th className="py-3 px-3 text-center w-28">Quick Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200/70 text-xs font-mono">
+              <tbody className="divide-y divide-[#24334b] text-xs font-mono">
                 {filteredFaculty.length === 0 ? (
                   <tr>
-                    <td colSpan={4 + totalItemCount} className="py-12 text-center text-slate-500 bg-white">
-                      <AlertCircle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                      <div className="font-bold text-sm text-slate-700">No faculty members found</div>
+                    <td colSpan={4 + totalItemCount} className="py-12 text-center text-slate-400 bg-[#141c2c]">
+                      <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                      <div className="font-bold text-sm text-slate-200">No faculty members found</div>
                       <div className="text-xs text-slate-400 mt-0.5">
                         Try adjusting your search query or department filter.
                       </div>
                     </td>
                   </tr>
                 ) : (
-                  filteredFaculty.map((faculty, idx) => {
+                  filteredFaculty.map((faculty) => {
                     const items = submissions[faculty.email] || Array(totalItemCount).fill(false);
                     const visibleSlice = items.slice(0, totalItemCount);
                     const completedCount = visibleSlice.filter(Boolean).length;
@@ -2253,29 +2253,21 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     return (
                       <tr
                         key={faculty.email}
-                        className={`hover:bg-blue-50/50 transition-colors ${
-                          idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'
-                        }`}
+                        className="bg-[#141c2c] hover:bg-[#1c273c] transition-colors border-b border-[#24334b]"
                       >
-                        {/* Faculty Name & Info */}
+                        {/* Faculty Name & Info (Uniform clean styling, no alternating color) */}
                         <td className="py-3 px-4">
                           <div className="flex items-center space-x-2.5">
                             <div
-                              className={`w-7 h-7 rounded-xl flex items-center justify-center font-bold text-[11px] text-white shrink-0 shadow-2xs ${
-                                isAllChecked
-                                  ? 'bg-emerald-600'
-                                  : completedCount >= Math.ceil(totalItemCount / 2)
-                                  ? 'bg-blue-600'
-                                  : 'bg-slate-600'
-                              }`}
+                              className="w-7 h-7 rounded-xl flex items-center justify-center font-bold text-[11px] text-blue-300 shrink-0 shadow-2xs bg-[#1f2d45] border border-[#2d4060]"
                             >
                               {faculty.surname.charAt(0)}
                             </div>
                             <div className="min-w-0">
-                              <div className="font-bold text-slate-900 truncate">
+                              <div className="font-bold text-slate-100 truncate text-xs">
                                 {faculty.surname}, {faculty.name}
                               </div>
-                              <div className="text-[10px] text-slate-400 truncate">
+                              <div className="text-[10px] text-slate-400 truncate font-mono">
                                 {faculty.email}
                               </div>
                             </div>
@@ -2283,8 +2275,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         </td>
 
                         {/* Department */}
-                        <td className="py-3 px-3 text-slate-600 text-[11px]">
-                          <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md truncate max-w-[140px] inline-block font-sans font-medium">
+                        <td className="py-3 px-3 text-slate-300 text-[11px]">
+                          <span className="bg-[#0d1524] text-slate-300 border border-[#24334b] px-2 py-0.5 rounded-md truncate max-w-[140px] inline-block font-sans font-medium">
                             {faculty.department || 'SHS Dept.'}
                           </span>
                         </td>
@@ -2302,7 +2294,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           return (
                             <td
                               key={col.key}
-                              className="py-2 px-1 text-center border-l border-slate-200/60"
+                              className="py-2 px-1 text-center border-l border-[#24334b]"
                             >
                               <button
                                 type="button"
@@ -2319,7 +2311,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                                     ? 'bg-rose-500 border-rose-600 text-white shadow-2xs hover:bg-rose-600 ring-1 ring-rose-400'
                                     : isLate
                                     ? 'bg-orange-500 border-orange-600 text-white shadow-2xs hover:bg-orange-600 ring-1 ring-orange-400'
-                                    : 'bg-white border-slate-300 text-transparent hover:border-slate-400 hover:bg-slate-50'
+                                    : 'bg-[#0d1524] border-[#24334b] text-transparent hover:border-slate-500 hover:bg-[#1a2638]'
                                 } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
                                 title={`${faculty.name} - ${col.fullLabel}: ${
                                   isChecked
@@ -2343,17 +2335,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         })}
 
                         {/* Progress Bar & Number */}
-                        <td className="py-3 px-3 text-center border-l border-slate-200">
+                        <td className="py-3 px-3 text-center border-l border-[#24334b]">
                           <div className="flex flex-col items-center justify-center">
                             <span
                               className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono ${
                                 isAllChecked
-                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                                   : completedCount >= Math.ceil(totalItemCount / 2)
-                                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
                                   : completedCount > 0
-                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                  : 'bg-slate-100 text-slate-500'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                  : 'bg-[#0d1524] text-slate-400 border border-[#24334b]'
                               }`}
                             >
                               {completedCount} / {totalItemCount}
@@ -2371,8 +2363,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                             onClick={() => handleCheckAllItems(faculty.email, !isAllChecked)}
                             className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold transition-all cursor-pointer ${
                               isAllChecked
-                                ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
-                                : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
+                                ? 'bg-[#1c273a] text-slate-300 hover:bg-[#25344d] border border-[#2d3e57]'
+                                : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/40'
                             }`}
                             title={isAllChecked ? `Clear all ${currentCategory.name} submissions` : `Mark all ${currentCategory.name} complete (Checked)`}
                           >
@@ -2388,36 +2380,36 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           </div>
 
           {/* Directory Footer Info */}
-          <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between text-xs font-mono text-slate-500 gap-2">
+          <div className="p-4 bg-[#0f1725] border-t border-[#24334b] flex flex-col sm:flex-row items-center justify-between text-xs font-mono text-slate-400 gap-2">
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center space-x-1.5">
                 <span className="w-3.5 h-3.5 rounded-md bg-emerald-500 inline-flex items-center justify-center text-white text-[9px] font-bold">✓</span>
-                <span className="text-slate-800 font-bold">Checked</span> (No comments)
+                <span className="text-slate-200 font-bold">Checked</span> (No comments)
               </div>
-              <span className="text-slate-300">•</span>
+              <span className="text-slate-600">•</span>
               <div className="flex items-center space-x-1.5">
                 <span className="w-3.5 h-3.5 rounded-md bg-amber-500 inline-flex items-center justify-center text-white text-[9px]">💬</span>
-                <span className="text-amber-800 font-bold">With Comments</span> (Corrections)
+                <span className="text-amber-300 font-bold">With Comments</span> (Corrections)
               </div>
-              <span className="text-slate-300">•</span>
+              <span className="text-slate-600">•</span>
               <div className="flex items-center space-x-1.5">
                 <span className="w-3.5 h-3.5 rounded-md bg-rose-500 inline-flex items-center justify-center text-white text-[9px] font-bold">!</span>
-                <span className="text-rose-800 font-bold">Incomplete</span> (Lacking requirements)
+                <span className="text-rose-300 font-bold">Incomplete</span> (Lacking requirements)
               </div>
-              <span className="text-slate-300">•</span>
+              <span className="text-slate-600">•</span>
               <div className="flex items-center space-x-1.5">
                 <span className="w-3.5 h-3.5 rounded-md bg-orange-500 inline-flex items-center justify-center text-white text-[9px]">⏰</span>
-                <span className="text-orange-800 font-bold">Late</span> (Submitted late)
+                <span className="text-orange-300 font-bold">Late</span> (Submitted late)
               </div>
-              <span className="text-slate-300">•</span>
+              <span className="text-slate-600">•</span>
               <div className="flex items-center space-x-1.5">
-                <span className="w-3.5 h-3.5 rounded-md bg-white border border-slate-300 inline-block" />
-                <span>Empty</span> (Pending)
+                <span className="w-3.5 h-3.5 rounded-md bg-[#0d1524] border border-[#24334b] inline-block" />
+                <span className="text-slate-400">Empty</span> (Pending)
               </div>
             </div>
             <div>
-              Showing <span className="font-bold text-slate-700">{filteredFaculty.length}</span> faculty members for{' '}
-              <span className="font-bold text-blue-700">
+              Showing <span className="font-bold text-slate-200">{filteredFaculty.length}</span> faculty members for{' '}
+              <span className="font-bold text-blue-400">
                 {currentCategory.name} • {isWeeklyCategory ? `${currentTerm.name} (Weeks 1–${currentTermWeeks})` : 'Term 1, Term 2 & Term 3'}
               </span>
             </div>
@@ -2427,22 +2419,22 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       {/* SECTION 2: FACULTY SUBMISSION PROGRESS VISUALIZER (ADMINISTRATOR ONLY) */}
       {isAdmin ? (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+        <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-xs p-5 sm:p-6 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#24334b] pb-4">
             <div className="flex items-center space-x-3">
-              <div className="p-2.5 rounded-2xl bg-blue-100 text-blue-700">
+              <div className="p-2.5 rounded-2xl bg-blue-500/20 text-blue-300">
                 <BarChart3 className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center space-x-2 flex-wrap">
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-100 font-sans">
                     {currentCategory.fullName} ({currentCategory.name}) Progress Visualizer
                   </h3>
-                  <span className="bg-blue-100 text-blue-800 text-xs font-mono px-2 py-0.5 rounded-full font-bold">
+                  <span className="bg-blue-500/20 text-blue-300 text-xs font-mono px-2 py-0.5 rounded-full font-bold border border-blue-500/40">
                     {isWeeklyCategory ? currentTerm.name : 'Terms 1, 2 & 3'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 font-mono">
+                <p className="text-xs text-slate-400 font-mono">
                   {isWeeklyCategory
                     ? `Analytical charts representing submitted weeks out of ${currentTermWeeks} for all faculty members.`
                     : `Visualizer showing Term 1 ${currentCategory.name}, Term 2 ${currentCategory.name}, and Term 3 ${currentCategory.name} compliance.`}
@@ -2451,14 +2443,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
 
             {/* Toggle View: Admin Visualizer Modes */}
-            <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200 text-xs font-mono font-bold">
+            <div className="flex items-center space-x-1.5 bg-[#0d1524] p-1 rounded-2xl border border-[#24334b] text-xs font-mono font-bold">
               <button
                 type="button"
                 onClick={() => setViewMode('faculty-chart')}
                 className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
                   viewMode === 'faculty-chart'
                     ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    : 'text-slate-300 hover:text-white'
                 }`}
               >
                 By Faculty Member
@@ -2469,7 +2461,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
                   viewMode === 'weekly-chart'
                     ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    : 'text-slate-300 hover:text-white'
                 }`}
               >
                 {isWeeklyCategory ? `Weekly Trend (W1–W${currentTermWeeks})` : `Term Trend`}
@@ -2480,7 +2472,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center space-x-1 ${
                   viewMode === 'pie-chart'
                     ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    : 'text-slate-300 hover:text-white'
                 }`}
               >
                 <PieChartIcon className="w-3.5 h-3.5" />
@@ -2495,18 +2487,18 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               {/* Render Selected Pie Charts */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Chart 1: Faculty Compliance Status Pie Chart */}
-                <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
+                <div className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                      <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
                         <span>Faculty Compliance Status Breakdown</span>
                       </h4>
-                      <p className="text-[11px] text-slate-500 font-mono">
+                      <p className="text-[11px] text-slate-400 font-mono">
                         Distribution across {stats.totalFaculty} teachers ({currentCategory.name})
                       </p>
                     </div>
-                    <span className="text-xs font-mono font-bold px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full">
+                    <span className="text-xs font-mono font-bold px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full">
                       {stats.overallPercentage}% Overall
                     </span>
                   </div>
@@ -2525,7 +2517,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           nameKey="name"
                         >
                           {compliancePieData.map((entry, index) => (
-                            <Cell key={`cell-comp-${index}`} fill={entry.color} stroke="#ffffff" strokeWidth={2} />
+                            <Cell key={`cell-comp-${index}`} fill={entry.color} stroke="#141c2c" strokeWidth={2} />
                           ))}
                         </Pie>
                         <Tooltip
@@ -2582,18 +2574,18 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 </div>
 
                 {/* Chart 2: Deliverables Target Ratio Pie Chart */}
-                <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
+                <div className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
+                      <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />
                         <span>Deliverables Target Volume Ratio</span>
                       </h4>
-                      <p className="text-[11px] text-slate-500 font-mono">
+                      <p className="text-[11px] text-slate-400 font-mono">
                         {stats.totalCompleted} submitted of {stats.totalPossible} expected deliverables
                       </p>
                     </div>
-                    <span className="text-xs font-mono font-bold px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full">
+                    <span className="text-xs font-mono font-bold px-2.5 py-1 bg-blue-500/20 text-blue-300 border border-blue-500/40 rounded-full">
                       {stats.totalCompleted} / {stats.totalPossible}
                     </span>
                   </div>
@@ -2612,7 +2604,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           nameKey="name"
                         >
                           {volumePieData.map((entry, index) => (
-                            <Cell key={`cell-vol-${index}`} fill={entry.color} stroke="#ffffff" strokeWidth={2} />
+                            <Cell key={`cell-vol-${index}`} fill={entry.color} stroke="#141c2c" strokeWidth={2} />
                           ))}
                         </Pie>
                         <Tooltip
@@ -2620,12 +2612,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                             if (active && payload && payload.length) {
                               const data = payload[0].payload;
                               return (
-                                <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl border border-slate-800 text-xs font-mono space-y-1">
+                                <div className="bg-[#0d1524] text-white p-3 rounded-2xl shadow-xl border border-[#24334b] text-xs font-mono space-y-1">
                                   <div className="flex items-center space-x-2">
                                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: data.color }} />
                                     <span className="font-bold text-white text-xs">{data.name}</span>
                                   </div>
-                                  <div className="text-slate-300 text-xs pt-1 border-t border-slate-800">
+                                  <div className="text-slate-300 text-xs pt-1 border-t border-[#24334b]">
                                     Deliverables: <span className="font-bold text-blue-400">{data.value}</span> / {stats.totalPossible} ({data.percentage}%)
                                   </div>
                                   <div className="text-[11px] text-slate-400">
@@ -2640,23 +2632,23 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         <Legend
                           verticalAlign="bottom"
                           height={36}
-                          formatter={(value) => <span className="text-xs font-mono font-medium text-slate-700">{value}</span>}
+                          formatter={(value) => <span className="text-xs font-mono font-medium text-slate-300">{value}</span>}
                         />
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-200/80 text-center font-mono">
-                    <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-100">
-                      <div className="text-[10px] text-blue-700 font-bold uppercase">Submitted Files</div>
-                      <div className="text-sm font-extrabold text-blue-800">
-                        {stats.totalCompleted} <span className="text-[10px] font-normal text-blue-600">({stats.overallPercentage}%)</span>
+                  <div className="grid grid-cols-2 gap-2 pt-3 border-t border-[#24334b] text-center font-mono">
+                    <div className="p-2.5 rounded-xl bg-[#0d1524] border border-blue-500/30">
+                      <div className="text-[10px] text-blue-300 font-bold uppercase">Submitted Files</div>
+                      <div className="text-sm font-extrabold text-blue-400">
+                        {stats.totalCompleted} <span className="text-[10px] font-normal text-blue-300">({stats.overallPercentage}%)</span>
                       </div>
                     </div>
-                    <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200">
-                      <div className="text-[10px] text-slate-600 font-bold uppercase">Pending Files</div>
-                      <div className="text-sm font-extrabold text-slate-700">
-                        {Math.max(0, stats.totalPossible - stats.totalCompleted)} <span className="text-[10px] font-normal text-slate-500">({100 - stats.overallPercentage}%)</span>
+                    <div className="p-2.5 rounded-xl bg-[#0d1524] border border-[#24334b]">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Pending Files</div>
+                      <div className="text-sm font-extrabold text-slate-200">
+                        {Math.max(0, stats.totalPossible - stats.totalCompleted)} <span className="text-[10px] font-normal text-slate-400">({100 - stats.overallPercentage}%)</span>
                       </div>
                     </div>
                   </div>
@@ -2664,22 +2656,22 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               </div>
 
             {/* Chart 3: Period / Weekly Submissions Pie Breakdown */}
-            <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
+            <div className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
+                    <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-purple-400 inline-block" />
                       <span>
                         {isWeeklyCategory
                           ? `Weekly Submission Distribution (${currentTerm.name} • W1 to W${currentTermWeeks})`
                           : `Term Compliance Distribution (Term 1, Term 2 & Term 3)`}
                       </span>
                     </h4>
-                    <p className="text-[11px] text-slate-500 font-mono">
+                    <p className="text-[11px] text-slate-400 font-mono">
                       Submissions recorded per {isWeeklyCategory ? 'week' : 'term'} milestone across all faculty
                     </p>
                   </div>
-                  <span className="text-xs font-mono font-bold px-2.5 py-1 bg-purple-100 text-purple-800 rounded-full">
+                  <span className="text-xs font-mono font-bold px-2.5 py-1 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded-full">
                     {totalItemCount} {isWeeklyCategory ? 'Weeks' : 'Terms'}
                   </span>
                 </div>
@@ -2698,7 +2690,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         nameKey="name"
                       >
                         {periodDistributionPieData.map((entry, index) => (
-                          <Cell key={`cell-period-${index}`} fill={entry.color} stroke="#ffffff" strokeWidth={2} />
+                          <Cell key={`cell-period-${index}`} fill={entry.color} stroke="#141c2c" strokeWidth={2} />
                         ))}
                       </Pie>
                       <Tooltip
@@ -2706,12 +2698,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           if (active && payload && payload.length) {
                             const data = payload[0].payload;
                             return (
-                              <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl border border-slate-800 text-xs font-mono space-y-1">
+                              <div className="bg-[#0d1524] text-white p-3 rounded-2xl shadow-xl border border-[#24334b] text-xs font-mono space-y-1">
                                 <div className="flex items-center space-x-2">
                                   <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: data.color }} />
                                   <span className="font-bold text-white text-xs">{data.fullName || data.name}</span>
                                 </div>
-                                <div className="text-slate-300 text-xs pt-1 border-t border-slate-800">
+                                <div className="text-slate-300 text-xs pt-1 border-t border-[#24334b]">
                                   Faculty Submitted: <span className="font-bold text-emerald-400">{data.value}</span> / {data.totalFaculty} ({data.percentage}%)
                                 </div>
                               </div>
@@ -2723,7 +2715,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                       <Legend
                         verticalAlign="bottom"
                         height={40}
-                        formatter={(value) => <span className="text-xs font-mono font-medium text-slate-700">{value}</span>}
+                        formatter={(value) => <span className="text-xs font-mono font-medium text-slate-300">{value}</span>}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -2752,13 +2744,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   data={facultyChartData}
                   margin={{ top: 20, right: 30, left: 0, bottom: 65 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#24334a" vertical={false} />
                   <XAxis
                     dataKey="name"
                     interval={0}
                     angle={-45}
                     textAnchor="end"
-                    tick={{ fill: '#475569', fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}
+                    tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}
                     height={60}
                   />
                   <YAxis
@@ -2766,12 +2758,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     ticks={Array.from({ length: totalItemCount + 1 }, (_, i) => i).filter(
                       (i) => totalItemCount <= 6 || i % 2 === 0 || i === totalItemCount
                     )}
-                    tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'monospace' }}
+                    tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}
                     label={{
                       value: `${currentCategory.name} Submitted (out of ${totalItemCount})`,
                       angle: -90,
                       position: 'insideLeft',
-                      fill: '#64748b',
+                      fill: '#94a3b8',
                       fontSize: 11,
                       fontFamily: 'monospace',
                       dy: 70,
@@ -2839,19 +2831,19 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   data={trendChartData}
                   margin={{ top: 20, right: 30, left: 0, bottom: 25 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#24334a" vertical={false} />
                   <XAxis
                     dataKey="shortLabel"
-                    tick={{ fill: '#334155', fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}
+                    tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}
                   />
                   <YAxis
                     domain={[0, allFaculty.length > 0 ? allFaculty.length : 10]}
-                    tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'monospace' }}
+                    tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}
                     label={{
                       value: `Number of Faculty Submitted (${currentCategory.name})`,
                       angle: -90,
                       position: 'insideLeft',
-                      fill: '#64748b',
+                      fill: '#94a3b8',
                       fontSize: 11,
                       fontFamily: 'monospace',
                       dy: 80,
@@ -2899,15 +2891,15 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       {/* ADMIN: SET NUMBER OF WEEKS PER TERM MODAL (1 to 12 Weeks Max) */}
       {isSettingWeeksModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden my-auto">
+          <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden my-auto text-slate-100">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-4 sm:p-6 flex items-start justify-between shrink-0">
+            <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 text-white p-4 sm:p-6 flex items-start justify-between shrink-0 border-b border-[#24334b]">
               <div className="flex items-center space-x-3">
                 <div className="p-2.5 bg-blue-500/20 text-blue-300 rounded-2xl border border-blue-400/30">
                   <CalendarDays className="w-6 h-6 text-blue-300" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold font-sans tracking-tight">
+                  <h3 className="text-lg font-bold font-sans tracking-tight text-white">
                     Set Number of Weeks per Term
                   </h3>
                   <p className="text-xs text-blue-200/80 font-mono">
@@ -2926,23 +2918,23 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
 
             {/* Modal Body (Scrollable) */}
-            <div className="p-5 sm:p-6 space-y-6 overflow-y-auto flex-1 min-h-0 overscroll-contain">
+            <div className="p-5 sm:p-6 space-y-6 overflow-y-auto flex-1 min-h-0 overscroll-contain bg-[#141c2c]">
               {/* Default Active Academic Term (On Page Load & Refresh) */}
-              <div className="bg-gradient-to-r from-amber-50 to-orange-50/50 border border-amber-200/90 rounded-2xl p-4 space-y-3">
+              <div className="bg-[#0f1725] border border-amber-500/30 rounded-2xl p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center space-x-2">
-                    <Star className="w-4 h-4 text-amber-500 fill-amber-400 shrink-0" />
+                    <Star className="w-4 h-4 text-amber-400 fill-amber-400 shrink-0" />
                     <div>
-                      <span className="font-bold text-slate-900 text-xs font-mono uppercase tracking-wider">
+                      <span className="font-bold text-slate-100 text-xs font-mono uppercase tracking-wider">
                         Default Current Academic Term
                       </span>
-                      <p className="text-[11px] text-slate-600 font-mono">
+                      <p className="text-[11px] text-slate-400 font-mono">
                         Saved in Firebase so the page automatically opens this term on load and refresh
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center space-x-1.5 self-start sm:self-auto">
-                    <span className="text-[11px] font-mono font-bold text-amber-900 bg-amber-200/80 px-2.5 py-1 rounded-full border border-amber-300">
+                    <span className="text-[11px] font-mono font-bold text-amber-300 bg-amber-500/20 px-2.5 py-1 rounded-full border border-amber-500/40">
                       Active: {activeDefaultTermId === 'term-1' ? '1st Term' : activeDefaultTermId === 'term-2' ? '2nd Term' : '3rd Term'}
                     </span>
                   </div>
@@ -2966,7 +2958,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         className={`px-3 py-2.5 rounded-xl text-xs font-mono font-bold flex items-center justify-between transition-all cursor-pointer border ${
                           isCurrentDefault
                             ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs'
-                            : 'bg-white hover:bg-amber-100 text-slate-700 border-slate-200 hover:border-amber-300'
+                            : 'bg-[#0d1524] hover:bg-[#1a2638] text-slate-200 border-[#24334b] hover:border-amber-500/40'
                         }`}
                         title={`Click to set ${t.name} as the official default term saved in Firebase`}
                       >
@@ -2974,12 +2966,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           {isCurrentDefault ? (
                             <Star className="w-3.5 h-3.5 fill-slate-950 text-slate-950" />
                           ) : (
-                            <span className="w-2 h-2 rounded-full bg-slate-300" />
+                            <span className="w-2 h-2 rounded-full bg-slate-500" />
                           )}
                           <span>{t.name}</span>
                         </span>
                         {isCurrentDefault && (
-                          <span className="text-[10px] bg-slate-950/15 text-slate-950 px-1.5 py-0.5 rounded-md font-extrabold">
+                          <span className="text-[10px] bg-slate-950/20 text-slate-950 px-1.5 py-0.5 rounded-md font-extrabold">
                             Saved ✓
                           </span>
                         )}
@@ -3068,28 +3060,28 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   return (
                     <div
                       key={term.id}
-                      className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3"
+                      className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3"
                     >
                       <div>
-                        <div className="font-bold text-slate-900 text-sm font-sans flex items-center space-x-2">
-                          <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />
+                        <div className="font-bold text-slate-100 text-sm font-sans flex items-center space-x-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
                           <span>{term.name}</span>
                           {isSavedThisTerm && (
-                            <span className="bg-emerald-100 text-emerald-700 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold flex items-center space-x-1 animate-fadeIn">
+                            <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold flex items-center space-x-1 animate-fadeIn border border-emerald-500/40">
                               <Check className="w-3 h-3" />
                               <span>Saved to Firebase</span>
                             </span>
                           )}
                         </div>
-                        <div className="text-xs text-slate-500 font-mono mt-0.5">
-                          Checkboxes: <strong className="text-blue-600 font-bold">W1 to W{weeks}</strong> ({weeks} instructional weeks)
+                        <div className="text-xs text-slate-400 font-mono mt-0.5">
+                          Checkboxes: <strong className="text-blue-400 font-bold">W1 to W{weeks}</strong> ({weeks} instructional weeks)
                         </div>
                       </div>
 
                       {/* Stepper, Number Selection & Dedicated Save Button */}
                       <div className="flex flex-wrap items-center gap-2.5">
                         {/* Stepper */}
-                        <div className="flex items-center space-x-1 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs">
+                        <div className="flex items-center space-x-1 bg-[#0d1524] border border-[#24334b] p-1 rounded-xl shadow-2xs">
                           <button
                             type="button"
                             onClick={() =>
@@ -3099,13 +3091,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                               )
                             }
                             disabled={weeks <= MIN_TERM_WEEKS}
-                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                            className="p-1.5 rounded-lg text-slate-300 hover:bg-[#1a2638] disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
                             title="Decrease weeks"
                           >
                             <Minus className="w-4 h-4" />
                           </button>
 
-                          <div className="w-10 text-center font-mono font-extrabold text-slate-900 text-base">
+                          <div className="w-10 text-center font-mono font-extrabold text-slate-100 text-base">
                             {weeks}
                           </div>
 
@@ -3118,7 +3110,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                               )
                             }
                             disabled={weeks >= MAX_TERM_WEEKS}
-                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                            className="p-1.5 rounded-lg text-slate-300 hover:bg-[#1a2638] disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
                             title="Increase weeks"
                           >
                             <Plus className="w-4 h-4" />
@@ -3135,10 +3127,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                             )
                           }
                           aria-label={`Select weeks for ${term.name}`}
-                          className="bg-white border border-slate-200 text-slate-700 text-xs font-mono font-bold rounded-xl px-2.5 py-2 shadow-2xs cursor-pointer focus:outline-hidden"
+                          className="bg-[#0d1524] border border-[#24334b] text-slate-100 text-xs font-mono font-bold rounded-xl px-2.5 py-2 shadow-2xs cursor-pointer focus:outline-hidden"
                         >
                           {Array.from({ length: 12 }, (_, i) => i + 1).map((w) => (
-                            <option key={w} value={w}>
+                            <option key={w} value={w} className="bg-[#0d1524] text-slate-100">
                               {w} {w === 1 ? 'Week' : 'Weeks'}
                             </option>
                           ))}
@@ -3178,8 +3170,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               </div>
 
               {/* Info Notice */}
-              <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-3.5 text-xs text-blue-900 font-mono flex items-start space-x-2.5">
-                <FileCheck2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <div className="bg-[#0d1524] border border-blue-500/30 rounded-2xl p-3.5 text-xs text-blue-200 font-mono flex items-start space-x-2.5">
+                <FileCheck2 className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
                 <div>
                   <strong>Synchronized Dynamic Directory:</strong> Changing and saving the number of weeks automatically updates all DLL checkboxes, matrix tables, progress visualizers, and weekly trend graphs in real-time across both Admin and Faculty portals.
                 </div>
@@ -3187,9 +3179,9 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
 
             {/* Modal Footer (Always visible & docked) */}
-            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center space-x-2 text-xs font-mono text-slate-500">
-                <Cloud className="w-4 h-4 text-blue-600" />
+            <div className="p-4 sm:p-5 bg-[#0f1725] border-t border-[#24334b] flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
+                <Cloud className="w-4 h-4 text-blue-400" />
                 <span>
                   {lastSavedTimestamp
                     ? `Last synced with Firebase at ${lastSavedTimestamp}`
@@ -3201,17 +3193,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsSettingWeeksModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-2xl text-xs font-mono font-bold transition-all flex items-center space-x-1.5 cursor-pointer active:scale-95 shadow-2xs"
+                  className="px-4 py-2.5 bg-[#1c273a] hover:bg-[#25344d] border border-[#2d3e57] text-slate-200 rounded-2xl text-xs font-mono font-bold transition-all flex items-center space-x-1.5 cursor-pointer active:scale-95 shadow-2xs"
                   title="Exit weeks configuration and return to Faculty Submission Report"
                 >
-                  <LogOut className="w-4 h-4 text-slate-500" />
+                  <LogOut className="w-4 h-4 text-slate-400" />
                   <span>Exit & Return to Page</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveWeeksConfiguration}
                   disabled={isSavingWeeksConfig}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white rounded-2xl text-xs font-mono font-bold transition-all shadow-md flex items-center space-x-2 cursor-pointer active:scale-95 border border-blue-400/40"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-2xl text-xs font-mono font-bold transition-all shadow-md flex items-center space-x-2 cursor-pointer active:scale-95 border border-blue-400/40"
                 >
                   {isSavingWeeksConfig ? (
                     <>
@@ -3233,27 +3225,27 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       {/* ADMIN STATUS REVIEW MODAL (Checked vs With Comments vs Incomplete) */}
       {isAdmin && activeCellAction && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-2xl max-w-lg w-full overflow-hidden text-slate-100 animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}
-            <div className="p-5 sm:p-6 bg-slate-50 border-b border-slate-200 flex items-start justify-between">
+            <div className="p-5 sm:p-6 bg-[#0f1725] border-b border-[#24334b] flex items-start justify-between">
               <div className="flex items-center space-x-3">
                 <div className={`w-10 h-10 rounded-2xl ${currentCategory.activeBg} text-white flex items-center justify-center font-bold text-lg shadow-sm shrink-0`}>
                   {currentCategory.icon}
                 </div>
                 <div>
                   <div className="flex items-center space-x-2">
-                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-blue-300 bg-blue-500/20 border border-blue-500/40 px-2 py-0.5 rounded-md">
                       {activeCellAction.colLabel}
                     </span>
-                    <span className="text-xs font-mono text-slate-500 font-bold">
+                    <span className="text-xs font-mono text-slate-400 font-bold">
                       {currentCategory.name} Review
                     </span>
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 font-sans mt-0.5">
+                  <h3 className="text-base font-bold text-slate-100 font-sans mt-0.5">
                     {activeCellAction.facultySurname}, {activeCellAction.facultyName}
                   </h3>
-                  <p className="text-xs text-slate-500 font-mono">
+                  <p className="text-xs text-slate-400 font-mono">
                     {activeCellAction.facultyEmail} • {activeCellAction.department || 'SHS Dept.'}
                   </p>
                 </div>
@@ -3262,7 +3254,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveCellAction(null)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-all cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] transition-all cursor-pointer"
                 title="Close"
               >
                 <X className="w-5 h-5" />
@@ -3270,9 +3262,9 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
 
             {/* Modal Body */}
-            <div className="p-5 sm:p-6 space-y-4">
+            <div className="p-5 sm:p-6 space-y-4 bg-[#141c2c]">
               <div>
-                <label className="block text-xs font-mono font-bold text-slate-700 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-mono font-bold text-slate-200 uppercase tracking-wider mb-2">
                   Select Submission Review Status:
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
@@ -3282,20 +3274,20 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     onClick={() => setSelectedActionType('checked')}
                     className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
                       selectedActionType === 'checked'
-                        ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        ? 'bg-emerald-500/20 border-emerald-500 ring-2 ring-emerald-500/30 shadow-xs'
+                        : 'bg-[#0f1725] border-[#24334b] hover:border-slate-500 hover:bg-[#1a2638]'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold text-emerald-800 flex items-center space-x-1.5">
+                      <span className="text-xs font-mono font-bold text-emerald-300 flex items-center space-x-1.5">
                         <span className="w-4 h-4 rounded-md bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
                         <span>Checked</span>
                       </span>
                       {selectedActionType === 'checked' && (
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500 font-mono leading-tight">
+                    <p className="text-[11px] text-slate-400 font-mono leading-tight">
                       No comments or corrections. Clean compliance.
                     </p>
                   </button>
@@ -3306,20 +3298,20 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     onClick={() => setSelectedActionType('with-comments')}
                     className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
                       selectedActionType === 'with-comments'
-                        ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20 shadow-xs'
-                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        ? 'bg-amber-500/20 border-amber-500 ring-2 ring-amber-500/30 shadow-xs'
+                        : 'bg-[#0f1725] border-[#24334b] hover:border-slate-500 hover:bg-[#1a2638]'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold text-amber-900 flex items-center space-x-1.5">
+                      <span className="text-xs font-mono font-bold text-amber-300 flex items-center space-x-1.5">
                         <span className="w-4 h-4 rounded-md bg-amber-500 text-white flex items-center justify-center text-[10px]">💬</span>
                         <span>With Comments</span>
                       </span>
                       {selectedActionType === 'with-comments' && (
-                        <span className="w-2 h-2 rounded-full bg-amber-500" />
+                        <span className="w-2 h-2 rounded-full bg-amber-400" />
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500 font-mono leading-tight">
+                    <p className="text-[11px] text-slate-400 font-mono leading-tight">
                       Deliverable has corrections or notes for teacher.
                     </p>
                   </button>
@@ -3330,20 +3322,20 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     onClick={() => setSelectedActionType('incomplete')}
                     className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
                       selectedActionType === 'incomplete'
-                        ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-500/20 shadow-xs'
-                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        ? 'bg-rose-500/20 border-rose-500 ring-2 ring-rose-500/30 shadow-xs'
+                        : 'bg-[#0f1725] border-[#24334b] hover:border-slate-500 hover:bg-[#1a2638]'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold text-rose-900 flex items-center space-x-1.5">
+                      <span className="text-xs font-mono font-bold text-rose-300 flex items-center space-x-1.5">
                         <span className="w-4 h-4 rounded-md bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">!</span>
                         <span>Incomplete</span>
                       </span>
                       {selectedActionType === 'incomplete' && (
-                        <span className="w-2 h-2 rounded-full bg-rose-500" />
+                        <span className="w-2 h-2 rounded-full bg-rose-400" />
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500 font-mono leading-tight">
+                    <p className="text-[11px] text-slate-400 font-mono leading-tight">
                       Submission has lacking components or missing attachments.
                     </p>
                   </button>
@@ -3354,20 +3346,20 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     onClick={() => setSelectedActionType('late')}
                     className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
                       selectedActionType === 'late'
-                        ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 shadow-xs'
-                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        ? 'bg-orange-500/20 border-orange-500 ring-2 ring-orange-500/30 shadow-xs'
+                        : 'bg-[#0f1725] border-[#24334b] hover:border-slate-500 hover:bg-[#1a2638]'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold text-orange-900 flex items-center space-x-1.5">
+                      <span className="text-xs font-mono font-bold text-orange-300 flex items-center space-x-1.5">
                         <span className="w-4 h-4 rounded-md bg-orange-500 text-white flex items-center justify-center text-[10px] font-bold">⏰</span>
                         <span>Late</span>
                       </span>
                       {selectedActionType === 'late' && (
-                        <span className="w-2 h-2 rounded-full bg-orange-500" />
+                        <span className="w-2 h-2 rounded-full bg-orange-400" />
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500 font-mono leading-tight">
+                    <p className="text-[11px] text-slate-400 font-mono leading-tight">
                       Submitted past deadline or late delivery deliverable.
                     </p>
                   </button>
@@ -3380,8 +3372,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     onClick={() => setSelectedActionType('unchecked')}
                     className={`text-xs font-mono font-medium underline-offset-2 transition-all cursor-pointer ${
                       selectedActionType === 'unchecked'
-                        ? 'text-slate-700 font-bold underline'
-                        : 'text-slate-400 hover:text-slate-600'
+                        ? 'text-blue-400 font-bold underline'
+                        : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
                     {selectedActionType === 'unchecked' ? '● Set as Pending / Unchecked' : 'Set as Pending / Unchecked'}
@@ -3391,14 +3383,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
               {/* Comments / Notes Input (Shows when With Comments, Incomplete, or Late is selected) */}
               {(selectedActionType === 'with-comments' || selectedActionType === 'incomplete' || selectedActionType === 'late') && (
-                <div className="space-y-2 pt-1 border-t border-slate-100">
+                <div className="space-y-2 pt-1 border-t border-[#24334b]">
                   <div className="flex items-center justify-between">
                     <label className={`block text-xs font-mono font-bold ${
                       selectedActionType === 'incomplete'
-                        ? 'text-rose-900'
+                        ? 'text-rose-300'
                         : selectedActionType === 'late'
-                        ? 'text-orange-900'
-                        : 'text-amber-900'
+                        ? 'text-orange-300'
+                        : 'text-amber-300'
                     }`}>
                       {selectedActionType === 'incomplete'
                         ? 'Notes on Lacking Components / Missing Parts:'
@@ -3421,18 +3413,18 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         : 'e.g. Please revise learning competencies; missing supervisor signature; incomplete items...'
                     }
                     rows={3}
-                    className={`w-full p-3 bg-white border rounded-2xl text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 resize-none shadow-2xs ${
+                    className={`w-full p-3 bg-[#0d1524] border rounded-2xl text-xs font-mono text-slate-100 placeholder:text-slate-500 focus:outline-hidden focus:ring-2 resize-none shadow-2xs ${
                       selectedActionType === 'incomplete'
-                        ? 'border-rose-300 focus:ring-rose-500'
+                        ? 'border-rose-500/50 focus:ring-rose-500'
                         : selectedActionType === 'late'
-                        ? 'border-orange-300 focus:ring-orange-500'
-                        : 'border-amber-300 focus:ring-amber-500'
+                        ? 'border-orange-500/50 focus:ring-orange-500'
+                        : 'border-amber-500/50 focus:ring-amber-500'
                     }`}
                   />
 
                   {/* Quick comment suggestion chips */}
                   <div className="space-y-1">
-                    <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
                       Quick Suggestions:
                     </span>
                     <div className="flex flex-wrap gap-1.5">
@@ -3468,10 +3460,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           onClick={() => setCommentInput(tip)}
                           className={`text-[10px] font-mono px-2 py-1 rounded-lg transition-all cursor-pointer border ${
                             selectedActionType === 'incomplete'
-                              ? 'bg-slate-100 hover:bg-rose-100 hover:text-rose-900 text-slate-600 border-slate-200'
+                              ? 'bg-[#0d1524] hover:bg-rose-500/20 hover:text-rose-200 text-slate-300 border-[#24334b]'
                               : selectedActionType === 'late'
-                              ? 'bg-slate-100 hover:bg-orange-100 hover:text-orange-900 text-slate-600 border-slate-200'
-                              : 'bg-slate-100 hover:bg-amber-100 hover:text-amber-900 text-slate-600 border-slate-200'
+                              ? 'bg-[#0d1524] hover:bg-orange-500/20 hover:text-orange-200 text-slate-300 border-[#24334b]'
+                              : 'bg-[#0d1524] hover:bg-amber-500/20 hover:text-amber-200 text-slate-300 border-[#24334b]'
                           }`}
                         >
                           + {tip}
@@ -3483,18 +3475,18 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               )}
 
               {/* Status summary preview */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs font-mono text-slate-600 flex items-center justify-between">
+              <div className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-3 text-xs font-mono text-slate-300 flex items-center justify-between">
                 <span>Resulting Status:</span>
                 <span className={`font-bold px-2 py-0.5 rounded-md ${
                   selectedActionType === 'checked'
-                    ? 'bg-emerald-100 text-emerald-800'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                     : selectedActionType === 'with-comments'
-                    ? 'bg-amber-100 text-amber-900'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                     : selectedActionType === 'incomplete'
-                    ? 'bg-rose-100 text-rose-900'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                     : selectedActionType === 'late'
-                    ? 'bg-orange-100 text-orange-900'
-                    : 'bg-slate-200 text-slate-700'
+                    ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40'
+                    : 'bg-[#0d1524] text-slate-400 border border-[#24334b]'
                 }`}>
                   {selectedActionType === 'checked'
                     ? '✓ Checked (No Comments)'
@@ -3510,11 +3502,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+            <div className="p-4 sm:p-5 bg-[#0f1725] border-t border-[#24334b] flex items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setActiveCellAction(null)}
-                className="px-4 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer shadow-2xs"
+                className="px-4 py-2 bg-[#1c273a] hover:bg-[#25344d] border border-[#2d3e57] text-slate-200 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer shadow-2xs"
               >
                 Cancel
               </button>
@@ -3551,23 +3543,23 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       {/* FACULTY VIEW FEEDBACK DETAIL MODAL (With Comments or Incomplete) */}
       {facultyDetailModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-slate-100">
             {/* Header */}
             <div className={`p-5 border-b flex items-center justify-between ${
               facultyDetailModal.status === 'incomplete'
-                ? 'bg-rose-50 border-rose-200'
+                ? 'bg-rose-500/15 border-rose-500/30'
                 : facultyDetailModal.status === 'late'
-                ? 'bg-orange-50 border-orange-200'
-                : 'bg-amber-50 border-amber-200'
+                ? 'bg-orange-500/15 border-orange-500/30'
+                : 'bg-amber-500/15 border-amber-500/30'
             }`}>
               <div className="flex items-center space-x-2.5">
                 <div className={`w-9 h-9 rounded-xl text-white flex items-center justify-center shadow-xs ${
                   facultyDetailModal.status === 'incomplete'
-                    ? 'bg-rose-500'
+                    ? 'bg-rose-600'
                     : facultyDetailModal.status === 'late'
-                    ? 'bg-orange-500'
-                    : 'bg-amber-500'
+                    ? 'bg-orange-600'
+                    : 'bg-amber-600'
                 }`}>
                   {facultyDetailModal.status === 'incomplete' ? (
                     <AlertCircle className="w-5 h-5" />
@@ -3578,7 +3570,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   )}
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 font-sans">
+                  <h3 className="text-sm font-bold text-slate-100 font-sans">
                     {facultyDetailModal.status === 'incomplete'
                       ? 'Incomplete Deliverable Details'
                       : facultyDetailModal.status === 'late'
@@ -3587,10 +3579,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   </h3>
                   <p className={`text-xs font-mono font-bold ${
                     facultyDetailModal.status === 'incomplete'
-                      ? 'text-rose-800'
+                      ? 'text-rose-300'
                       : facultyDetailModal.status === 'late'
-                      ? 'text-orange-800'
-                      : 'text-amber-800'
+                      ? 'text-orange-300'
+                      : 'text-amber-300'
                   }`}>
                     {facultyDetailModal.colLabel}
                   </p>
@@ -3600,7 +3592,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               <button
                 type="button"
                 onClick={() => setFacultyDetailModal(null)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-all cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] transition-all cursor-pointer"
                 title="Close"
               >
                 <X className="w-5 h-5" />
@@ -3612,10 +3604,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               <div className="flex items-center space-x-2">
                 <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-md border ${
                   facultyDetailModal.status === 'incomplete'
-                    ? 'text-rose-900 bg-rose-100 border-rose-300'
+                    ? 'text-rose-200 bg-rose-500/25 border-rose-500/40'
                     : facultyDetailModal.status === 'late'
-                    ? 'text-orange-900 bg-orange-100 border-orange-300'
-                    : 'text-amber-900 bg-amber-100 border-amber-300'
+                    ? 'text-orange-200 bg-orange-500/25 border-orange-500/40'
+                    : 'text-amber-200 bg-amber-500/25 border-amber-500/40'
                 }`}>
                   Status: {facultyDetailModal.status === 'incomplete'
                     ? 'Incomplete (Lacking Requirements)'
@@ -3623,7 +3615,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     ? 'Late (Submitted Late)'
                     : 'With Comments (Corrections)'}
                 </span>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-slate-400">
                   {facultyDetailModal.status === 'incomplete'
                     ? 'Action needed to complete deliverable'
                     : facultyDetailModal.status === 'late'
@@ -3634,22 +3626,22 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
               <div className={`p-4 rounded-r-xl border-l-4 ${
                 facultyDetailModal.status === 'incomplete'
-                  ? 'bg-rose-50/70 border-rose-500'
+                  ? 'bg-rose-500/10 border-rose-500'
                   : facultyDetailModal.status === 'late'
-                  ? 'bg-orange-50/70 border-orange-500'
-                  : 'bg-amber-50/70 border-amber-500'
+                  ? 'bg-orange-500/10 border-orange-500'
+                  : 'bg-amber-500/10 border-amber-500'
               }`}>
-                <p className="text-xs text-slate-800 leading-relaxed italic">
+                <p className="text-xs text-slate-200 leading-relaxed italic">
                   "{facultyDetailModal.comment}"
                 </p>
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-900 space-y-1">
-                <p className="font-bold flex items-center space-x-1.5">
+              <div className="bg-[#0d1524] border border-[#24334b] rounded-xl p-3 text-xs text-slate-300 space-y-1">
+                <p className="font-bold flex items-center space-x-1.5 text-blue-400">
                   <span>💡</span>
                   <span>How to resolve:</span>
                 </p>
-                <p className="text-[11px] text-blue-800">
+                <p className="text-[11px] text-slate-300">
                   {facultyDetailModal.status === 'incomplete'
                     ? 'Please provide the missing parts, attachments, or competencies and upload the complete file into your personal Faculty Folder. Once updated, the administrator will verify and mark it clean.'
                     : facultyDetailModal.status === 'late'
@@ -3660,11 +3652,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
 
             {/* Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 text-right">
+            <div className="p-4 bg-[#0f1725] border-t border-[#24334b] text-right">
               <button
                 type="button"
                 onClick={() => setFacultyDetailModal(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-mono font-bold transition-all cursor-pointer"
+                className="px-4 py-2 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] rounded-xl text-xs font-mono font-bold transition-all cursor-pointer"
               >
                 Close Feedback
               </button>

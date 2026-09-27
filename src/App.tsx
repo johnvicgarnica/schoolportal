@@ -561,14 +561,14 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen text-slate-800 font-sans selection:bg-emerald-500 selection:text-white relative bg-slate-100/90 overflow-x-hidden">
+    <div className="min-h-screen text-slate-100 font-sans selection:bg-emerald-600 selection:text-white relative bg-[#0b111e] overflow-x-hidden">
       {/* Background Image Layer with Controlled Opacity */}
       <div 
-        className="fixed inset-0 pointer-events-none bg-cover bg-center bg-no-repeat bg-fixed z-0 opacity-25 mix-blend-multiply"
+        className="fixed inset-0 pointer-events-none bg-cover bg-center bg-no-repeat bg-fixed z-0 opacity-15 mix-blend-luminosity"
         style={{ backgroundImage: `url(${buildingBg})` }}
       />
-      {/* Soft Light Backdrop Tint to preserve high foreground readability */}
-      <div className="fixed inset-0 pointer-events-none bg-slate-50/70 backdrop-blur-[0.5px] z-0" />
+      {/* Moderate Dark Backdrop Tint to preserve comfortable contrast & zero eye fatigue */}
+      <div className="fixed inset-0 pointer-events-none bg-[#0b111e]/90 backdrop-blur-[1px] z-0" />
 
       <div className="relative z-10 flex flex-col min-h-screen">
         <Header
@@ -678,11 +678,11 @@ export function App() {
           {activeTab === 'copilot' && <AiCopilot files={files} />}
         </main>
 
-        {/* Clean Footer with High-Contrast Text */}
-        <footer className="bg-white/95 backdrop-blur-md border-t border-slate-200/80 mt-12 py-5 text-center text-xs font-sans text-slate-600 shadow-2xs relative z-10">
-          <p className="font-medium">Department of Education • CARAGA Region • Division of Bislig City</p>
-          <p className="mt-1 text-slate-900 font-bold">San Vicente National High School • Official Portal</p>
-          <div className="font-mono text-[11px] text-emerald-800 font-bold pt-2 mt-2 border-t border-slate-100 max-w-xs mx-auto">
+        {/* Clean Footer with High-Contrast Light Text on Moderate Dark */}
+        <footer className="bg-[#141c2c]/95 backdrop-blur-md border-t border-[#24334b] mt-12 py-5 text-center text-xs font-sans text-slate-300 shadow-2xs relative z-10">
+          <p className="font-medium text-slate-400">Department of Education • CARAGA Region • Division of Bislig City</p>
+          <p className="mt-1 text-slate-100 font-bold">San Vicente National High School • Official Portal</p>
+          <div className="font-mono text-[11px] text-emerald-400 font-bold pt-2 mt-2 border-t border-[#24334b] max-w-xs mx-auto">
             <p>Powered by: GARJOHN</p>
           </div>
         </footer>

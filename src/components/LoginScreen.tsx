@@ -477,18 +477,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100/90 text-slate-800 flex flex-col justify-center items-center px-2 sm:px-6 py-4 sm:py-6 relative overflow-hidden font-sans">
+    <div className="min-h-screen bg-[#0b111e] text-slate-100 flex flex-col justify-center items-center px-2 sm:px-6 py-4 sm:py-6 relative overflow-hidden font-sans">
       {/* Background Image Layer with Controlled Opacity */}
       <div 
-        className="fixed inset-0 pointer-events-none bg-cover bg-center bg-no-repeat bg-fixed z-0 opacity-50 mix-blend-multiply"
+        className="fixed inset-0 pointer-events-none bg-cover bg-center bg-no-repeat bg-fixed z-0 opacity-15 mix-blend-luminosity"
         style={{ backgroundImage: `url(${buildingBg})` }}
       />
-      {/* Soft Light Backdrop Tint */}
-      <div className="fixed inset-0 pointer-events-none bg-slate-50/50 backdrop-blur-[0.25px] z-0" />
+      {/* Moderate Dark Backdrop Tint */}
+      <div className="fixed inset-0 pointer-events-none bg-[#0b111e]/90 backdrop-blur-[1px] z-0" />
 
       {/* Background Decorative Grids & Soft Glows */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-emerald-200/20 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-[450px] h-[450px] bg-amber-200/20 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute bottom-10 right-10 w-[450px] h-[450px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
 
       {/* Main Grid Wrapper (Left: Intro + Message + Announcements, Right: Login Card) */}
       <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start relative z-10 my-auto">
@@ -534,11 +534,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           {/* School Principal's Message Section */}
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 relative overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
-              <div className="flex items-center space-x-2 text-amber-700 font-bold text-xs font-mono">
-                <Quote className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>School Principal's Message</span>
+              <div className="flex items-center space-x-2 text-amber-900 font-bold text-xs font-mono">
+                <Quote className="w-4 h-4 text-amber-700 shrink-0" />
+                <span className="font-bold">School Principal's Message</span>
               </div>
-              <span className="text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300/80">
+              <span className="text-xs font-mono font-bold text-white bg-emerald-800 px-2.5 py-1 rounded-md border border-emerald-900 shadow-xs tracking-wider uppercase inline-flex items-center">
                 OFFICIAL MESSAGE
               </span>
             </div>
@@ -559,7 +559,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
               {/* Message Content */}
               <div className="flex-1 space-y-2.5 text-center sm:text-left">
-                <div className="space-y-2 text-xs sm:text-[12.5px] text-slate-700 leading-relaxed font-sans italic">
+                <div className="space-y-2 text-xs sm:text-[13px] text-slate-800 leading-relaxed font-sans italic">
                   <p>
                     "It is with immense pride that San Vicente National High School recognizes and showcases the excellence of its highly competent and dedicated teachers in both the Junior High School and Senior High School Departments. Their professionalism, expertise, and steadfast commitment to quality education serve as the foundation of our school’s success. Through their passion for teaching and genuine dedication to learner development, they continue to cultivate an environment where every student is guided to achieve their full potential.
                   </p>
@@ -572,7 +572,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   <p className="text-xs sm:text-sm font-bold font-serif text-slate-900 tracking-wide">
                     Marivic R. Villaluz, School Principal I
                   </p>
-                  <p className="text-[10px] font-mono text-emerald-800 font-semibold">
+                  <p className="text-[11px] font-mono text-emerald-900 font-bold">
                     San Vicente National High School • DepEd CARAGA Region
                   </p>
                 </div>
@@ -995,20 +995,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       </div>
 
       {/* INSTITUTIONAL & SECURITY FOOTER */}
-      <footer className="w-full max-w-6xl mt-6 pt-4 pb-2 border-t border-slate-300/80 text-center relative z-10 space-y-2">
-        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] font-mono font-semibold text-slate-700">
+      <footer className="w-full max-w-6xl mt-6 pt-4 pb-2 border-t border-[#24334b] text-center relative z-10 space-y-2">
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] font-mono font-semibold text-slate-300">
           <span>Republic of the Philippines</span>
-          <span className="text-slate-300">•</span>
+          <span className="text-slate-500">•</span>
           <span>Department of Education</span>
-          <span className="text-slate-300">•</span>
+          <span className="text-slate-500">•</span>
           <span>Region XIII (CARAGA)</span>
-          <span className="text-slate-300">•</span>
+          <span className="text-slate-500">•</span>
           <span>Division of Bislig City</span>
-          <span className="text-slate-300">•</span>
-          <span className="text-emerald-800 font-bold">San Vicente NHS (School ID: 304868)</span>
+          <span className="text-slate-500">•</span>
+          <span className="text-emerald-400 font-bold">San Vicente NHS (School ID: 304868)</span>
         </div>
-        <p className="text-[10px] text-slate-500 max-w-3xl mx-auto leading-relaxed font-sans">
-          <strong>Institutional Privacy & Security Notice:</strong> This web portal is an internal academic repository engineered exclusively for authorized faculty and administrative staff of San Vicente National High School. All submitted records, Daily Lesson Logs, and user credentials are encrypted and protected under Republic Act No. 10173 (Data Privacy Act of 2012). This application does not collect financial details or commercial consumer information.
+        <p className="text-[10px] text-slate-400 max-w-3xl mx-auto leading-relaxed font-sans">
+          <strong className="text-slate-300">Institutional Privacy & Security Notice:</strong> This web portal is an internal academic repository engineered exclusively for authorized faculty and administrative staff of San Vicente National High School. All submitted records, Daily Lesson Logs, and user credentials are encrypted and protected under Republic Act No. 10173 (Data Privacy Act of 2012). This application does not collect financial details or commercial consumer information.
         </p>
       </footer>
 
@@ -1358,12 +1358,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       )}
 
       {/* Footer copyright */}
-      <div className="mt-8 px-6 py-3.5 bg-white/90 backdrop-blur-md border border-slate-200/80 rounded-2xl shadow-sm text-center max-w-xl mx-auto space-y-1 z-10 relative">
-        <div className="font-mono text-[11px] text-slate-600 font-medium space-y-0.5">
+      <div className="mt-8 px-6 py-3.5 bg-[#141c2c]/90 backdrop-blur-md border border-[#24334b] rounded-2xl shadow-sm text-center max-w-xl mx-auto space-y-1 z-10 relative">
+        <div className="font-mono text-[11px] text-slate-300 font-medium space-y-0.5">
           <p>Department of Education • CARAGA Region • Division of Bislig City</p>
-          <p>San Vicente National High School</p>
+          <p className="text-slate-100 font-bold">San Vicente National High School</p>
         </div>
-        <div className="font-mono text-[11px] text-emerald-800 font-bold pt-1 border-t border-slate-100">
+        <div className="font-mono text-[11px] text-emerald-400 font-bold pt-1 border-t border-[#24334b]">
           <p>Powered by: GARJOHN</p>
         </div>
       </div>

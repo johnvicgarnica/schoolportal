@@ -580,22 +580,22 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
           {/* School-Wide Permanent Banner */}
           {isPermanentActive && (
-            <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-emerald-50 border border-indigo-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono shadow-2xs">
+            <div className="bg-[#141c2c] border border-[#24334b] rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono shadow-2xs">
               <div className="flex items-center space-x-3">
                 <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
                   <ShieldCheck className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900 text-xs sm:text-sm">
+                  <div className="font-bold text-slate-100 text-xs sm:text-sm">
                     Official Central School Repository • {activeFolder.name}
                   </div>
-                  <div className="text-slate-600 text-[11px] mt-0.5">
+                  <div className="text-slate-400 text-[11px] mt-0.5">
                     This folder is permanent and visible to all faculty members. The embedded Google Drive link is centrally managed by School Administration through the Admin Dashboard.
                   </div>
                 </div>
               </div>
               <div className="flex items-center space-x-2 shrink-0">
-                <span className="text-[10px] text-indigo-900 bg-white/90 px-2.5 py-1 rounded-lg border border-indigo-200 font-bold uppercase">
+                <span className="text-[10px] text-indigo-300 bg-[#0d1524] px-2.5 py-1 rounded-lg border border-indigo-500/40 font-bold uppercase">
                   DepEd Official Link
                 </span>
               </div>
@@ -604,8 +604,8 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
           {/* Folder Description and Optional Google Drive Link Banner */}
           {activeFolder.description && (
-            <p className="text-xs sm:text-sm text-slate-600 bg-slate-50 p-3.5 rounded-2xl border border-slate-100 font-medium">
-              <span className="font-bold text-slate-800">Description: </span>
+            <p className="text-xs sm:text-sm text-slate-300 bg-[#0d1524] p-3.5 rounded-2xl border border-[#24334b] font-medium">
+              <span className="font-bold text-slate-100">Description: </span>
               {activeFolder.description}
             </p>
           )}
@@ -710,7 +710,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         /* FOLDERS OVERVIEW LIST & GRID */
         <div className="space-y-6">
           {/* Controls Bar: Search & Filter */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#141c2c] p-4 rounded-2xl border border-[#24334b] shadow-2xs">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -718,7 +718,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 placeholder="Search your personal folders by name or category..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl pl-9 pr-4 py-2 text-xs font-mono text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:bg-[#101a2c] transition-all"
               />
             </div>
 
@@ -726,7 +726,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               <select
                 value={selectedCategoryFilter}
                 onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer"
+                className="bg-[#0d1524] border border-[#24334b] rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer"
               >
                 <option value="all">All Categories ({myFolders.length})</option>
                 {CATEGORY_OPTIONS.map((cat) => (
@@ -740,30 +740,30 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
           {/* SECTION 1: PERMANENT SCHOOL-WIDE FOLDERS */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+            <div className="flex items-center justify-between border-b border-[#24334b] pb-2">
               <div className="flex items-center space-x-2.5">
-                <div className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg">
+                <div className="p-1.5 bg-indigo-500/20 text-indigo-300 rounded-lg">
                   <FolderLock className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-900 flex items-center space-x-2">
+                  <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center space-x-2">
                     <span>School Permanent Folders</span>
                     <span className="bg-indigo-600 text-white text-[10px] font-mono px-2 py-0.2 rounded-full font-bold">
                       Set for All Faculty
                     </span>
                   </h2>
-                  <p className="text-[11px] text-slate-500 font-mono">
+                  <p className="text-[11px] text-slate-400 font-mono">
                     Official central folders. The embedded Google Drive link is managed centrally by administrators.
                   </p>
                 </div>
               </div>
-              <div className="text-[11px] font-mono text-slate-500 hidden sm:block">
+              <div className="text-[11px] font-mono text-slate-400 hidden sm:block">
                 {filteredPermanentFolders.length} Central Folders
               </div>
             </div>
 
             {filteredPermanentFolders.length === 0 ? (
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-xs font-mono text-slate-500">
+              <div className="bg-[#141c2c] border border-[#24334b] rounded-2xl p-4 text-center text-xs font-mono text-slate-400">
                 No permanent school folders match "{searchTerm}".
               </div>
             ) : (
@@ -772,45 +772,45 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   const isForms = permFolder.id === 'school-forms';
                   const isDocs = permFolder.id === 'school-documents';
 
-                  let bgGradient = 'from-indigo-50/70 to-blue-50/50 hover:border-indigo-500';
+                  let bgGradient = 'from-[#141c2c] to-[#172236] hover:border-indigo-500/70';
                   let iconBg = 'bg-indigo-600';
-                  let badgeColor = 'bg-indigo-100 text-indigo-800 border-indigo-200';
+                  let badgeColor = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
 
                   if (isForms || permFolder.color === 'Blue') {
-                    bgGradient = 'from-blue-50/70 to-indigo-50/50 hover:border-blue-500';
+                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-blue-500/70';
                     iconBg = 'bg-blue-600';
-                    badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+                    badgeColor = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
                   } else if (isDocs || permFolder.color === 'Emerald') {
-                    bgGradient = 'from-emerald-50/70 to-teal-50/50 hover:border-emerald-500';
+                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-emerald-500/70';
                     iconBg = 'bg-emerald-600';
-                    badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                    badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
                   } else if (permFolder.color === 'Purple') {
-                    bgGradient = 'from-purple-50/70 to-fuchsia-50/50 hover:border-purple-500';
+                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-purple-500/70';
                     iconBg = 'bg-purple-600';
-                    badgeColor = 'bg-purple-100 text-purple-800 border-purple-200';
+                    badgeColor = 'bg-purple-500/20 text-purple-300 border-purple-500/40';
                   } else if (permFolder.color === 'Amber') {
-                    bgGradient = 'from-amber-50/70 to-yellow-50/50 hover:border-amber-500';
+                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-amber-500/70';
                     iconBg = 'bg-amber-600';
-                    badgeColor = 'bg-amber-100 text-amber-800 border-amber-200';
+                    badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
                   } else if (permFolder.color === 'Rose') {
-                    bgGradient = 'from-rose-50/70 to-pink-50/50 hover:border-rose-500';
+                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-rose-500/70';
                     iconBg = 'bg-rose-600';
-                    badgeColor = 'bg-rose-100 text-rose-800 border-rose-200';
+                    badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
                   } else if (permFolder.color === 'Teal') {
-                    bgGradient = 'from-teal-50/70 to-emerald-50/50 hover:border-teal-500';
+                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-teal-500/70';
                     iconBg = 'bg-teal-600';
-                    badgeColor = 'bg-teal-100 text-teal-800 border-teal-200';
+                    badgeColor = 'bg-teal-500/20 text-teal-300 border-teal-500/40';
                   } else if (permFolder.color === 'Cyan') {
-                    bgGradient = 'from-cyan-50/70 to-blue-50/50 hover:border-cyan-500';
+                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-cyan-500/70';
                     iconBg = 'bg-cyan-600';
-                    badgeColor = 'bg-cyan-100 text-cyan-800 border-cyan-200';
+                    badgeColor = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
                   }
 
                   return (
                     <div
                       key={permFolder.id}
                       onClick={() => setActiveFolderId(permFolder.id)}
-                      className={`bg-gradient-to-br ${bgGradient} border-2 border-slate-200 rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden`}
+                      className={`bg-gradient-to-br ${bgGradient} border-2 border-[#24334b] rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden`}
                     >
                       <div className="space-y-3">
                         <div className="flex items-start justify-between gap-2">
@@ -829,37 +829,37 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                                 <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${badgeColor}`}>
                                   {permFolder.category}
                                 </span>
-                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-slate-200/80 text-slate-700 flex items-center space-x-1">
-                                  <Lock className="w-3 h-3 text-slate-600" />
+                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-[#0d1524] text-slate-300 border border-[#24334b] flex items-center space-x-1">
+                                  <Lock className="w-3 h-3 text-slate-400" />
                                   <span>{permFolder.isPermanent ? 'Permanent' : 'School Folder'}</span>
                                 </span>
                               </div>
-                              <h3 className="font-extrabold text-base sm:text-lg text-slate-900 group-hover:text-blue-700 transition-colors mt-1 font-sans">
+                              <h3 className="font-extrabold text-base sm:text-lg text-slate-100 group-hover:text-blue-400 transition-colors mt-1 font-sans">
                                 {permFolder.name}
                               </h3>
                             </div>
                           </div>
 
                           <div
-                            className="p-1.5 text-slate-400 bg-white/80 rounded-xl border border-slate-200 shadow-2xs"
+                            className="p-1.5 text-slate-400 bg-[#0d1524] rounded-xl border border-[#24334b] shadow-2xs"
                             title="School Central Folder (Admin/Coordinator Managed Link)"
                           >
-                            <Lock className="w-4 h-4 text-slate-500" />
+                            <Lock className="w-4 h-4 text-slate-400" />
                           </div>
                         </div>
 
-                        <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed font-sans">
+                        <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed font-sans">
                           {permFolder.description || 'Central department repository folder.'}
                         </p>
                       </div>
 
-                      <div className="pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs font-mono">
-                        <span className="text-[10px] text-slate-500 flex items-center space-x-1 font-semibold">
-                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <div className="pt-3 border-t border-[#24334b] flex items-center justify-between text-xs font-mono">
+                        <span className="text-[10px] text-slate-400 flex items-center space-x-1 font-semibold">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                           <span>{permFolder.updatedBy ? `Set by ${permFolder.updatedBy}` : 'Central Drive Link'}</span>
                         </span>
 
-                        <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-700 group-hover:translate-x-1 transition-transform">
+                        <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-400 group-hover:text-blue-300 group-hover:translate-x-1 transition-transform">
                           <span>Open Live Drive</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </div>
@@ -872,17 +872,17 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
           </div>
 
           {/* SECTION 2: PERSONAL FACULTY FOLDERS */}
-          <div className="space-y-4 pt-4 border-t border-slate-200/80">
+          <div className="space-y-4 pt-4 border-t border-[#24334b]">
             <div className="flex items-center justify-between pb-1">
               <div className="flex items-center space-x-2.5">
-                <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
+                <div className="p-1.5 bg-blue-500/20 text-blue-300 rounded-lg">
                   <Folder className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-900">
+                  <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100">
                     Personal Faculty Folders ({myFolders.length})
                   </h2>
-                  <p className="text-[11px] text-slate-500 font-mono">
+                  <p className="text-[11px] text-slate-400 font-mono">
                     Your private DLL, TOS, TQ, and instructional materials folders.
                   </p>
                 </div>
@@ -900,13 +900,13 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
             {/* Folders Grid / Empty State */}
             {myFolders.length === 0 ? (
-              <div className="bg-white border-2 border-dashed border-blue-200 rounded-3xl p-8 sm:p-12 text-center space-y-4 shadow-sm">
-                <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 text-blue-600 mx-auto flex items-center justify-center shadow-inner">
+              <div className="bg-[#141c2c] border-2 border-dashed border-[#24334b] rounded-3xl p-8 sm:p-12 text-center space-y-4 shadow-sm">
+                <div className="w-14 h-14 rounded-2xl bg-blue-500/20 border border-blue-500/40 text-blue-300 mx-auto flex items-center justify-center shadow-inner">
                   <FolderPlus className="w-7 h-7" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900">No Personal Folders Created Yet</h3>
-                  <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-100">No Personal Folders Created Yet</h3>
+                  <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
                     You have access to the permanent school folders above. You can also create personal folders to organize your Daily Lesson Logs (DLL), Table of Specifications, and personal teaching materials.
                   </p>
                 </div>
@@ -920,7 +920,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 </button>
               </div>
             ) : filteredFolders.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center text-xs font-mono text-slate-500 space-y-2">
+              <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-8 text-center text-xs font-mono text-slate-400 space-y-2">
                 <p>No personal folders match your search query: "{searchTerm}"</p>
                 <button
                   type="button"
@@ -928,7 +928,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     setSearchTerm('');
                     setSelectedCategoryFilter('all');
                   }}
-                  className="text-blue-600 hover:underline font-bold"
+                  className="text-blue-400 hover:underline font-bold"
                 >
                   Reset filters
                 </button>
@@ -943,7 +943,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   <div
                     key={folder.id}
                     onClick={() => setActiveFolderId(folder.id)}
-                    className="bg-white border border-slate-200 hover:border-blue-500/80 rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden"
+                    className="bg-[#141c2c] border border-[#24334b] hover:border-blue-500/70 rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden"
                   >
                     <div className="space-y-3">
                       {/* Top Header */}
@@ -953,10 +953,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                             <Folder className="w-6 h-6" />
                           </div>
                           <div>
-                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md">
+                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-[#0d1524] text-slate-300 border border-[#24334b] rounded-md">
                               {folder.category || 'General'}
                             </span>
-                            <h3 className="font-bold text-sm sm:text-base text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors mt-1">
+                            <h3 className="font-bold text-sm sm:text-base text-slate-100 line-clamp-1 group-hover:text-blue-400 transition-colors mt-1">
                               {folder.name}
                             </h3>
                           </div>
@@ -970,7 +970,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                           <button
                             type="button"
                             onClick={(e) => handleOpenEditFolderModal(folder, e)}
-                            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
                             title="Edit folder"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -978,7 +978,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                           <button
                             type="button"
                             onClick={(e) => handleDeleteFolderConfirm(folder.id, folder.name, e)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                            className="p-1.5 text-slate-400 hover:text-rose-300 hover:bg-rose-500/20 rounded-lg transition-all"
                             title="Delete folder"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -988,14 +988,14 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
                       {/* Description */}
                       {folder.description && (
-                        <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed font-sans">
+                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed font-sans">
                           {folder.description}
                         </p>
                       )}
                     </div>
 
                     {/* Footer Info */}
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-end text-xs font-mono text-slate-500">
+                    <div className="pt-3 border-t border-[#24334b] flex items-center justify-end text-xs font-mono text-slate-400">
                       {folder.driveUrl ? (
                         <div className="flex items-center space-x-1.5">
                           <button
@@ -1005,10 +1005,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                               setActiveFolderId(folder.id);
                               setShowFolderDriveEmbed(true);
                             }}
-                            className="text-[10px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1 transition-all"
+                            className="text-[10px] text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1 transition-all"
                             title="Open Google Drive Webview"
                           >
-                            <HardDrive className="w-3 h-3 text-emerald-600" />
+                            <HardDrive className="w-3 h-3 text-emerald-400" />
                             <span>Drive Webview</span>
                           </button>
                         </div>

@@ -1,15 +1,21 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    color-scheme: dark;
+  }
+
   html {
     font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     line-height: 1.65;
     -webkit-font-smoothing: antialiased;
+    background-color: #0b111e;
+    color: #e2e8f0;
   }
 
   body {
-    background-color: #f8fafc;
-    color: #0f172a;
+    background-color: #0b111e;
+    color: #e2e8f0;
     line-height: 1.65;
   }
 
@@ -18,24 +24,290 @@
     font-weight: 700;
     line-height: 1.3;
     letter-spacing: -0.015em;
+    color: #f8fafc;
+  }
+
+  /* Form Controls Baseline for Moderate Dark Theme */
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    background-color: #0d1524 !important;
+    color: #f8fafc !important;
+    border-color: #27374f !important;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"])::placeholder,
+  textarea::placeholder {
+    color: #64748b !important;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):focus,
+  textarea:focus,
+  select:focus {
+    border-color: #3b82f6 !important;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
   }
 }
 
-/* Custom smooth scrollbar */
+/* Custom smooth dark scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #0b111e;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
+  background: #24334a;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #364a6b;
 }
+
+/* ========================================================
+   MODERATE DARK THEME UTILITY OVERRIDES
+   Carefully tuned to eliminate harsh white glare and eye fatigue
+   while maintaining maximum text legibility & crisp button presence.
+   ======================================================== */
+
+/* Surface Backgrounds */
+.bg-white {
+  background-color: #141c2c !important;
+}
+
+.bg-slate-50 {
+  background-color: #0f1725 !important;
+}
+
+.bg-slate-100 {
+  background-color: #162031 !important;
+}
+
+.bg-slate-100\/90 {
+  background-color: rgba(14, 21, 34, 0.94) !important;
+}
+
+.bg-slate-100\/80 {
+  background-color: rgba(14, 21, 34, 0.85) !important;
+}
+
+.bg-slate-50\/50,
+.bg-slate-50\/70 {
+  background-color: rgba(11, 17, 30, 0.88) !important;
+}
+
+.bg-slate-200 {
+  background-color: #223046 !important;
+}
+
+/* Borders */
+.border-slate-100,
+.border-slate-200,
+.border-slate-200\/80,
+.border-slate-200\/90,
+.border-slate-300 {
+  border-color: #24334b !important;
+}
+
+.border-slate-400 {
+  border-color: #384c6c !important;
+}
+
+.divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #223046 !important;
+}
+
+/* Typography Hierarchy - Soft on eyes, crystal clear contrast */
+.text-slate-950,
+.text-slate-900 {
+  color: #f8fafc !important;
+}
+
+.text-slate-800 {
+  color: #e2e8f0 !important;
+}
+
+.text-slate-700 {
+  color: #cbd5e1 !important;
+}
+
+.text-slate-600 {
+  color: #94a3b8 !important;
+}
+
+.text-slate-500 {
+  color: #8394ac !important;
+}
+
+.text-slate-400 {
+  color: #6d8098 !important;
+}
+
+/* Secondary & Ghost Buttons in Moderate Dark */
+button.bg-slate-100,
+a.bg-slate-100,
+button.bg-slate-200,
+a.bg-slate-200 {
+  background-color: #1c273a !important;
+  color: #f1f5f9 !important;
+  border-color: #2d3e57 !important;
+}
+
+button.bg-slate-100:hover,
+a.bg-slate-100:hover,
+button.bg-slate-200:hover,
+a.bg-slate-200:hover {
+  background-color: #25344d !important;
+  color: #ffffff !important;
+}
+
+/* Interactive list / table row hover states */
+.hover\:bg-slate-50:hover,
+.hover\:bg-slate-100:hover {
+  background-color: #1b2638 !important;
+}
+
+.hover\:bg-slate-200:hover,
+.hover\:bg-slate-200\/80:hover {
+  background-color: #28374d !important;
+}
+
+/* Harmonic Status Badges (Smooth dark glow with legible high-contrast text) */
+.bg-emerald-50,
+.bg-emerald-100 {
+  background-color: rgba(16, 185, 129, 0.16) !important;
+}
+.text-emerald-700,
+.text-emerald-800,
+.text-emerald-900 {
+  color: #34d399 !important;
+}
+.border-emerald-200,
+.border-emerald-300 {
+  border-color: rgba(16, 185, 129, 0.35) !important;
+}
+
+.bg-blue-50,
+.bg-blue-100 {
+  background-color: rgba(59, 130, 246, 0.16) !important;
+}
+.text-blue-700,
+.text-blue-800,
+.text-blue-900 {
+  color: #60a5fa !important;
+}
+.border-blue-200,
+.border-blue-300 {
+  border-color: rgba(59, 130, 246, 0.35) !important;
+}
+
+.bg-amber-50,
+.bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.16) !important;
+}
+.text-amber-700,
+.text-amber-800,
+.text-amber-900 {
+  color: #fbbf24 !important;
+}
+.border-amber-200,
+.border-amber-300 {
+  border-color: rgba(245, 158, 11, 0.35) !important;
+}
+
+.bg-indigo-50,
+.bg-indigo-100,
+.bg-purple-50,
+.bg-purple-100 {
+  background-color: rgba(99, 102, 241, 0.16) !important;
+}
+.text-indigo-700,
+.text-indigo-800,
+.text-indigo-900 {
+  color: #a5b4fc !important;
+}
+.border-indigo-200,
+.border-indigo-300 {
+  border-color: rgba(99, 102, 241, 0.35) !important;
+}
+
+.bg-rose-50,
+.bg-rose-100,
+.bg-red-50,
+.bg-red-100 {
+  background-color: rgba(244, 63, 94, 0.16) !important;
+}
+.text-rose-700,
+.text-rose-800,
+.text-rose-900,
+.text-red-700,
+.text-red-800,
+.text-red-900 {
+  color: #f87171 !important;
+}
+.border-rose-200,
+.border-rose-300,
+.border-red-200 {
+  border-color: rgba(244, 63, 94, 0.35) !important;
+}
+
+.bg-sky-50,
+.bg-sky-100 {
+  background-color: rgba(14, 165, 233, 0.16) !important;
+}
+.text-sky-700,
+.text-sky-800,
+.text-sky-900 {
+  color: #38bdf8 !important;
+}
+.border-sky-200,
+.border-sky-300 {
+  border-color: rgba(14, 165, 233, 0.35) !important;
+}
+
+.bg-teal-50,
+.bg-teal-100 {
+  background-color: rgba(20, 184, 166, 0.16) !important;
+}
+.text-teal-700,
+.text-teal-800,
+.text-teal-900 {
+  color: #2dd4bf !important;
+}
+.border-teal-200,
+.border-teal-300 {
+  border-color: rgba(20, 184, 166, 0.35) !important;
+}
+
+/* Gradients in Dark Theme */
+.from-indigo-50 {
+  --tw-gradient-from: rgba(99, 102, 241, 0.15) !important;
+}
+.via-blue-50 {
+  --tw-gradient-via: rgba(59, 130, 246, 0.12) !important;
+}
+.to-emerald-50 {
+  --tw-gradient-to: rgba(16, 185, 129, 0.15) !important;
+}
+.from-amber-50 {
+  --tw-gradient-from: rgba(245, 158, 11, 0.15) !important;
+}
+.to-amber-50 {
+  --tw-gradient-to: rgba(245, 158, 11, 0.15) !important;
+}
+
+/* Modals & Dialogs Deep Backdrop */
+.bg-slate-900\/60,
+.bg-slate-900\/50,
+.bg-black\/50,
+.bg-black\/60 {
+  background-color: rgba(5, 9, 17, 0.75) !important;
+  backdrop-filter: blur(4px);
+}
+

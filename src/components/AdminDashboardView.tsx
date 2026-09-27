@@ -1166,13 +1166,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
   if (!isAdmin) {
     return (
-      <div className="bg-white border border-rose-200 rounded-2xl p-8 text-center space-y-4 max-w-2xl mx-auto my-8 shadow-sm">
-        <div className="w-16 h-16 bg-rose-50 border border-rose-200 rounded-full flex items-center justify-center mx-auto text-rose-600">
+      <div className="bg-[#141c2c] border border-rose-500/30 rounded-2xl p-8 text-center space-y-4 max-w-2xl mx-auto my-8 shadow-xs">
+        <div className="w-16 h-16 bg-rose-500/20 border border-rose-500/30 rounded-full flex items-center justify-center mx-auto text-rose-400">
           <ShieldAlert className="w-8 h-8" />
         </div>
-        <h2 className="text-lg font-bold font-mono text-slate-900">Access Restricted to Department Administrators</h2>
-        <p className="text-xs text-slate-600 font-sans leading-relaxed">
-          The Admin Dashboard contains sensitive account directory management, faculty password controls, and system parameters. You are currently logged in as <span className="font-bold text-slate-900">{currentUser.name}</span> ({currentUser.role}).
+        <h2 className="text-lg font-bold font-mono text-slate-100">Access Restricted to Department Administrators</h2>
+        <p className="text-xs text-slate-300 font-sans leading-relaxed">
+          The Admin Dashboard contains sensitive account directory management, faculty password controls, and system parameters. You are currently logged in as <span className="font-bold text-slate-100">{currentUser.name}</span> ({currentUser.role}).
         </p>
       </div>
     );
@@ -1194,22 +1194,22 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       )}
 
       {/* Main Admin Dashboard Header Banner */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-[#141c2c] p-6 rounded-2xl border border-[#24334b] shadow-xs relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="space-y-1.5 relative z-10">
           <div className="flex items-center space-x-2.5">
-            <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-600 shadow-2xs">
+            <div className="p-2.5 bg-blue-500/20 border border-blue-500/40 rounded-xl text-blue-400 shadow-2xs">
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h1 className="text-xl font-bold font-mono text-slate-900 tracking-tight">
+                <h1 className="text-xl font-bold font-mono text-slate-100 tracking-tight">
                   {isCoordinator ? 'SVNHS Coordinator Dashboard' : 'SVNHS Admin Security & Management Dashboard'}
                 </h1>
-                <span className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] px-2 py-0.5 rounded font-mono font-extrabold uppercase">
+                <span className="bg-blue-500/20 text-blue-300 border border-blue-500/40 text-[10px] px-2 py-0.5 rounded font-mono font-extrabold uppercase">
                   {isCoordinator ? 'COORDINATOR PANEL' : 'MASTER CONTROL'}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">
+              <p className="text-xs text-slate-400 font-medium mt-0.5">
                 {isCoordinator ? 'San Vicente National High School • Senior High School Coordinator Panel' : 'San Vicente National High School • Administrator Panel'}
               </p>
             </div>
@@ -1217,18 +1217,18 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
 
         {/* Master Admin Indicator Badge */}
-        <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs font-mono">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-slate-600 font-bold">Logged in as:</span>
-          <span className="text-slate-900 font-bold truncate max-w-[180px]">{currentUser.name}</span>
-          <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[9px] px-1.5 py-0.2 rounded font-extrabold uppercase ml-1">
+        <div className="flex items-center space-x-2 bg-[#0d1524] border border-[#24334b] px-3 py-2 rounded-xl text-xs font-mono">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-slate-400 font-bold">Logged in as:</span>
+          <span className="text-slate-100 font-bold truncate max-w-[180px]">{currentUser.name}</span>
+          <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] px-1.5 py-0.2 rounded font-extrabold uppercase ml-1">
             {currentUser.designation || (isMasterAdmin ? 'Web Developer' : 'Admin')}
           </span>
         </div>
       </div>
 
       {/* Admin Sub-Navigation Tabs */}
-      <div className="bg-slate-100 p-2 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2.5 shadow-sm">
+      <div className="bg-[#0f1725] p-2 rounded-2xl border border-[#24334b] flex flex-col sm:flex-row items-center justify-between gap-2.5 shadow-xs">
         <div className="flex items-center flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
           {/* Faculty & Admin Accounts & Passwords Tab: STRICTLY VISIBLE ONLY TO MASTER ADMIN */}
           {isMasterAdmin && !isCoordinator && (
@@ -1299,8 +1299,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </button>
         </div>
 
-        <div className="text-[11px] font-mono text-slate-600 flex items-center space-x-1.5 px-3 py-1 bg-white/70 rounded-lg border border-slate-200/60 shadow-2xs">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+        <div className="text-[11px] font-mono text-slate-300 flex items-center space-x-1.5 px-3 py-1 bg-[#141c2c] rounded-lg border border-[#24334b] shadow-2xs">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           <span className="font-medium">DepEd Firestore Synced</span>
         </div>
       </div>
@@ -2922,7 +2922,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </div>
 
           {/* Quick Filter & Action Bar */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          <div className="bg-[#141c2c] border border-[#24334b] rounded-2xl p-3 sm:p-4 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -2931,7 +2931,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   placeholder="Search school folders by name, category, or notes..."
                   value={folderSearchTerm}
                   onChange={(e) => setFolderSearchTerm(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
+                  className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl pl-9 pr-4 py-2 text-xs font-mono text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-[#101a2c] transition-all"
                 />
               </div>
 
@@ -2940,7 +2940,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 <select
                   value={folderCategoryFilter}
                   onChange={(e) => setFolderCategoryFilter(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  className="bg-[#0d1524] border border-[#24334b] rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
                 >
                   <option value="all">All Categories ({schoolFolders.length})</option>
                   <option value="DepEd Forms & Portfolio">DepEd Forms & Portfolio</option>
@@ -2965,16 +2965,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </div>
 
           {/* SECTION HEADER: CORE PERMANENT SYSTEM FOLDERS */}
-          <div className="flex items-center justify-between border-b border-slate-200 pb-2 pt-2">
+          <div className="flex items-center justify-between border-b border-[#24334b] pb-2 pt-2">
             <div className="flex items-center space-x-2">
-              <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
+              <div className="p-1.5 bg-blue-500/20 text-blue-300 rounded-lg">
                 <ShieldCheck className="w-4 h-4" />
               </div>
-              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-900">
+              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100">
                 Core DepEd Permanent System Folders (2)
               </h3>
             </div>
-            <span className="text-[11px] font-mono text-slate-500">
+            <span className="text-[11px] font-mono text-slate-400">
               Anchored in all faculty workspaces
             </span>
           </div>
@@ -2982,30 +2982,30 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           {/* TWO PERMANENT FOLDER EDITORS */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* 1. SCHOOL FORMS */}
-            <div className="bg-white border-2 border-slate-200 hover:border-blue-400/60 rounded-3xl p-6 shadow-sm space-y-5 transition-all">
-              <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+            <div className="bg-[#141c2c] border-2 border-[#24334b] hover:border-blue-500/60 rounded-3xl p-6 shadow-sm space-y-5 transition-all">
+              <div className="flex items-start justify-between gap-3 border-b border-[#24334b] pb-4">
                 <div className="flex items-center space-x-3">
                   <div className="p-3 bg-blue-600 text-white rounded-2xl shadow-xs shrink-0">
                     <FileSpreadsheet className="w-6 h-6" />
                   </div>
                   <div>
                     <div className="flex items-center space-x-2">
-                      <span className="bg-blue-100 text-blue-800 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-blue-200 uppercase">
+                      <span className="bg-blue-500/20 text-blue-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-blue-500/40 uppercase">
                         Permanent System Folder
                       </span>
-                      <span className="text-[10px] font-mono text-slate-500 font-semibold flex items-center space-x-1">
+                      <span className="text-[10px] font-mono text-slate-400 font-semibold flex items-center space-x-1">
                         <Lock className="w-3 h-3 text-slate-400" />
                         <span>All Faculty Workspaces</span>
                       </span>
                     </div>
-                    <h3 className="text-lg font-bold text-slate-900 mt-1">
+                    <h3 className="text-lg font-bold text-slate-100 mt-1">
                       SCHOOL FORMS
                     </h3>
                   </div>
                 </div>
 
                 <div className="text-right">
-                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-bold">
+                  <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 rounded-md font-bold">
                     Active
                   </span>
                 </div>
@@ -3013,17 +3013,17 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
               <form onSubmit={handleSaveFormsLink} className="space-y-4 text-xs font-mono">
                 <div>
-                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1 flex items-center justify-between">
                     <span className="flex items-center space-x-1.5">
-                      <Link className="w-3.5 h-3.5 text-blue-600" />
+                      <Link className="w-3.5 h-3.5 text-blue-400" />
                       <span>Embedded Google Drive Link *</span>
                     </span>
                     {extractDriveId(formsUrlInput) ? (
-                      <span className="text-[10px] text-emerald-600 font-bold lowercase">
+                      <span className="text-[10px] text-emerald-400 font-bold lowercase">
                         Drive ID: {extractDriveId(formsUrlInput)?.substring(0, 14)}...
                       </span>
                     ) : (
-                      <span className="text-[10px] text-amber-600">Standard Google Drive folder URL</span>
+                      <span className="text-[10px] text-amber-400">Standard Google Drive folder URL</span>
                     )}
                   </label>
                   <input
@@ -3032,15 +3032,15 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     onChange={(e) => setFormsUrlInput(e.target.value)}
                     placeholder="https://drive.google.com/drive/folders/..."
                     required
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white font-mono transition-all"
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:bg-[#101a2c] font-mono transition-all"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-[10px] text-slate-400 mt-1">
                     Paste the shared Google Drive folder link containing DepEd SF1-SF10, Clearance, Inventory, and official School Forms.
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                  <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1">
                     Folder Description & Instructions for Faculty
                   </label>
                   <textarea
@@ -3048,18 +3048,18 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     value={formsDescInput}
                     onChange={(e) => setFormsDescInput(e.target.value)}
                     placeholder="Provide notes or guidelines for faculty regarding school forms..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white font-mono transition-all resize-none"
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:bg-[#101a2c] font-mono transition-all resize-none"
                   />
                 </div>
 
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100">
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#24334b]">
                   <div className="flex items-center space-x-2">
                     <button
                       type="button"
                       onClick={() => setShowFormsPreview(!showFormsPreview)}
-                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                      className="px-3 py-2 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
                     >
-                      <Eye className="w-3.5 h-3.5 text-slate-600" />
+                      <Eye className="w-3.5 h-3.5 text-slate-300" />
                       <span>{showFormsPreview ? 'Hide Preview' : 'Preview Webview'}</span>
                     </button>
 
@@ -3068,7 +3068,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         href={formsPermanentFolder.driveUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                        className="px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
                         title="Open in new browser tab"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
@@ -3081,7 +3081,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     <button
                       type="button"
                       onClick={handleResetFormsDefault}
-                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                      className="p-2 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-xl transition-all cursor-pointer"
                       title="Reset to default official link"
                     >
                       <RotateCcw className="w-4 h-4" />
@@ -3110,16 +3110,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
               {/* Embedded Webview Preview */}
               {showFormsPreview && (
-                <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono text-slate-600">
+                <div className="mt-4 pt-4 border-t border-[#24334b] space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-200">
                     <span className="font-bold flex items-center space-x-1.5">
-                      <FolderLock className="w-4 h-4 text-blue-600" />
+                      <FolderLock className="w-4 h-4 text-blue-400" />
                       <span>Live Drive Webview (SCHOOL FORMS)</span>
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowFormsPreview(false)}
-                      className="text-slate-400 hover:text-slate-700"
+                      className="text-slate-400 hover:text-slate-200"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -3134,30 +3134,30 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </div>
 
             {/* 2. SCHOOL DOCUMENTS */}
-            <div className="bg-white border-2 border-slate-200 hover:border-emerald-400/60 rounded-3xl p-6 shadow-sm space-y-5 transition-all">
-              <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+            <div className="bg-[#141c2c] border-2 border-[#24334b] hover:border-emerald-500/60 rounded-3xl p-6 shadow-sm space-y-5 transition-all">
+              <div className="flex items-start justify-between gap-3 border-b border-[#24334b] pb-4">
                 <div className="flex items-center space-x-3">
                   <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-xs shrink-0">
                     <FileText className="w-6 h-6" />
                   </div>
                   <div>
                     <div className="flex items-center space-x-2">
-                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-emerald-200 uppercase">
+                      <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-emerald-500/40 uppercase">
                         Permanent System Folder
                       </span>
-                      <span className="text-[10px] font-mono text-slate-500 font-semibold flex items-center space-x-1">
+                      <span className="text-[10px] font-mono text-slate-400 font-semibold flex items-center space-x-1">
                         <Lock className="w-3 h-3 text-slate-400" />
                         <span>All Faculty Workspaces</span>
                       </span>
                     </div>
-                    <h3 className="text-lg font-bold text-slate-900 mt-1">
+                    <h3 className="text-lg font-bold text-slate-100 mt-1">
                       SCHOOL DOCUMENTS
                     </h3>
                   </div>
                 </div>
 
                 <div className="text-right">
-                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-bold">
+                  <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 rounded-md font-bold">
                     Active
                   </span>
                 </div>
@@ -3165,17 +3165,17 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
               <form onSubmit={handleSaveDocsLink} className="space-y-4 text-xs font-mono">
                 <div>
-                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1 flex items-center justify-between">
                     <span className="flex items-center space-x-1.5">
-                      <Link className="w-3.5 h-3.5 text-emerald-600" />
+                      <Link className="w-3.5 h-3.5 text-emerald-400" />
                       <span>Embedded Google Drive Link *</span>
                     </span>
                     {extractDriveId(docsUrlInput) ? (
-                      <span className="text-[10px] text-emerald-600 font-bold lowercase">
+                      <span className="text-[10px] text-emerald-400 font-bold lowercase">
                         Drive ID: {extractDriveId(docsUrlInput)?.substring(0, 14)}...
                       </span>
                     ) : (
-                      <span className="text-[10px] text-amber-600">Standard Google Drive folder URL</span>
+                      <span className="text-[10px] text-amber-400">Standard Google Drive folder URL</span>
                     )}
                   </label>
                   <input
@@ -3184,15 +3184,15 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     onChange={(e) => setDocsUrlInput(e.target.value)}
                     placeholder="https://drive.google.com/drive/folders/..."
                     required
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white font-mono transition-all"
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 focus:bg-[#101a2c] font-mono transition-all"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-[10px] text-slate-400 mt-1">
                     Paste the shared Google Drive folder link containing School Memos, DepEd Orders, Division Advisories, and Institutional Policies.
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                  <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1">
                     Folder Description & Instructions for Faculty
                   </label>
                   <textarea
@@ -3200,18 +3200,18 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     value={docsDescInput}
                     onChange={(e) => setDocsDescInput(e.target.value)}
                     placeholder="Provide notes or guidelines for faculty regarding school documents..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white font-mono transition-all resize-none"
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 focus:bg-[#101a2c] font-mono transition-all resize-none"
                   />
                 </div>
 
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100">
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#24334b]">
                   <div className="flex items-center space-x-2">
                     <button
                       type="button"
                       onClick={() => setShowDocsPreview(!showDocsPreview)}
-                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                      className="px-3 py-2 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
                     >
-                      <Eye className="w-3.5 h-3.5 text-slate-600" />
+                      <Eye className="w-3.5 h-3.5 text-slate-300" />
                       <span>{showDocsPreview ? 'Hide Preview' : 'Preview Webview'}</span>
                     </button>
 
@@ -3220,7 +3220,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         href={docsPermanentFolder.driveUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                        className="px-3 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
                         title="Open in new browser tab"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
@@ -3233,7 +3233,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     <button
                       type="button"
                       onClick={handleResetDocsDefault}
-                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                      className="p-2 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-xl transition-all cursor-pointer"
                       title="Reset to default official link"
                     >
                       <RotateCcw className="w-4 h-4" />
@@ -3262,16 +3262,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
               {/* Embedded Webview Preview */}
               {showDocsPreview && (
-                <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono text-slate-600">
+                <div className="mt-4 pt-4 border-t border-[#24334b] space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-200">
                     <span className="font-bold flex items-center space-x-1.5">
-                      <FolderLock className="w-4 h-4 text-emerald-600" />
+                      <FolderLock className="w-4 h-4 text-emerald-400" />
                       <span>Live Drive Webview (SCHOOL DOCUMENTS)</span>
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowDocsPreview(false)}
-                      className="text-slate-400 hover:text-slate-700"
+                      className="text-slate-400 hover:text-slate-200"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -3287,20 +3287,20 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </div>
 
           {/* SECTION HEADER: ADDITIONAL DEPARTMENT & COORDINATOR FOLDERS */}
-          <div className="space-y-4 pt-4 border-t border-slate-200">
+          <div className="space-y-4 pt-4 border-t border-[#24334b]">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center space-x-2.5">
-                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl shadow-2xs">
+                <div className="p-2 bg-indigo-500/20 text-indigo-300 rounded-xl shadow-2xs">
                   <Folder className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-mono font-bold uppercase tracking-wider text-slate-900 flex items-center space-x-2">
+                  <h3 className="text-sm font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center space-x-2">
                     <span>Department & Coordinator Folders</span>
                     <span className="bg-indigo-600 text-white text-[10px] font-mono px-2 py-0.2 rounded-full font-bold">
                       {customSchoolFolders.length} Folders
                     </span>
                   </h3>
-                  <p className="text-[11px] text-slate-500 font-mono">
+                  <p className="text-[11px] text-slate-400 font-mono">
                     Additional shared folders created by coordinators and administrators for all faculty workspaces.
                   </p>
                 </div>
@@ -3317,15 +3317,15 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </div>
 
             {filteredCustomFolders.length === 0 ? (
-              <div className="bg-slate-50 border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-3xl p-8 text-center space-y-4 transition-colors">
-                <div className="w-14 h-14 bg-indigo-50 border border-indigo-200 text-indigo-600 rounded-2xl mx-auto flex items-center justify-center shadow-2xs">
+              <div className="bg-[#141c2c] border-2 border-dashed border-[#24334b] hover:border-indigo-500/60 rounded-3xl p-8 text-center space-y-4 transition-colors">
+                <div className="w-14 h-14 bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 rounded-2xl mx-auto flex items-center justify-center shadow-2xs">
                   <FolderPlus className="w-7 h-7" />
                 </div>
                 <div className="max-w-md mx-auto space-y-1">
-                  <h4 className="font-bold text-slate-800 text-sm font-sans">
+                  <h4 className="font-bold text-slate-100 text-sm font-sans">
                     {customSchoolFolders.length === 0 ? 'No Additional Department Folders Yet' : 'No Folders Match Filters'}
                   </h4>
-                  <p className="text-xs text-slate-500 font-mono leading-relaxed">
+                  <p className="text-xs text-slate-400 font-mono leading-relaxed">
                     {customSchoolFolders.length === 0
                       ? 'Coordinators can add necessary shared Google Drive folders for INSET / LAC sessions, Action Research, MELCs Guides, or Assessment Banks.'
                       : `Try clearing your search query "${folderSearchTerm}" or category filter.`}
@@ -3343,34 +3343,34 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {filteredCustomFolders.map((folder) => {
-                  let borderClass = 'border-slate-200 hover:border-indigo-400/80';
+                  let borderClass = 'border-[#24334b] hover:border-indigo-500/70';
                   let headerIconBg = 'bg-indigo-600';
-                  let badgeBg = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                  let badgeBg = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
 
                   if (folder.color === 'Purple') {
-                    borderClass = 'border-slate-200 hover:border-purple-400/80';
+                    borderClass = 'border-[#24334b] hover:border-purple-500/70';
                     headerIconBg = 'bg-purple-600';
-                    badgeBg = 'bg-purple-50 text-purple-700 border-purple-200';
+                    badgeBg = 'bg-purple-500/20 text-purple-300 border-purple-500/40';
                   } else if (folder.color === 'Amber') {
-                    borderClass = 'border-slate-200 hover:border-amber-400/80';
+                    borderClass = 'border-[#24334b] hover:border-amber-500/70';
                     headerIconBg = 'bg-amber-600';
-                    badgeBg = 'bg-amber-50 text-amber-700 border-amber-200';
+                    badgeBg = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
                   } else if (folder.color === 'Rose') {
-                    borderClass = 'border-slate-200 hover:border-rose-400/80';
+                    borderClass = 'border-[#24334b] hover:border-rose-500/70';
                     headerIconBg = 'bg-rose-600';
-                    badgeBg = 'bg-rose-50 text-rose-700 border-rose-200';
+                    badgeBg = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
                   } else if (folder.color === 'Teal') {
-                    borderClass = 'border-slate-200 hover:border-teal-400/80';
+                    borderClass = 'border-[#24334b] hover:border-teal-500/70';
                     headerIconBg = 'bg-teal-600';
-                    badgeBg = 'bg-teal-50 text-teal-700 border-teal-200';
+                    badgeBg = 'bg-teal-500/20 text-teal-300 border-teal-500/40';
                   } else if (folder.color === 'Blue') {
-                    borderClass = 'border-slate-200 hover:border-blue-400/80';
+                    borderClass = 'border-[#24334b] hover:border-blue-500/70';
                     headerIconBg = 'bg-blue-600';
-                    badgeBg = 'bg-blue-50 text-blue-700 border-blue-200';
+                    badgeBg = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
                   } else if (folder.color === 'Emerald') {
-                    borderClass = 'border-slate-200 hover:border-emerald-400/80';
+                    borderClass = 'border-[#24334b] hover:border-emerald-500/70';
                     headerIconBg = 'bg-emerald-600';
-                    badgeBg = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                    badgeBg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
                   }
 
                   const isPreviewOpen = previewWebviewFolderId === folder.id;
@@ -3378,10 +3378,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   return (
                     <div
                       key={folder.id}
-                      className={`bg-white border-2 ${borderClass} rounded-3xl p-6 shadow-sm space-y-5 transition-all flex flex-col justify-between`}
+                      className={`bg-[#141c2c] border-2 ${borderClass} rounded-3xl p-6 shadow-sm space-y-5 transition-all flex flex-col justify-between`}
                     >
                       <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                        <div className="flex items-start justify-between gap-3 border-b border-[#24334b] pb-4">
                           <div className="flex items-center space-x-3">
                             <div className={`p-3 ${headerIconBg} text-white rounded-2xl shadow-xs shrink-0`}>
                               <FolderLock className="w-6 h-6" />
@@ -3391,12 +3391,12 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                                 <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border uppercase ${badgeBg}`}>
                                   {folder.category || 'School Documents'}
                                 </span>
-                                <span className="text-[10px] font-mono text-slate-500 font-semibold flex items-center space-x-1">
+                                <span className="text-[10px] font-mono text-slate-400 font-semibold flex items-center space-x-1">
                                   <Lock className="w-3 h-3 text-slate-400" />
                                   <span>All Workspaces</span>
                                 </span>
                               </div>
-                              <h3 className="text-lg font-bold text-slate-900 mt-1">
+                              <h3 className="text-lg font-bold text-slate-100 mt-1">
                                 {folder.name}
                               </h3>
                             </div>
@@ -3406,7 +3406,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                             <button
                               type="button"
                               onClick={() => handleOpenEditFolderModal(folder)}
-                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                              className="p-2 text-slate-400 hover:text-indigo-300 hover:bg-[#1c273a] rounded-xl transition-all cursor-pointer"
                               title="Edit Folder Details"
                             >
                               <Edit2 className="w-4 h-4" />
@@ -3414,7 +3414,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                             <button
                               type="button"
                               onClick={() => handleDeleteSchoolFolderConfirm(folder)}
-                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                              className="p-2 text-slate-400 hover:text-rose-300 hover:bg-rose-500/20 rounded-xl transition-all cursor-pointer"
                               title="Delete Folder"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -3423,35 +3423,35 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         </div>
 
                         {folder.description && (
-                          <p className="text-xs text-slate-600 leading-relaxed font-sans bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                          <p className="text-xs text-slate-300 leading-relaxed font-sans bg-[#0d1524] p-3.5 rounded-2xl border border-[#24334b]">
                             {folder.description}
                           </p>
                         )}
 
                         <div className="space-y-1.5 text-xs font-mono">
-                          <div className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
+                          <div className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
                             <span className="flex items-center space-x-1.5">
-                              <Link className="w-3.5 h-3.5 text-indigo-600" />
+                              <Link className="w-3.5 h-3.5 text-indigo-400" />
                               <span>Embedded Google Drive Link</span>
                             </span>
                             {folder.driveId && (
-                              <span className="text-[10px] text-emerald-600 font-bold lowercase">
+                              <span className="text-[10px] text-emerald-400 font-bold lowercase">
                                 Drive ID: {folder.driveId.substring(0, 14)}...
                               </span>
                             )}
                           </div>
-                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between gap-2">
-                            <span className="text-[11px] text-slate-700 truncate max-w-xs font-mono">
+                          <div className="bg-[#0d1524] border border-[#24334b] rounded-xl p-2.5 flex items-center justify-between gap-2">
+                            <span className="text-[11px] text-slate-300 truncate max-w-xs font-mono">
                               {folder.driveUrl}
                             </span>
                             <button
                               type="button"
                               onClick={() => copyFolderLink(folder.driveUrl, folder.id)}
-                              className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200 transition-colors shrink-0 cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-[#1c273a] transition-colors shrink-0 cursor-pointer"
                               title="Copy Link"
                             >
                               {copiedDriveId === folder.id ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
                               ) : (
                                 <Copy className="w-3.5 h-3.5" />
                               )}
@@ -3460,16 +3460,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                      <div className="pt-3 border-t border-[#24334b] flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                         <div className="flex items-center space-x-2">
                           <button
                             type="button"
                             onClick={() =>
                               setPreviewWebviewFolderId(isPreviewOpen ? null : folder.id)
                             }
-                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                            className="px-3 py-1.5 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
                           >
-                            <Eye className="w-3.5 h-3.5 text-slate-600" />
+                            <Eye className="w-3.5 h-3.5 text-slate-300" />
                             <span>{isPreviewOpen ? 'Hide Preview' : 'Preview Webview'}</span>
                           </button>
 
@@ -3478,7 +3478,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                               href={folder.driveUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                              className="px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
                               title="Open in new browser tab"
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
@@ -3494,16 +3494,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
                       {/* Embedded Webview Preview */}
                       {isPreviewOpen && (
-                        <div className="mt-3 pt-3 border-t border-slate-200 space-y-2">
-                          <div className="flex items-center justify-between text-xs font-mono text-slate-600">
+                        <div className="mt-3 pt-3 border-t border-[#24334b] space-y-2">
+                          <div className="flex items-center justify-between text-xs font-mono text-slate-200">
                             <span className="font-bold flex items-center space-x-1.5">
-                              <FolderLock className="w-4 h-4 text-indigo-600" />
+                              <FolderLock className="w-4 h-4 text-indigo-400" />
                               <span>Live Drive Webview ({folder.name})</span>
                             </span>
                             <button
                               type="button"
                               onClick={() => setPreviewWebviewFolderId(null)}
-                              className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                              className="text-slate-400 hover:text-slate-200 cursor-pointer"
                             >
                               <X className="w-4 h-4" />
                             </button>
@@ -3523,20 +3523,20 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 <button
                   type="button"
                   onClick={handleOpenAddFolderModal}
-                  className="border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50/60 hover:bg-indigo-50/40 rounded-3xl p-6 text-center flex flex-col items-center justify-center space-y-3 transition-all cursor-pointer group min-h-[220px]"
+                  className="border-2 border-dashed border-[#24334b] hover:border-indigo-500 bg-[#141c2c]/80 hover:bg-[#182338] rounded-3xl p-6 text-center flex flex-col items-center justify-center space-y-3 transition-all cursor-pointer group min-h-[220px]"
                 >
-                  <div className="p-4 bg-indigo-100 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white rounded-2xl transition-all shadow-xs group-hover:scale-110">
+                  <div className="p-4 bg-indigo-500/20 group-hover:bg-indigo-600 text-indigo-300 group-hover:text-white rounded-2xl transition-all shadow-xs group-hover:scale-110">
                     <FolderPlus className="w-8 h-8" />
                   </div>
                   <div>
-                    <div className="font-bold text-slate-800 group-hover:text-indigo-900 text-sm font-sans">
+                    <div className="font-bold text-slate-100 group-hover:text-indigo-300 text-sm font-sans">
                       Add Another School Folder
                     </div>
-                    <div className="text-xs text-slate-500 font-mono mt-1 max-w-xs">
+                    <div className="text-xs text-slate-400 font-mono mt-1 max-w-xs">
                       Create a shared department repository for INSET, MELCs, Action Research, or Assessment Banks.
                     </div>
                   </div>
-                  <span className="px-3.5 py-1.5 bg-white group-hover:bg-indigo-600 group-hover:text-white text-indigo-700 text-xs font-mono font-bold rounded-xl border border-indigo-200 group-hover:border-indigo-600 transition-all shadow-2xs">
+                  <span className="px-3.5 py-1.5 bg-[#1c273a] group-hover:bg-indigo-600 group-hover:text-white text-indigo-300 text-xs font-mono font-bold rounded-xl border border-[#2d3e57] group-hover:border-indigo-600 transition-all shadow-2xs">
                     + Add Folder Now
                   </span>
                 </button>
@@ -3545,14 +3545,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </div>
 
           {/* Quick Explanatory Guide Card */}
-          <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 text-xs font-mono text-slate-600 space-y-3">
-            <div className="flex items-center space-x-2 text-slate-900 font-bold">
-              <ShieldCheck className="w-4 h-4 text-blue-600" />
+          <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-6 text-xs font-mono text-slate-300 space-y-3">
+            <div className="flex items-center space-x-2 text-slate-100 font-bold">
+              <ShieldCheck className="w-4 h-4 text-blue-400" />
               <span className="uppercase tracking-wider">Coordinator & Administrator Instructions</span>
             </div>
-            <ul className="list-disc pl-5 space-y-1.5 text-slate-600 leading-relaxed">
+            <ul className="list-disc pl-5 space-y-1.5 text-slate-300 leading-relaxed">
               <li>
-                <strong>Visibility:</strong> All configured folders appear permanently anchored in the <strong className="text-slate-800">"My Workspace"</strong> view for every registered faculty member. Teachers cannot delete or rename them.
+                <strong>Visibility:</strong> All configured folders appear permanently anchored in the <strong className="text-slate-100">"My Workspace"</strong> view for every registered faculty member. Teachers cannot delete or rename them.
               </li>
               <li>
                 <strong>Adding Necessary Folders:</strong> Coordinators and administrators can add folders for specific department needs such as Action Research, INSET materials, MELCs curriculum guides, or assessment banks.
@@ -3561,7 +3561,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 <strong>Central Link Management:</strong> Once saved, any new folder or updated Google Drive link immediately updates across all teacher workspaces in real time.
               </li>
               <li>
-                <strong>Drive Permissions:</strong> Ensure shared Google Drive folder permissions are set to <strong className="text-slate-800">"Department of Education (DepEd)"</strong> or <strong className="text-slate-800">"Anyone with the link can view"</strong> so faculty members can open and download files seamlessly.
+                <strong>Drive Permissions:</strong> Ensure shared Google Drive folder permissions are set to <strong className="text-slate-100">"Department of Education (DepEd)"</strong> or <strong className="text-slate-100">"Anyone with the link can view"</strong> so faculty members can open and download files seamlessly.
               </li>
             </ul>
           </div>
@@ -3570,8 +3570,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
       {/* ADD / EDIT SCHOOL FOLDER MODAL */}
       {isAddFolderModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-fadeIn">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-2xl overflow-hidden my-8 animate-scaleUp">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto animate-fadeIn">
+          <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-2xl w-full max-w-2xl overflow-hidden my-8 animate-scaleUp text-slate-100">
             {/* Header */}
             <div className="bg-gradient-to-r from-indigo-900 via-blue-900 to-slate-900 text-white p-6 relative">
               <div className="flex items-center space-x-3">
@@ -3608,9 +3608,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             <form onSubmit={handleSaveSchoolFolder} className="p-6 space-y-5 text-xs font-mono">
               {/* Quick Template Presets for Coordinators (only on create) */}
               {!editingSchoolFolder && (
-                <div className="space-y-2 bg-indigo-50/60 border border-indigo-100 rounded-2xl p-4">
-                  <div className="flex items-center space-x-1.5 text-indigo-900 font-bold text-[11px] uppercase tracking-wider">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                <div className="space-y-2 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-4">
+                  <div className="flex items-center space-x-1.5 text-indigo-300 font-bold text-[11px] uppercase tracking-wider">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
                     <span>Coordinator Quick Suggestions (Click to fill)</span>
                   </div>
                   <div className="flex flex-wrap gap-2 pt-1">
@@ -3621,8 +3621,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         onClick={() => handleSelectPreset(preset)}
                         className={`text-[11px] font-mono px-2.5 py-1 rounded-xl border transition-all text-left flex items-center space-x-1.5 cursor-pointer ${
                           folderFormName === preset.title
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs font-bold'
-                            : 'bg-white hover:bg-indigo-100/80 text-indigo-950 border-indigo-200'
+                            ? 'bg-indigo-600 text-white border-indigo-500 shadow-2xs font-bold'
+                            : 'bg-[#0d1524] hover:bg-[#182338] text-indigo-200 border-[#24334b]'
                         }`}
                       >
                         <span>{preset.title}</span>
@@ -3634,7 +3634,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
               {/* Folder Name */}
               <div>
-                <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1">
                   Folder Name *
                 </label>
                 <input
@@ -3643,19 +3643,19 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   value={folderFormName}
                   onChange={(e) => setFolderFormName(e.target.value)}
                   placeholder="e.g., Action Research & Innovation, INSET Materials, MELCs..."
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white font-mono transition-all"
+                  className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:bg-[#101a2c] font-mono transition-all"
                 />
               </div>
 
               {/* Google Drive Link */}
               <div>
-                <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1 flex items-center justify-between">
                   <span className="flex items-center space-x-1.5">
-                    <Link className="w-3.5 h-3.5 text-indigo-600" />
+                    <Link className="w-3.5 h-3.5 text-indigo-400" />
                     <span>Embedded Google Drive Link *</span>
                   </span>
                   {extractDriveId(folderFormUrl) ? (
-                    <span className="text-[10px] text-emerald-600 font-bold lowercase">
+                    <span className="text-[10px] text-emerald-400 font-bold lowercase">
                       Drive ID: {extractDriveId(folderFormUrl)?.substring(0, 14)}...
                     </span>
                   ) : (
@@ -3668,9 +3668,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   value={folderFormUrl}
                   onChange={(e) => setFolderFormUrl(e.target.value)}
                   placeholder="https://drive.google.com/drive/folders/..."
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white font-mono transition-all"
+                  className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:bg-[#101a2c] font-mono transition-all"
                 />
-                <p className="text-[10px] text-slate-500 mt-1">
+                <p className="text-[10px] text-slate-400 mt-1">
                   Paste the shared Google Drive folder URL. Make sure permissions are set to "Anyone with the link can view".
                 </p>
               </div>
@@ -3678,13 +3678,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               {/* Category & Color Picker Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                  <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1">
                     Folder Category
                   </label>
                   <select
                     value={folderFormCategory}
                     onChange={(e) => setFolderFormCategory(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3 py-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
                   >
                     <option value="Instructional Materials">Instructional Materials</option>
                     <option value="Faculty Development">Faculty Development</option>
@@ -3697,7 +3697,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                  <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1">
                     Theme Color Accent
                   </label>
                   <div className="flex items-center space-x-2 pt-1">
@@ -3715,7 +3715,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         type="button"
                         onClick={() => setFolderFormColor(col.name)}
                         className={`w-7 h-7 rounded-xl ${col.bg} transition-all flex items-center justify-center cursor-pointer ${
-                          folderFormColor === col.name ? 'ring-2 ring-slate-900 ring-offset-2 scale-110' : 'opacity-70 hover:opacity-100'
+                          folderFormColor === col.name ? 'ring-2 ring-indigo-400 ring-offset-2 ring-offset-[#141c2c] scale-110' : 'opacity-70 hover:opacity-100'
                         }`}
                         title={col.name}
                       >
@@ -3728,7 +3728,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
               {/* Description */}
               <div>
-                <label className="block text-[11px] uppercase font-bold text-slate-700 mb-1">
+                <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1">
                   Folder Description & Faculty Instructions
                 </label>
                 <textarea
@@ -3736,16 +3736,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   value={folderFormDesc}
                   onChange={(e) => setFolderFormDesc(e.target.value)}
                   placeholder="Provide notes or guidelines for faculty regarding files and submissions in this folder..."
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white font-mono transition-all resize-none"
+                  className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:bg-[#101a2c] font-mono transition-all resize-none"
                 />
               </div>
 
               {/* Footer Actions */}
-              <div className="pt-4 border-t border-slate-200 flex items-center justify-end space-x-3">
+              <div className="pt-4 border-t border-[#24334b] flex items-center justify-end space-x-3">
                 <button
                   type="button"
                   onClick={() => setIsAddFolderModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  className="px-4 py-2.5 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] font-bold rounded-xl text-xs transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
