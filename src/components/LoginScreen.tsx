@@ -75,12 +75,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       designation: 'Web Developer',
     },
     {
-      id: 'admin-marivic',
-      name: 'Marivic R. Villaluz',
-      email: 'marivic.villaluz@deped.gov.ph',
-      designation: 'School Principal',
-    },
-    {
       id: 'admin-norma',
       name: 'Norma Jabagat',
       email: 'norma.jabagat@deped.gov.ph',
@@ -542,9 +536,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
         role = 'Admin';
         name = registeredAdmin.name;
-        if (cleanEmail.includes('marivic') || cleanEmail.includes('villaluz')) {
-          userDesignation = registeredAdmin.designation || 'School Principal';
-        } else if (cleanEmail.includes('norma') || cleanEmail.includes('jabagat')) {
+        if (cleanEmail.includes('norma') || cleanEmail.includes('jabagat')) {
           userDesignation = registeredAdmin.designation || 'Master Teacher';
         } else if (cleanEmail.includes('coordinator') || registeredAdmin.designation === 'Coordinator') {
           userDesignation = 'Coordinator';

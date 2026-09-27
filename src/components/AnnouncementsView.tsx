@@ -219,12 +219,6 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
       designation: 'Web Developer',
     },
     {
-      id: 'admin-marivic',
-      name: 'Marivic R. Villaluz',
-      email: 'marivic.villaluz@deped.gov.ph',
-      designation: 'School Principal',
-    },
-    {
       id: 'admin-norma',
       name: 'Norma Jabagat',
       email: 'norma.jabagat@deped.gov.ph',

@@ -169,7 +169,36 @@ export const saveAdminsToFirestore = async (adminList: AdminDoc[]) => {
 
 export const deleteAdminFromFirestore = async (email: string) => {
   try {
-    await deleteDoc(doc(db, ADMINS_COL, emailToDocId(email)));
+    const cleanEmail = (email || '').toLowerCase().trim();
+    if (!cleanEmail) return;
+    await deleteDoc(doc(db, ADMINS_COL, emailToDocId(cleanEmail)));
+    await deleteDoc(doc(db, PASSWORDS_COL, emailToDocId(cleanEmail)));
+
+    if (cleanEmail === 'marivic.villaluz@deped.gov.ph') {
+      await deleteDoc(doc(db, ADMINS_COL, 'admin-marivic'));
+    }
+    if (cleanEmail === 'coordinator@deped.gov.ph') {
+      await deleteDoc(doc(db, ADMINS_COL, 'admin-coordinator'));
+    }
+
+    // Query and delete any matching documents in ADMINS_COL by email or name
+    try {
+      const snap = await getDocs(collection(db, ADMINS_COL));
+      for (const d of snap.docs) {
+        const data = d.data();
+        const dEmail = (data.email || '').toLowerCase().trim();
+        const dName = (data.name || '').toLowerCase().trim();
+        if (
+          dEmail === cleanEmail ||
+          (cleanEmail === 'coordinator@deped.gov.ph' && (dName.includes('coordinator') || d.id === 'admin-coordinator')) ||
+          (cleanEmail === 'marivic.villaluz@deped.gov.ph' && (dName.includes('villaluz') || d.id === 'admin-marivic'))
+        ) {
+          await deleteDoc(d.ref);
+        }
+      }
+    } catch {
+      // Continue if query fails
+    }
   } catch (err) {
     console.error('Error deleting admin from Firestore:', err);
   }
@@ -179,14 +208,30 @@ export const subscribeAdmins = (onUpdate: (adminList: AdminDoc[]) => void) => {
   return onSnapshot(collection(db, ADMINS_COL), (snapshot) => {
     let list: AdminDoc[] = snapshot.docs.map((d) => d.data() as AdminDoc);
 
+    // Explicitly filter out deleted admin accounts: SHS Department Coordinator & Marivic R. Villaluz
+    list = list.filter((a) => {
+      const emailLower = (a.email || '').toLowerCase().trim();
+      const nameLower = (a.name || '').toLowerCase().trim();
+      const idLower = (a.id || '').toLowerCase().trim();
+      if (
+        emailLower === 'coordinator@deped.gov.ph' ||
+        emailLower === 'marivic.villaluz@deped.gov.ph' ||
+        idLower === 'admin-coordinator' ||
+        idLower === 'admin-marivic' ||
+        nameLower === 'shs department coordinator' ||
+        nameLower === 'marivic r. villaluz' ||
+        nameLower === 'marivic villaluz'
+      ) {
+        return false;
+      }
+      return true;
+    });
+
     // Ensure required designations for current admins and master admin
     list = list.map((a) => {
       const emailLower = (a.email || '').toLowerCase();
       if (emailLower.includes('johnvic') || a.id === 'admin-master') {
         return { ...a, designation: 'Web Developer' };
-      }
-      if (emailLower.includes('marivic') || emailLower.includes('villaluz') || a.id === 'admin-marivic') {
-        return { ...a, designation: 'School Principal' };
       }
       if (emailLower.includes('norma') || emailLower.includes('jabagat') || a.id === 'admin-norma') {
         return { ...a, designation: 'Master Teacher' };
@@ -197,30 +242,12 @@ export const subscribeAdmins = (onUpdate: (adminList: AdminDoc[]) => void) => {
       return a;
     });
 
-    if (!list.some((a) => (a.email || '').toLowerCase().includes('marivic') || a.id === 'admin-marivic')) {
-      list.push({
-        id: 'admin-marivic',
-        name: 'Marivic R. Villaluz',
-        email: 'marivic.villaluz@deped.gov.ph',
-        designation: 'School Principal',
-      });
-    }
-
     if (!list.some((a) => (a.email || '').toLowerCase().includes('norma') || a.id === 'admin-norma')) {
       list.push({
         id: 'admin-norma',
         name: 'Norma Jabagat',
         email: 'norma.jabagat@deped.gov.ph',
         designation: 'Master Teacher',
-      });
-    }
-
-    if (!list.some((a) => (a.email || '').toLowerCase().includes('coordinator') || a.id === 'admin-coordinator')) {
-      list.push({
-        id: 'admin-coordinator',
-        name: 'SHS Department Coordinator',
-        email: 'coordinator@deped.gov.ph',
-        designation: 'Coordinator',
       });
     }
 
@@ -727,18 +754,6 @@ export const seedInitialAdminIfEmpty = async () => {
 
     await setDoc(doc(db, ADMINS_COL, masterAdminDocId), masterAdminObj, { merge: true });
 
-    // Seed/Update Admin Marivic Villaluz as School Principal
-    const marivicEmail = 'marivic.villaluz@deped.gov.ph';
-    const marivicDocId = emailToDocId(marivicEmail);
-    const marivicObj = {
-      id: 'admin-marivic',
-      name: 'Marivic R. Villaluz',
-      email: marivicEmail,
-      designation: 'School Principal',
-      createdAt: new Date().toISOString(),
-    };
-    await setDoc(doc(db, ADMINS_COL, marivicDocId), marivicObj, { merge: true });
-
     // Seed/Update Admin Norma Jabagat as Master Teacher
     const normaEmail = 'norma.jabagat@deped.gov.ph';
     const normaDocId = emailToDocId(normaEmail);
@@ -751,17 +766,36 @@ export const seedInitialAdminIfEmpty = async () => {
     };
     await setDoc(doc(db, ADMINS_COL, normaDocId), normaObj, { merge: true });
 
-    // Seed/Update Admin Coordinator
-    const coordinatorEmail = 'coordinator@deped.gov.ph';
-    const coordinatorDocId = emailToDocId(coordinatorEmail);
-    const coordinatorObj = {
-      id: 'admin-coordinator',
-      name: 'SHS Department Coordinator',
-      email: coordinatorEmail,
-      designation: 'Coordinator',
-      createdAt: new Date().toISOString(),
-    };
-    await setDoc(doc(db, ADMINS_COL, coordinatorDocId), coordinatorObj, { merge: true });
+    // Ensure deleted admins (Marivic R. Villaluz & SHS Department Coordinator) are purged from Firestore
+    try {
+      await deleteDoc(doc(db, ADMINS_COL, emailToDocId('marivic.villaluz@deped.gov.ph')));
+      await deleteDoc(doc(db, ADMINS_COL, 'admin-marivic'));
+      await deleteDoc(doc(db, PASSWORDS_COL, emailToDocId('marivic.villaluz@deped.gov.ph')));
+
+      await deleteDoc(doc(db, ADMINS_COL, emailToDocId('coordinator@deped.gov.ph')));
+      await deleteDoc(doc(db, ADMINS_COL, 'admin-coordinator'));
+      await deleteDoc(doc(db, PASSWORDS_COL, emailToDocId('coordinator@deped.gov.ph')));
+
+      // Scan and delete any remaining document in ADMINS_COL matching the deleted admins
+      const existingAdminsSnap = await getDocs(collection(db, ADMINS_COL));
+      for (const d of existingAdminsSnap.docs) {
+        const dData = d.data();
+        const dEmail = (dData.email || '').toLowerCase().trim();
+        const dName = (dData.name || '').toLowerCase().trim();
+        if (
+          dEmail === 'coordinator@deped.gov.ph' ||
+          dEmail === 'marivic.villaluz@deped.gov.ph' ||
+          dName.includes('shs department coordinator') ||
+          (dName.includes('marivic') && dName.includes('villaluz')) ||
+          d.id === 'admin-marivic' ||
+          d.id === 'admin-coordinator'
+        ) {
+          await deleteDoc(d.ref);
+        }
+      }
+    } catch (e) {
+      console.warn('Purged deleted admins check notice:', e);
+    }
 
     // Seed master admin password into Firebase settings if not already present
     const adminPassSnap = await getDoc(doc(db, SETTINGS_COL, 'svnhs_admin_password'));

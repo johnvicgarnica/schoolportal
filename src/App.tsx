@@ -68,6 +68,19 @@ export function App() {
     if (saved) {
       try {
         const user = JSON.parse(saved);
+        if (user && user.email) {
+          const emailLower = (user.email || '').toLowerCase().trim();
+          const nameLower = (user.name || '').toLowerCase().trim();
+          if (
+            emailLower === 'coordinator@deped.gov.ph' ||
+            emailLower === 'marivic.villaluz@deped.gov.ph' ||
+            nameLower.includes('shs department coordinator') ||
+            (nameLower.includes('marivic') && nameLower.includes('villaluz'))
+          ) {
+            localStorage.removeItem('svnhs_user_session');
+            return null;
+          }
+        }
         if (user && user.role === 'Faculty' && user.email) {
           if (user.email.includes('@deped.gov.ph')) {
             user.name = user.email.split('@deped.gov.ph')[0];
@@ -79,8 +92,6 @@ export function App() {
           const emailLower = (user.email || '').toLowerCase();
           if (emailLower.includes('johnvic') || emailLower === 'garjohn@deped.gov.ph' || emailLower === 'johnvicgarnica1@gmail.com') {
             user.designation = 'Web Developer';
-          } else if (emailLower.includes('marivic') || emailLower.includes('villaluz')) {
-            user.designation = 'School Principal';
           } else if (emailLower.includes('norma') || emailLower.includes('jabagat')) {
             user.designation = 'Master Teacher';
           } else if (emailLower.includes('coordinator')) {

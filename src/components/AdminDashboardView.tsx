@@ -585,12 +585,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       designation: 'Web Developer',
     },
     {
-      id: 'admin-marivic',
-      name: 'Marivic R. Villaluz',
-      email: 'marivic.villaluz@deped.gov.ph',
-      designation: 'School Principal',
-    },
-    {
       id: 'admin-norma',
       name: 'Norma Jabagat',
       email: 'norma.jabagat@deped.gov.ph',
@@ -2952,7 +2946,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   required
                   value={newAdminName}
                   onChange={(e) => setNewAdminName(e.target.value)}
-                  placeholder="e.g., Marivic Villaluz"
+                  placeholder="e.g., Norma Jabagat"
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
                 />
               </div>
@@ -2966,7 +2960,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   required
                   value={newAdminEmail}
                   onChange={(e) => setNewAdminEmail(e.target.value)}
-                  placeholder="e.g., marivic.villaluz@deped.gov.ph"
+                  placeholder="e.g., norma.jabagat@deped.gov.ph"
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
                 />
               </div>
