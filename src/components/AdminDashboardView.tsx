@@ -37,6 +37,10 @@ import {
   deleteSchoolPermanentFolderFromFirestore,
   INITIAL_SCHOOL_PERMANENT_FOLDERS,
   extractDriveId,
+  PasswordResetReqDoc,
+  subscribePasswordResetRequests,
+  updatePasswordResetRequestStatus,
+  deletePasswordResetRequestFromFirestore,
 } from '../lib/firebase';
 import {
   Megaphone,
@@ -630,6 +634,52 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  // Password Reset Requests (svnhs304868) State for Master Admin
+  const [passwordResetRequests, setPasswordResetRequests] = useState<PasswordResetReqDoc[]>([]);
+  const [revealedResetPasswords, setRevealedResetPasswords] = useState<Record<string, boolean>>({});
+
+  const toggleRevealResetPassword = (id: string) => {
+    setRevealedResetPasswords((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const pendingPasswordResets = useMemo(() => {
+    return passwordResetRequests.filter((r) => r.status === 'pending');
+  }, [passwordResetRequests]);
+
+  const handleAcceptPasswordReset = async (req: PasswordResetReqDoc) => {
+    try {
+      // 1. Save new password into userPasswords collection in Firestore
+      await saveUserPasswordToFirestore(req.email, req.requestedNewPassword, req.role);
+      // 2. Mark request as approved
+      await updatePasswordResetRequestStatus(req.id, 'approved', currentUser.name || 'Master Admin');
+      showToast(`⚡ Password change approved for ${req.name} (${req.email})! New password is now active.`);
+    } catch (err) {
+      console.error('Error accepting password reset:', err);
+      showToast('⚠️ Error accepting password reset request.');
+    }
+  };
+
+  const handleRejectPasswordReset = async (req: PasswordResetReqDoc) => {
+    if (window.confirm(`Decline password change request for ${req.name} (${req.email})?`)) {
+      try {
+        await updatePasswordResetRequestStatus(req.id, 'rejected', currentUser.name || 'Master Admin');
+        showToast(`Password change request for ${req.email} has been declined.`);
+      } catch (err) {
+        console.error('Error declining password reset:', err);
+        showToast('⚠️ Error declining password reset request.');
+      }
+    }
+  };
+
+  const handleDeletePasswordResetRecord = async (requestId: string) => {
+    try {
+      await deletePasswordResetRequestFromFirestore(requestId);
+      showToast('Password reset record removed.');
+    } catch {
+      showToast('⚠️ Error removing record.');
+    }
+  };
+
   // Real-Time Firebase Subscriptions
   useEffect(() => {
     const unsubFaculty = subscribeFaculty((list) => {
@@ -666,6 +716,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       }
     });
 
+    const unsubPasswordResets = subscribePasswordResetRequests((reqs) => {
+      setPasswordResetRequests(reqs || []);
+    });
+
     return () => {
       unsubFaculty();
       unsubAdmins();
@@ -673,6 +727,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       unsubAdminReq();
       unsubPasswords();
       unsubSettings();
+      unsubPasswordResets();
     };
   }, []);
 
@@ -1244,9 +1299,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               >
                 <Key className="w-4 h-4 text-emerald-200" />
                 <span>Faculty & Admin Accounts & Passwords</span>
-                {facultyRequests.length + adminRequests.length > 0 ? (
-                  <span className="bg-rose-500 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full animate-bounce ml-1">
-                    {facultyRequests.length + adminRequests.length} Pending
+                {facultyRequests.length + adminRequests.length + pendingPasswordResets.length > 0 ? (
+                  <span className="bg-rose-500 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full animate-bounce ml-1 flex items-center space-x-1">
+                    <span>{facultyRequests.length + adminRequests.length + pendingPasswordResets.length} Pending</span>
+                    {pendingPasswordResets.length > 0 && (
+                      <span className="bg-amber-400 text-slate-900 px-1 rounded text-[9px] font-black">
+                        {pendingPasswordResets.length} Resets
+                      </span>
+                    )}
                   </span>
                 ) : (
                   <span className="bg-emerald-900/60 text-emerald-100 border border-emerald-400/40 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ml-1">
@@ -1308,6 +1368,116 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       {/* SUB-TAB 1: FACULTY & ADMIN REAL-TIME PASSWORD CONTROL & ACCOUNTS (RESTRICTED TO MASTER ADMIN) */}
       {adminSubTab === 'passwords' && isMasterAdmin && (
         <div className="space-y-6">
+
+          {/* Pending Password Reset Requests (Triggered by Temporary Password svnhs304868) */}
+          <div className="bg-white border-2 border-emerald-500/40 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-xs font-mono font-bold text-slate-900 uppercase tracking-wider">
+                      Pending Password Change Requests
+                    </h3>
+                    {pendingPasswordResets.length > 0 && (
+                      <span className="bg-emerald-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full animate-bounce">
+                        {pendingPasswordResets.length} To Review
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                    Users who submitted password change requests via authorized temporary authentication. Review and click "Accept" to activate their new password.
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-xs font-mono text-slate-500">
+                Pending Actions: <span className="font-bold text-emerald-700">{pendingPasswordResets.length}</span>
+              </div>
+            </div>
+
+            {pendingPasswordResets.length === 0 ? (
+              <div className="p-6 bg-emerald-50/40 border border-dashed border-emerald-200 rounded-xl text-center text-xs font-mono text-emerald-800 flex items-center justify-center space-x-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>No pending password reset requests. All faculty and admin credentials are up to date.</span>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 text-[10px] uppercase tracking-wider">
+                    <tr>
+                      <th className="p-3">User Name</th>
+                      <th className="p-3">DepEd Email</th>
+                      <th className="p-3">Role</th>
+                      <th className="p-3">Requested New Password</th>
+                      <th className="p-3">Requested Date</th>
+                      <th className="p-3 text-right">Master Admin Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {pendingPasswordResets.map((req) => (
+                      <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-bold text-slate-900 flex items-center space-x-2">
+                          <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>{req.name}</span>
+                        </td>
+                        <td className="p-3 text-slate-700">{req.email}</td>
+                        <td className="p-3">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                            req.role === 'Admin'
+                              ? 'bg-amber-50 text-amber-900 border-amber-200'
+                              : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                          }`}>
+                            {req.role}
+                          </span>
+                        </td>
+                        <td className="p-3 font-mono">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              {revealedResetPasswords[req.id] ? req.requestedNewPassword : '••••••••'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => toggleRevealResetPassword(req.id)}
+                              className="text-slate-500 hover:text-slate-900 cursor-pointer p-1 rounded hover:bg-slate-200/50"
+                              title="Toggle reveal password"
+                            >
+                              {revealedResetPasswords[req.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="p-3 text-slate-500 text-[11px]">{req.requestedAt}</td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => handleRejectPasswordReset(req)}
+                              className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center space-x-1"
+                              title="Decline password change"
+                            >
+                              <UserX className="w-3.5 h-3.5" />
+                              <span>Decline</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAcceptPasswordReset(req)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-all cursor-pointer flex items-center space-x-1"
+                              title="Accept & Activate new password"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Accept & Activate</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
 
           {/* Pending Faculty Account Registration Requests */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">

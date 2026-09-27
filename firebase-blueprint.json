@@ -256,6 +256,23 @@
         "updatedBy": { "type": "string" }
       },
       "required": ["id", "name", "driveUrl", "isPermanent"]
+    },
+    "passwordResetRequests": {
+      "title": "Password Reset Requests",
+      "description": "User password reset requests using temporary password awaiting Master Admin approval",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "requestedNewPassword": { "type": "string" },
+        "requestedAt": { "type": "string" },
+        "status": { "type": "string" },
+        "reviewedAt": { "type": "string" },
+        "reviewedBy": { "type": "string" }
+      },
+      "required": ["id", "email", "requestedNewPassword", "status"]
     }
   }
 }

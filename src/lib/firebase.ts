@@ -8,6 +8,7 @@ import {
   getDocs,
   setDoc,
   deleteDoc,
+  updateDoc,
   onSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -49,12 +50,25 @@ export interface RegistrationReqDoc {
   status: string;
 }
 
+export interface PasswordResetReqDoc {
+  id: string;
+  email: string;
+  name: string;
+  role: 'Faculty' | 'Admin';
+  requestedNewPassword: string;
+  requestedAt: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedAt?: string;
+  reviewedBy?: string;
+}
+
 // Collections
 const FACULTY_COL = 'faculty';
 const ADMINS_COL = 'admins';
 const FACULTY_REQ_COL = 'facultyRequests';
 const ADMIN_REQ_COL = 'adminRequests';
 const PASSWORDS_COL = 'userPasswords';
+const PASSWORD_RESET_REQ_COL = 'passwordResetRequests';
 const SETTINGS_COL = 'settings';
 const ANNOUNCEMENTS_COL = 'announcements';
 const DRIVE_FOLDERS_COL = 'driveFolders';
@@ -275,6 +289,51 @@ export const subscribeAdminRequests = (onUpdate: (requests: RegistrationReqDoc[]
     onUpdate(list);
   }, (err) => {
     console.error('Error subscribing to admin requests collection:', err);
+  });
+};
+
+// 4.5. PASSWORD RESET REQUESTS (WITH TEMPORARY KEY svnhs304868)
+export const savePasswordResetRequestToFirestore = async (request: PasswordResetReqDoc) => {
+  try {
+    await setDoc(doc(db, PASSWORD_RESET_REQ_COL, request.id), {
+      ...request,
+      email: request.email.toLowerCase(),
+    }, { merge: true });
+  } catch (err) {
+    console.error('Error saving password reset request to Firestore:', err);
+  }
+};
+
+export const deletePasswordResetRequestFromFirestore = async (requestId: string) => {
+  try {
+    await deleteDoc(doc(db, PASSWORD_RESET_REQ_COL, requestId));
+  } catch (err) {
+    console.error('Error deleting password reset request from Firestore:', err);
+  }
+};
+
+export const updatePasswordResetRequestStatus = async (
+  requestId: string,
+  status: 'approved' | 'rejected',
+  reviewedBy: string = 'Master Admin'
+) => {
+  try {
+    await updateDoc(doc(db, PASSWORD_RESET_REQ_COL, requestId), {
+      status,
+      reviewedAt: new Date().toISOString(),
+      reviewedBy,
+    });
+  } catch (err) {
+    console.error('Error updating password reset request status:', err);
+  }
+};
+
+export const subscribePasswordResetRequests = (onUpdate: (requests: PasswordResetReqDoc[]) => void) => {
+  return onSnapshot(collection(db, PASSWORD_RESET_REQ_COL), (snapshot) => {
+    const list: PasswordResetReqDoc[] = snapshot.docs.map((d) => d.data() as PasswordResetReqDoc);
+    onUpdate(list);
+  }, (err) => {
+    console.error('Error subscribing to password reset requests collection:', err);
   });
 };
 

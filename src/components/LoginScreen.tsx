@@ -15,6 +15,9 @@ import {
   saveFacultyRequestsToFirestore,
   saveAdminRequestsToFirestore,
   seedInitialAdminIfEmpty,
+  PasswordResetReqDoc,
+  savePasswordResetRequestToFirestore,
+  subscribePasswordResetRequests,
 } from '../lib/firebase';
 import {
   Lock,
@@ -91,6 +94,27 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [masterFacultyPassword, setMasterFacultyPassword] = useState<string>('shs304868');
   const [masterAdminPassword, setMasterAdminPassword] = useState<string>('garjohn@1995');
   const [masterAdminEmail, setMasterAdminEmail] = useState<string>('johnvic.garnica@deped.gov.ph');
+
+  // Forgot Password / Temporary Password ("svnhs304868") Dialog State
+  const TEMPORARY_PASSWORD = 'svnhs304868';
+  const [isForgotPassOpen, setIsForgotPassOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotTempPass, setForgotTempPass] = useState('');
+  const [showForgotTempPass, setShowForgotTempPass] = useState(false);
+  const [forgotNewPass, setForgotNewPass] = useState('');
+  const [forgotConfirmPass, setForgotConfirmPass] = useState('');
+  const [showForgotNewPass, setShowForgotNewPass] = useState(false);
+  const [showForgotConfirmPass, setShowForgotConfirmPass] = useState(false);
+  const [isTempVerified, setIsTempVerified] = useState(false);
+  const [forgotError, setForgotError] = useState<string | null>(null);
+  const [forgotSuccess, setForgotSuccess] = useState(false);
+  const [forgotUserFound, setForgotUserFound] = useState<{
+    name: string;
+    email: string;
+    role: 'Faculty' | 'Admin';
+    department?: string;
+  } | null>(null);
+  const [passwordResetRequests, setPasswordResetRequests] = useState<PasswordResetReqDoc[]>([]);
 
   // Load important announcements posted by Admin
   const [importantAnnouncements, setImportantAnnouncements] = useState<Announcement[]>(() => {
@@ -170,6 +194,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       }
     });
 
+    // 8. Subscribe to Password Reset Requests
+    const unsubPasswordResets = subscribePasswordResetRequests((reqs) => {
+      setPasswordResetRequests(reqs || []);
+    });
+
     return () => {
       unsubAnnouncements();
       unsubFaculty();
@@ -178,6 +207,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       unsubAdminReq();
       unsubPasswords();
       unsubSettings();
+      unsubPasswordResets();
     };
   }, []);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
@@ -215,6 +245,156 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     setSuccessMsg(null);
   };
 
+  // Open Forgot Password Dialog
+  const handleOpenForgotPassword = (initialEmail?: string) => {
+    const targetEmail = (initialEmail || email || '').trim();
+    setForgotEmail(targetEmail);
+    setForgotTempPass('');
+    setForgotNewPass('');
+    setForgotConfirmPass('');
+    setIsTempVerified(false);
+    setForgotError(null);
+    setForgotSuccess(false);
+
+    if (targetEmail) {
+      const cleanTarget = targetEmail.toLowerCase();
+      const adminMatch = adminList.find((a) => a.email.toLowerCase() === cleanTarget);
+      const facultyMatch = facultyList.find((f) => f.email.toLowerCase() === cleanTarget);
+      const isMaster = cleanTarget === masterAdminEmail.toLowerCase() || cleanTarget === 'johnvic.garnica@deped.gov.ph';
+
+      if (isMaster || adminMatch) {
+        setForgotUserFound({
+          name: adminMatch ? adminMatch.name : 'Administrator',
+          email: cleanTarget,
+          role: 'Admin',
+          department: 'Administration',
+        });
+      } else if (facultyMatch) {
+        setForgotUserFound({
+          name: facultyMatch.name,
+          email: cleanTarget,
+          role: 'Faculty',
+          department: facultyMatch.department,
+        });
+      }
+    } else {
+      setForgotUserFound(null);
+    }
+
+    setIsForgotPassOpen(true);
+  };
+
+  // Verify Temporary Password ("svnhs304868")
+  const handleVerifyTemporaryPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError(null);
+
+    let cleanEmail = forgotEmail.trim().toLowerCase();
+    if (!cleanEmail) {
+      setForgotError('Please enter your official DepEd email address.');
+      return;
+    }
+    if (!cleanEmail.endsWith('@deped.gov.ph')) {
+      cleanEmail += '@deped.gov.ph';
+    }
+
+    const cleanTemp = forgotTempPass.trim();
+    if (!cleanTemp) {
+      setForgotError('Please enter the temporary password.');
+      return;
+    }
+
+    if (cleanTemp !== TEMPORARY_PASSWORD) {
+      setForgotError('Invalid temporary password. Please enter the authorized temporary password.');
+      return;
+    }
+
+    // Match registered user details
+    const facultyMatch = facultyList.find((f) => f.email.toLowerCase() === cleanEmail);
+    const adminMatch = adminList.find((a) => a.email.toLowerCase() === cleanEmail);
+    const isMaster = cleanEmail === masterAdminEmail.toLowerCase() || cleanEmail === 'johnvic.garnica@deped.gov.ph';
+
+    let userObj: { name: string; email: string; role: 'Faculty' | 'Admin'; department?: string } | null = null;
+    if (isMaster || adminMatch) {
+      userObj = {
+        name: adminMatch ? adminMatch.name : 'Administrator',
+        email: cleanEmail,
+        role: 'Admin',
+        department: 'Administration',
+      };
+    } else if (facultyMatch) {
+      userObj = {
+        name: facultyMatch.name,
+        email: cleanEmail,
+        role: 'Faculty',
+        department: facultyMatch.department,
+      };
+    } else {
+      userObj = {
+        name: cleanEmail.split('@')[0],
+        email: cleanEmail,
+        role: loginMode === 'admin' ? 'Admin' : 'Faculty',
+        department: loginMode === 'admin' ? 'Administration' : 'Senior High School Dept.',
+      };
+    }
+
+    setForgotEmail(cleanEmail);
+    setForgotUserFound(userObj);
+    setIsTempVerified(true);
+    setForgotError(null);
+  };
+
+  // Submit New Password for Master Admin Approval
+  const handleSubmitNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError(null);
+
+    const cleanNew = forgotNewPass.trim();
+    const cleanConfirm = forgotConfirmPass.trim();
+
+    if (!cleanNew) {
+      setForgotError('Please enter your new password.');
+      return;
+    }
+    if (cleanNew.length < 4) {
+      setForgotError('Password must be at least 4 characters long.');
+      return;
+    }
+    if (cleanNew === TEMPORARY_PASSWORD) {
+      setForgotError('New password cannot be the temporary password. Please create a personalized password.');
+      return;
+    }
+    if (cleanNew !== cleanConfirm) {
+      setForgotError('New password and confirm password do not match.');
+      return;
+    }
+
+    const cleanEmail = forgotEmail.trim().toLowerCase();
+    const reqDoc: PasswordResetReqDoc = {
+      id: `reset-${Date.now()}`,
+      email: cleanEmail,
+      name: forgotUserFound?.name || cleanEmail.split('@')[0],
+      role: forgotUserFound?.role || (loginMode === 'admin' ? 'Admin' : 'Faculty'),
+      requestedNewPassword: cleanNew,
+      requestedAt: new Date().toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      status: 'pending',
+    };
+
+    try {
+      await savePasswordResetRequestToFirestore(reqDoc);
+      setForgotSuccess(true);
+      setSuccessMsg(`✅ Password reset request submitted for "${cleanEmail}"! Master Admin (John Vic Garnica) has been notified to accept your new password.`);
+    } catch {
+      setForgotError('Failed to submit password reset request. Please check network connection.');
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -231,6 +411,46 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     // Email domain validation for DepEd
     if (!cleanEmail.endsWith('@deped.gov.ph')) {
       setErrorMsg('Access Denied: Only official DepEd email addresses (@deped.gov.ph) are authorized.');
+      return;
+    }
+
+    // INTERCEPTION: If user entered the temporary password "svnhs304868", prompt the Change Password dialog
+    if (cleanPassword === TEMPORARY_PASSWORD) {
+      const registeredAdmin = adminList.find((a) => a.email.toLowerCase() === cleanEmail);
+      const registeredFaculty = facultyList.find((f) => f.email.toLowerCase() === cleanEmail);
+      const isMaster = cleanEmail === masterAdminEmail.toLowerCase() || cleanEmail === 'johnvic.garnica@deped.gov.ph';
+
+      let matchedUser: { name: string; email: string; role: 'Faculty' | 'Admin'; department?: string } | null = null;
+      if (isMaster || registeredAdmin) {
+        matchedUser = {
+          name: registeredAdmin ? registeredAdmin.name : 'Administrator',
+          email: cleanEmail,
+          role: 'Admin',
+          department: 'Administration',
+        };
+      } else if (registeredFaculty) {
+        matchedUser = {
+          name: registeredFaculty.name,
+          email: cleanEmail,
+          role: 'Faculty',
+          department: registeredFaculty.department,
+        };
+      } else {
+        matchedUser = {
+          name: cleanEmail.split('@')[0],
+          email: cleanEmail,
+          role: loginMode === 'admin' ? 'Admin' : 'Faculty',
+          department: loginMode === 'admin' ? 'Administration' : 'Senior High School Dept.',
+        };
+      }
+
+      setForgotEmail(cleanEmail);
+      setForgotTempPass(TEMPORARY_PASSWORD);
+      setForgotUserFound(matchedUser);
+      setIsTempVerified(true);
+      setForgotError(null);
+      setForgotSuccess(false);
+      setIsForgotPassOpen(true);
       return;
     }
 
@@ -272,6 +492,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         const requiredPass = adminPasswords[cleanEmail] || masterAdminPassword;
 
         if (cleanPassword !== requiredPass) {
+          const pendingReset = passwordResetRequests.find(
+            (r) => r.email.toLowerCase() === cleanEmail && r.status === 'pending'
+          );
+          if (pendingReset) {
+            setErrorMsg(`Password Change Pending: A password reset request for "${cleanEmail}" is awaiting Master Admin acceptance. Once Master Admin accepts, your new password will be activated.`);
+            return;
+          }
           setErrorMsg('Invalid Admin Password. Access denied.');
           return;
         }
@@ -311,7 +538,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       const requiredPassword = facultyPasswords[cleanEmail] || masterFacultyPassword;
 
       if (cleanPassword !== requiredPassword) {
-        setErrorMsg('Invalid Faculty Password. Please re-enter or contact your Department Admin if your password was updated.');
+        const pendingReset = passwordResetRequests.find(
+          (r) => r.email.toLowerCase() === cleanEmail && r.status === 'pending'
+        );
+        if (pendingReset) {
+          setErrorMsg(`Password Change Pending: A password reset request for "${cleanEmail}" is awaiting Master Admin acceptance. Once Master Admin accepts, your new password will be activated.`);
+          return;
+        }
+        setErrorMsg('Invalid Faculty Password. Please re-enter or click "Forgot password?" to reset your password.');
         return;
       }
 
@@ -737,10 +971,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               </label>
               <button
                 type="button"
-                className="text-[11px] font-mono text-emerald-700 hover:underline cursor-pointer font-bold"
-                onClick={() => alert('Forgot password? Please contact your ICT Coordinator or Department Admin.')}
+                className="text-[11px] font-mono text-emerald-700 hover:text-emerald-900 hover:underline cursor-pointer font-bold flex items-center space-x-1"
+                onClick={() => handleOpenForgotPassword(email)}
               >
-                Password help
+                <Key className="w-3.5 h-3.5 text-amber-600" />
+                <span>Forgot password?</span>
               </button>
             </div>
             <div className="relative">
@@ -772,6 +1007,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
               </div>
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 pt-0.5">
+              <span>Official DepEd Portal</span>
+              <button
+                type="button"
+                onClick={() => handleOpenForgotPassword(email)}
+                className="text-emerald-700 hover:text-emerald-900 font-bold underline cursor-pointer"
+              >
+                Reset Password
+              </button>
             </div>
           </div>
 
@@ -1349,6 +1594,240 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   >
                     <Send className="w-3.5 h-3.5 text-white" />
                     <span>Submit Admin Application</span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: FORGOT PASSWORD & TEMPORARY PASSWORD DIALOG */}
+      {isForgotPassOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white border-2 border-emerald-500 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 font-mono relative text-slate-800">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center space-x-2.5 text-emerald-800">
+                <div className="p-2 bg-emerald-50 rounded-xl border border-emerald-200">
+                  <Key className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {!isTempVerified ? 'Reset Password Authentication' : 'Change Current Password'}
+                  </h3>
+                  <p className="text-[10px] text-slate-500 font-sans">
+                    {!isTempVerified
+                      ? 'Enter official temporary password to authenticate'
+                      : 'Set your new password for Master Admin approval'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsForgotPassOpen(false)}
+                className="p-1 hover:bg-slate-100 text-slate-500 rounded-lg cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Error Message */}
+            {forgotError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-mono rounded-xl flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{forgotError}</span>
+              </div>
+            )}
+
+            {/* Success View */}
+            {forgotSuccess ? (
+              <div className="p-6 bg-emerald-50 border border-emerald-300 text-emerald-900 text-center rounded-2xl space-y-3">
+                <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto animate-bounce" />
+                <h4 className="font-bold text-sm text-slate-900">Password Change Request Submitted!</h4>
+                <p className="text-xs text-emerald-800 leading-relaxed font-sans">
+                  Your request to update the password for <span className="font-bold text-slate-900 font-mono">{forgotEmail}</span> has been forwarded to the Master Admin (<strong>John Vic Garnica</strong>).
+                </p>
+                <div className="text-[11px] text-emerald-700 pt-2 border-t border-emerald-200 font-medium font-sans">
+                  The Master Admin will verify and accept your request in the Admin Dashboard. Once accepted, you can log in immediately with your new password!
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsForgotPassOpen(false);
+                    setPassword('');
+                  }}
+                  className="w-full mt-3 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+                >
+                  Return to Login
+                </button>
+              </div>
+            ) : !isTempVerified ? (
+              /* STEP 1: Enter DepEd Email & Temporary Password (svnhs304868) */
+              <form onSubmit={handleVerifyTemporaryPassword} className="space-y-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-900 space-y-1">
+                  <div className="flex items-center space-x-1.5 font-bold">
+                    <ShieldCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>Temporary Password Protocol</span>
+                  </div>
+                  <p className="font-sans leading-relaxed text-[10.5px]">
+                    To change your current password, enter your official DepEd email and the authorized temporary password provided for your account.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+                    <Mail className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Official DepEd Email Address</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    placeholder="name@deped.gov.ph"
+                    required
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-emerald-600 font-mono font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+                      <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Temporary Password</span>
+                    </label>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showForgotTempPass ? 'text' : 'password'}
+                      value={forgotTempPass}
+                      onChange={(e) => setForgotTempPass(e.target.value)}
+                      placeholder="Enter temporary password..."
+                      required
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-emerald-600 font-mono font-medium"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotTempPass(!showForgotTempPass)}
+                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
+                    >
+                      {showForgotTempPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setIsForgotPassOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5"
+                  >
+                    <Key className="w-3.5 h-3.5 text-white" />
+                    <span>Verify Temporary Key</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* STEP 2: Change Current Password Form */
+              <form onSubmit={handleSubmitNewPassword} className="space-y-4">
+                {/* User Verification Banner */}
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-emerald-900 flex items-center space-x-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{forgotUserFound?.name || forgotEmail}</span>
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-200/80 text-emerald-900 font-bold">
+                      {forgotUserFound?.role || 'Faculty'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-emerald-800 font-mono">
+                    {forgotEmail} • Temporary Key Verified ✅
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+                    <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>New Password</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showForgotNewPass ? 'text' : 'password'}
+                      value={forgotNewPass}
+                      onChange={(e) => setForgotNewPass(e.target.value)}
+                      placeholder="Enter new password (min. 4 characters)..."
+                      required
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-emerald-600 font-mono font-medium"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotNewPass(!showForgotNewPass)}
+                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
+                    >
+                      {showForgotNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+                    <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Confirm New Password</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showForgotConfirmPass ? 'text' : 'password'}
+                      value={forgotConfirmPass}
+                      onChange={(e) => setForgotConfirmPass(e.target.value)}
+                      placeholder="Confirm new password..."
+                      required
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-emerald-600 font-mono font-medium"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotConfirmPass(!showForgotConfirmPass)}
+                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
+                    >
+                      {showForgotConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Master Admin Approval Notice */}
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[10.5px] text-slate-600 space-y-1 font-sans">
+                  <div className="flex items-center space-x-1 font-bold text-amber-800 font-mono text-[11px]">
+                    <Clock className="w-3 h-3 text-amber-600" />
+                    <span>Master Admin Approval Required:</span>
+                  </div>
+                  <p>
+                    When you submit this request, it will be placed in the Master Admin Control Panel. <strong>Master Admin (John Vic Garnica)</strong> will review and accept your password change. Once accepted, your new password is immediately active.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsTempVerified(false);
+                      setForgotTempPass('');
+                    }}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5 text-white" />
+                    <span>Submit for Admin Approval</span>
                   </button>
                 </div>
               </form>

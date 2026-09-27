@@ -203,3 +203,15 @@ export interface FacultySubmissionRecord {
   notes?: string;
 }
 
+export interface PasswordResetRequest {
+  id: string;
+  email: string;
+  name: string;
+  role: 'Faculty' | 'Admin';
+  requestedNewPassword: string;
+  requestedAt: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedAt?: string;
+  reviewedBy?: string;
+}
+
