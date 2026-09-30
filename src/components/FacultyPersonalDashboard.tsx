@@ -5,7 +5,13 @@ import {
   UserProfile,
   SchoolPermanentFolder,
 } from '../types';
-import { extractDriveId, getStoredSchoolPermanentFolders, subscribeSchoolPermanentFolders } from '../lib/firebase';
+import {
+  extractDriveId,
+  getStoredSchoolPermanentFolders,
+  subscribeSchoolPermanentFolders,
+  getStoredFaculty,
+  subscribeFaculty,
+} from '../lib/firebase';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
 import {
   Folder,
@@ -44,6 +50,8 @@ import {
   Maximize2,
   Lock,
   FolderLock,
+  FileCheck2,
+  GraduationCap,
 } from 'lucide-react';
 
 interface FacultyPersonalDashboardProps {
@@ -58,6 +66,7 @@ interface FacultyPersonalDashboardProps {
   onDeleteFile: (id: string) => void;
   onNavigateToRepository?: () => void;
   onNavigateToAdminDashboard?: () => void;
+  onNavigateToSubmissionReport?: () => void;
 }
 
 const CATEGORY_OPTIONS = [
@@ -93,6 +102,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   onDeleteFile,
   onNavigateToRepository,
   onNavigateToAdminDashboard,
+  onNavigateToSubmissionReport,
 }) => {
   // Permanent School-Wide Folders state ("SCHOOL FORMS" and "SCHOOL DOCUMENTS")
   const [livePermanentFolders, setLivePermanentFolders] = useState<SchoolPermanentFolder[]>(() => {
@@ -129,6 +139,57 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       (f) => (f.facultyEmail || '').toLowerCase().trim() === userEmail
     );
   }, [facultyFiles, userEmail]);
+
+  // Live Faculty Directory to resolve real-time advisoryRole
+  const [liveAdvisoryRole, setLiveAdvisoryRole] = useState<'Class Adviser' | 'Non-Adviser'>(() => {
+    const roleClean = (currentUser.advisoryRole || '').toLowerCase().trim();
+    if (roleClean === 'class adviser' || roleClean === 'class-adviser' || roleClean === 'adviser') return 'Class Adviser';
+    const stored = getStoredFaculty();
+    const cleanEmail = (currentUser.email || '').toLowerCase().trim();
+    const match = stored.find((f) => (f.email || '').toLowerCase().trim() === cleanEmail);
+    if (match?.advisoryRole) return match.advisoryRole;
+    const DEMO_ADVISER_EMAILS = [
+      'johnvic.garnica@deped.gov.ph',
+      'maria.santos@deped.gov.ph',
+      'roberto.delacruz@deped.gov.ph',
+      'elena.bautista@deped.gov.ph',
+    ];
+    if (DEMO_ADVISER_EMAILS.includes(cleanEmail)) return 'Class Adviser';
+    return 'Non-Adviser';
+  });
+
+  useEffect(() => {
+    const unsub = subscribeFaculty((list) => {
+      const match = list.find((f) => (f.email || '').toLowerCase().trim() === userEmail);
+      if (match && match.advisoryRole) {
+        setLiveAdvisoryRole(match.advisoryRole);
+      }
+    });
+    return () => unsub();
+  }, [userEmail]);
+
+  // Dynamically resolve whether current faculty user is a Class Adviser
+  const isClassAdviser = useMemo(() => {
+    const roleClean = (liveAdvisoryRole || currentUser.advisoryRole || '').toLowerCase().trim();
+    if (roleClean === 'class adviser' || roleClean === 'class-adviser' || roleClean === 'adviser') return true;
+    const desigClean = (currentUser.designation || '').toLowerCase().trim();
+    if (desigClean.includes('class adviser') || desigClean.includes('adviser')) return true;
+    const DEMO_ADVISER_EMAILS = [
+      'johnvic.garnica@deped.gov.ph',
+      'maria.santos@deped.gov.ph',
+      'roberto.delacruz@deped.gov.ph',
+      'elena.bautista@deped.gov.ph',
+    ];
+    if (DEMO_ADVISER_EMAILS.includes(userEmail)) return true;
+    return false;
+  }, [liveAdvisoryRole, currentUser.advisoryRole, currentUser.designation, userEmail]);
+
+  const effectiveUser = useMemo<UserProfile>(() => {
+    return {
+      ...currentUser,
+      advisoryRole: isClassAdviser ? 'Class Adviser' : 'Non-Adviser',
+    };
+  }, [currentUser, isClassAdviser]);
 
   // Selected Active Folder
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
@@ -450,7 +511,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             </p>
           </div>
 
-          <div className="flex items-center space-x-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
             <button
               type="button"
               onClick={handleOpenNewFolderModal}
@@ -477,12 +538,39 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             <div className="text-xl font-bold text-white mt-0.5">{myFiles.length}</div>
           </div>
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-            <div className="text-blue-200 text-[11px]">Status</div>
-            <div className="text-xs font-bold text-emerald-300 mt-1 flex items-center space-x-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Firestore Synced</span>
+            <div className="text-blue-200 text-[11px]">Advisory Role</div>
+            <div className="text-xs font-bold text-amber-300 mt-1 flex items-center space-x-1">
+              {effectiveUser.advisoryRole === 'Class Adviser' ? (
+                <>
+                  <GraduationCap className="w-3.5 h-3.5 text-emerald-300" />
+                  <span className="text-emerald-300">Class Adviser</span>
+                </>
+              ) : (
+                <>
+                  <User className="w-3.5 h-3.5 text-slate-300" />
+                  <span className="text-slate-200">Non-Adviser</span>
+                </>
+              )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Workspace Header Bar */}
+      <div className="bg-[#141c2c] p-3 rounded-2xl border border-[#24334b] shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2.5 px-3 py-1 text-sm font-mono font-bold text-white">
+            <FolderOpen className="w-4 h-4 text-emerald-400" />
+            <span>My Folders & Workspace</span>
+            <span className="bg-slate-800 text-slate-300 text-xs px-2.5 py-0.5 rounded-full font-mono ml-1 border border-slate-700">
+              {myFolders.length + livePermanentFolders.length} folders
+            </span>
+          </div>
+        </div>
+
+        <div className="text-xs font-mono text-slate-400 px-3 flex items-center space-x-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Workspace active for {currentUser.name}</span>
         </div>
       </div>
 

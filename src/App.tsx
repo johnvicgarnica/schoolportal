@@ -59,6 +59,8 @@ import {
   updateSchoolPermanentFolderInFirestore,
   addSchoolPermanentFolderToFirestore,
   deleteSchoolPermanentFolderFromFirestore,
+  getStoredFaculty,
+  subscribeFaculty,
 } from './lib/firebase';
 
 export function App() {
@@ -86,6 +88,14 @@ export function App() {
             user.name = user.email.split('@deped.gov.ph')[0];
           } else if (user.email.includes('@')) {
             user.name = user.email.split('@')[0];
+          }
+          if (!user.advisoryRole) {
+            const stored = getStoredFaculty();
+            const cleanEmail = (user.email || '').toLowerCase().trim();
+            const matched = stored.find((f) => (f.email || '').toLowerCase().trim() === cleanEmail);
+            if (matched && matched.advisoryRole) {
+              user.advisoryRole = matched.advisoryRole;
+            }
           }
         }
         if (user && user.role === 'Admin') {
@@ -542,22 +552,45 @@ export function App() {
 
   const isCoordinator =
     currentUser?.designation === 'Coordinator' ||
-    (currentUser?.designation?.toLowerCase().includes('coordinator') ?? false);
+    (currentUser?.designation?.toLowerCase().includes('coordinator') ?? false) ||
+    currentUser?.role === 'Coordinator' ||
+    (currentUser?.role?.toLowerCase() === 'coordinator') ||
+    (currentUser?.email?.toLowerCase().includes('coordinator') ?? false);
 
-  // Restrict Coordinator from accessing Submission Report, My Workspace, or Files
+  // Restrict Coordinator from accessing My Workspace, Files, or outer Submission Report (keep them focused on Coordinator Dashboard)
   useEffect(() => {
-    if (isCoordinator && (activeTab === 'submission-report' || activeTab === 'my-workspace' || activeTab === 'files')) {
-      setActiveTab('announcements');
+    if (isCoordinator && (activeTab === 'my-workspace' || activeTab === 'files' || activeTab === 'submission-report')) {
+      setActiveTab('admin');
     }
   }, [isCoordinator, activeTab]);
+
+  // Real-time synchronization of current faculty user's advisoryRole from Firestore
+  useEffect(() => {
+    const unsub = subscribeFaculty((list) => {
+      if (currentUser && currentUser.role === 'Faculty' && currentUser.email) {
+        const cleanEmail = currentUser.email.toLowerCase().trim();
+        const matched = list.find((f) => (f.email || '').toLowerCase().trim() === cleanEmail);
+        if (matched && matched.advisoryRole && matched.advisoryRole !== currentUser.advisoryRole) {
+          const updated: UserProfile = {
+            ...currentUser,
+            advisoryRole: matched.advisoryRole,
+          };
+          setCurrentUser(updated);
+          localStorage.setItem('svnhs_user_session', JSON.stringify(updated));
+        }
+      }
+    });
+    return () => unsub();
+  }, [currentUser]);
 
   const handleLogin = (user: UserProfile) => {
     setCurrentUser(user);
     const isCoord =
       user.designation === 'Coordinator' ||
-      (user.designation?.toLowerCase().includes('coordinator') ?? false);
+      (user.designation?.toLowerCase().includes('coordinator') ?? false) ||
+      user.role === 'Coordinator';
     if (isCoord) {
-      setActiveTab('announcements');
+      setActiveTab('admin');
     } else if (user.role === 'Admin') {
       setActiveTab('admin');
     } else if (user.role === 'Faculty') {
@@ -611,6 +644,7 @@ export function App() {
               onDeleteFile={handleDeleteFacultyFile}
               onNavigateToRepository={() => setActiveTab('files')}
               onNavigateToAdminDashboard={() => setActiveTab('admin')}
+              onNavigateToSubmissionReport={() => setActiveTab('submission-report')}
             />
           )}
 
@@ -676,10 +710,11 @@ export function App() {
               onDeleteFacultyFile={handleDeleteFacultyFile}
               shouldOpenModal={shouldOpenAnnouncementModal}
               onModalOpened={() => setShouldOpenAnnouncementModal(false)}
+              onNavigateToSubmissionReport={() => setActiveTab('submission-report')}
             />
           )}
 
-          {activeTab === 'submission-report' && !isCoordinator && (
+          {activeTab === 'submission-report' && (
             <SubmissionReportView
               currentUser={currentUser}
               facultyFolders={facultyFolders}

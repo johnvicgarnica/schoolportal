@@ -12,10 +12,14 @@ import {
 } from '../types';
 import { AdminFacultyFoldersDirectory } from './AdminFacultyFoldersDirectory';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
+import { SubmissionReportView } from './SubmissionReportView';
 import {
   saveFacultyToFirestore,
+  updateFacultyAdvisoryRoleInFirestore,
+  updateFacultyDepartmentInFirestore,
   deleteFacultyFromFirestore,
   subscribeFaculty,
+  FacultyDoc,
   saveAdminsToFirestore,
   deleteAdminFromFirestore,
   subscribeAdmins,
@@ -81,6 +85,7 @@ import {
   Sparkles,
   Copy,
   Check,
+  FileCheck2,
 } from 'lucide-react';
 
 interface AdminDashboardViewProps {
@@ -113,6 +118,7 @@ interface AdminDashboardViewProps {
   onDeleteFacultyFile?: (id: string) => void;
   shouldOpenModal?: boolean;
   onModalOpened?: () => void;
+  onNavigateToSubmissionReport?: () => void;
 }
 
 export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
@@ -137,12 +143,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   onDeleteFacultyFile,
   shouldOpenModal,
   onModalOpened,
+  onNavigateToSubmissionReport,
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
-  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', or 'school-folders')
+  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', or 'submission-report')
   // Default to 'announcements' so passwords page is not exposed by default
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders'>('announcements');
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report'>('announcements');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
 
   // School Permanent Folders State (SCHOOL FORMS & SCHOOL DOCUMENTS)
@@ -511,19 +518,29 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const isMasterAdmin = currentUser.role === 'Admin' && (
     userEmailClean === masterEmailClean ||
     userEmailClean === 'johnvic.garnica@deped.gov.ph' ||
+    userEmailClean === 'johnvicgarnica@deped.gov.ph' ||
     userEmailClean === 'garjohn@deped.gov.ph' ||
-    userEmailClean === 'johnvicgarnica1@gmail.com'
+    userEmailClean === 'johnvicgarnica1@gmail.com' ||
+    (currentUser.designation?.toLowerCase().includes('master admin') ?? false) ||
+    currentUser.name.toLowerCase().includes('garnica')
   );
   const isCoordinator =
     currentUser.designation === 'Coordinator' ||
-    (currentUser.designation?.toLowerCase().includes('coordinator') ?? false);
+    (currentUser.designation?.toLowerCase().includes('coordinator') ?? false) ||
+    currentUser.role === 'Coordinator' ||
+    (currentUser.role?.toLowerCase() === 'coordinator') ||
+    (currentUser.email?.toLowerCase().includes('coordinator') ?? false);
 
   // Restrict Accounts & Passwords tab strictly to Master Admin, and restrict Faculty Folders from Coordinator
+  // Ensure non-coordinator admin does not have submission-report subtab in Admin Dashboard (redundant since there is outer Submission Report)
   useEffect(() => {
     if (!isMasterAdmin && adminSubTab === 'passwords') {
       setAdminSubTab('announcements');
     }
     if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders')) {
+      setAdminSubTab('announcements');
+    }
+    if (!isCoordinator && adminSubTab === 'submission-report') {
       setAdminSubTab('announcements');
     }
   }, [isMasterAdmin, isCoordinator, adminSubTab]);
@@ -539,7 +556,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [customFacultyPasswords, setCustomFacultyPasswords] = useState<Record<string, string>>({});
 
   // Faculty Directory List
-  const [facultyList, setFacultyList] = useState<Array<{ id: string; name: string; email: string; department: string }>>([]);
+  const [facultyList, setFacultyList] = useState<FacultyDoc[]>([]);
+  const [facultyRoleFilter, setFacultyRoleFilter] = useState<'all' | 'Class Adviser' | 'Non-Adviser'>('all');
+  const [newFacultyAdvisoryRole, setNewFacultyAdvisoryRole] = useState<'Class Adviser' | 'Non-Adviser'>('Class Adviser');
 
   // Pending Faculty Registration Requests State
   const [facultyRequests, setFacultyRequests] = useState<
@@ -729,11 +748,12 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const handleAcceptRequest = (req: { id: string; name: string; email: string; password: string; department?: string }) => {
     const cleanEmail = req.email.toLowerCase();
 
-    const newMember = {
+    const newMember: FacultyDoc = {
       id: `f-${Date.now()}`,
       name: req.name,
       email: cleanEmail,
       department: req.department || 'Senior High School Department',
+      advisoryRole: 'Non-Adviser',
     };
 
     const updatedDir = [...facultyList, newMember];
@@ -1039,6 +1059,50 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     }
   };
 
+  // Handler: Update Faculty Advisory Role (Class Adviser / Non-Adviser)
+  const handleUpdateAdvisoryRole = async (email: string, role: 'Class Adviser' | 'Non-Adviser') => {
+    if (!isMasterAdmin) {
+      alert('Security Restriction: Only Master Admin can designate faculty advisory roles.');
+      return;
+    }
+    const cleanEmail = email.toLowerCase().trim();
+    const updatedDir = facultyList.map((f) => {
+      if (f.email.toLowerCase().trim() === cleanEmail) {
+        return { ...f, advisoryRole: role };
+      }
+      return f;
+    });
+    setFacultyList(updatedDir);
+    try {
+      await updateFacultyAdvisoryRoleInFirestore(cleanEmail, role);
+      showToast(`🎓 Role designated as "${role}" for ${cleanEmail}!`);
+    } catch {
+      showToast(`⚠️ Failed to update advisory role in Firebase.`);
+    }
+  };
+
+  // Handler: Update Faculty Department (Senior High School / Junior High School)
+  const handleUpdateDepartment = async (email: string, department: string) => {
+    if (!isMasterAdmin) {
+      alert('Security Restriction: Only Master Admin can change faculty department.');
+      return;
+    }
+    const cleanEmail = email.toLowerCase().trim();
+    const updatedDir = facultyList.map((f) => {
+      if (f.email.toLowerCase().trim() === cleanEmail) {
+        return { ...f, department };
+      }
+      return f;
+    });
+    setFacultyList(updatedDir);
+    try {
+      await updateFacultyDepartmentInFirestore(cleanEmail, department);
+      showToast(`🏢 Department updated to "${department}" for ${cleanEmail}!`);
+    } catch {
+      showToast(`⚠️ Failed to update department in Firebase.`);
+    }
+  };
+
   // Handler: Add New Faculty Account
   const handleAddFaculty = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1049,11 +1113,12 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       cleanEmail += '@deped.gov.ph';
     }
 
-    const newMember = {
+    const newMember: FacultyDoc = {
       id: `f-${Date.now()}`,
       name: newFacultyName.trim(),
       email: cleanEmail,
       department: newFacultyDepartment,
+      advisoryRole: newFacultyAdvisoryRole,
     };
 
     const updatedDir = [...facultyList, newMember];
@@ -1070,8 +1135,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     setNewFacultyName('');
     setNewFacultyEmail('');
     setNewFacultyDepartment('Senior High School Department');
+    setNewFacultyAdvisoryRole('Class Adviser');
     setNewFacultyPass('');
-    showToast(`⚡ Faculty account ${cleanEmail} (${newFacultyDepartment}) created & password active in real time!`);
+    showToast(`⚡ Faculty account ${cleanEmail} (${newFacultyDepartment} • ${newFacultyAdvisoryRole}) created & active!`);
   };
 
   // Handler: Live Password Tester Sandbox
@@ -1351,6 +1417,26 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             <FolderLock className="w-4 h-4 text-indigo-200" />
             <span>School Forms & Documents ({schoolFolders.length})</span>
           </button>
+
+          {/* RETAINED FOR COORDINATOR DASHBOARD: Submission Report for Class Advisers */}
+          {isCoordinator && (
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('submission-report')}
+              className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
+                adminSubTab === 'submission-report'
+                  ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400 ring-offset-1 border border-emerald-600 scale-[1.02]'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 hover:shadow-xs hover:scale-[1.02]'
+              }`}
+              title="Open Submission Report (Class Advisers)"
+            >
+              <FileCheck2 className="w-4 h-4 text-emerald-200" />
+              <span>Submission Report</span>
+              <span className="bg-emerald-800 text-emerald-100 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ml-1">
+                Class Advisers
+              </span>
+            </button>
+          )}
         </div>
 
         <div className="text-[11px] font-mono text-slate-300 flex items-center space-x-1.5 px-3 py-1 bg-[#141c2c] rounded-lg border border-[#24334b] shadow-2xs">
@@ -2056,6 +2142,24 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   </select>
                 </div>
 
+                {/* Role / Designation Filter */}
+                <div className="flex items-center space-x-1.5 font-mono text-xs">
+                  <span className="text-slate-500 text-[10px] uppercase font-bold">Role:</span>
+                  <select
+                    value={facultyRoleFilter}
+                    onChange={(e) => setFacultyRoleFilter(e.target.value as 'all' | 'Class Adviser' | 'Non-Adviser')}
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-800 cursor-pointer focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="all">All Roles ({facultyList.length})</option>
+                    <option value="Class Adviser">
+                      Class Adviser ({facultyList.filter((f) => f.advisoryRole === 'Class Adviser').length})
+                    </option>
+                    <option value="Non-Adviser">
+                      Non-Adviser ({facultyList.filter((f) => (f.advisoryRole || 'Non-Adviser') === 'Non-Adviser').length})
+                    </option>
+                  </select>
+                </div>
+
                 <span className="bg-slate-100 text-slate-700 border border-slate-200 text-[10px] px-2.5 py-1 rounded-lg font-mono font-bold flex items-center space-x-1 shadow-2xs">
                   <Lock className="w-3.5 h-3.5 text-slate-500" />
                   <span>Passwords Hidden & Protected for Privacy</span>
@@ -2075,6 +2179,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       <th className="p-3">Faculty Name</th>
                       <th className="p-3">Email Address</th>
                       <th className="p-3">Department</th>
+                      <th className="p-3">Role</th>
                       <th className="p-3">Password Mode</th>
                       <th className="p-3">Active Login Password</th>
                       <th className="p-3 text-right">Actions</th>
@@ -2083,12 +2188,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {facultyList
                       .filter((f) => {
-                        if (facultyDeptFilter === 'all') return true;
                         if (facultyDeptFilter === 'Junior High School Department') {
-                          return (f.department || '').toLowerCase().includes('junior');
+                          if (!(f.department || '').toLowerCase().includes('junior')) return false;
+                        } else if (facultyDeptFilter === 'Senior High School Department') {
+                          if ((f.department || '').toLowerCase().includes('junior')) return false;
                         }
-                        if (facultyDeptFilter === 'Senior High School Department') {
-                          return !(f.department || '').toLowerCase().includes('junior');
+                        if (facultyRoleFilter !== 'all') {
+                          const currentRole = f.advisoryRole || 'Non-Adviser';
+                          if (currentRole !== facultyRoleFilter) return false;
                         }
                         return true;
                       })
@@ -2097,6 +2204,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       const customPass = customFacultyPasswords[emailKey];
                       const isCustom = Boolean(customPass);
                       const isJHS = (f.department || '').toLowerCase().includes('junior');
+                      const roleValue = f.advisoryRole || 'Non-Adviser';
 
                       return (
                         <tr key={f.id} className="hover:bg-slate-50 transition-colors">
@@ -2104,13 +2212,58 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                           <td className="p-3 text-slate-700">{f.email}</td>
 
                           <td className="p-3">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
-                              isJHS
-                                ? 'bg-blue-50 text-blue-800 border-blue-200'
-                                : 'bg-amber-50 text-amber-900 border-amber-200'
-                            }`}>
-                              {isJHS ? 'Junior High School' : 'Senior High School'}
-                            </span>
+                            {isMasterAdmin ? (
+                              <select
+                                value={isJHS ? 'Junior High School Department' : 'Senior High School Department'}
+                                onChange={(e) => handleUpdateDepartment(f.email, e.target.value)}
+                                className={`text-[10px] font-mono font-bold rounded-lg px-2 py-1 border transition-all cursor-pointer shadow-2xs focus:outline-none focus:ring-1 ${
+                                  isJHS
+                                    ? 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100/70 focus:ring-blue-500'
+                                    : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 focus:ring-amber-500'
+                                }`}
+                                title="Master Admin: Change faculty department"
+                              >
+                                <option value="Senior High School Department">Senior High School</option>
+                                <option value="Junior High School Department">Junior High School</option>
+                              </select>
+                            ) : (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                                isJHS
+                                  ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                  : 'bg-amber-50 text-amber-900 border-amber-200'
+                              }`}>
+                                {isJHS ? 'Junior High School' : 'Senior High School'}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Editable Role beside Department: Class Adviser / Non-Adviser */}
+                          <td className="p-3">
+                            {isMasterAdmin ? (
+                              <div className="relative inline-flex items-center">
+                                <select
+                                  value={roleValue}
+                                  onChange={(e) => handleUpdateAdvisoryRole(f.email, e.target.value as 'Class Adviser' | 'Non-Adviser')}
+                                  className={`text-[11px] font-mono font-bold rounded-lg px-2.5 py-1 border transition-all cursor-pointer shadow-2xs focus:outline-none focus:ring-1 ${
+                                    roleValue === 'Class Adviser'
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100/70 focus:ring-emerald-500'
+                                      : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100 focus:ring-slate-400'
+                                  }`}
+                                  title="Master Admin: Designate faculty as Class Adviser or Non-Adviser"
+                                >
+                                  <option value="Class Adviser">🎓 Class Adviser</option>
+                                  <option value="Non-Adviser">👤 Non-Adviser</option>
+                                </select>
+                              </div>
+                            ) : (
+                              <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                                roleValue === 'Class Adviser'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : 'bg-slate-100 text-slate-600 border-slate-200'
+                              }`}>
+                                <span>{roleValue === 'Class Adviser' ? '🎓 Class Adviser' : '👤 Non-Adviser'}</span>
+                              </span>
+                            )}
                           </td>
 
                           <td className="p-3">
@@ -2709,6 +2862,46 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     <div>
                       <div className="font-bold text-[11px] leading-tight">Senior High</div>
                       <div className="text-[9px] opacity-75 font-sans leading-tight">Grades 11 - 12</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span>Advisory Role / Designation *</span>
+                  <span className="text-slate-400 font-normal">Class Adviser or Non-Adviser</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewFacultyAdvisoryRole('Class Adviser')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center space-x-2.5 ${
+                      newFacultyAdvisoryRole === 'Class Adviser'
+                        ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-400/30 text-emerald-900 shadow-2xs font-bold'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-lg">🎓</span>
+                    <div>
+                      <div className="font-bold text-[11px] leading-tight">Class Adviser</div>
+                      <div className="text-[9px] opacity-75 font-sans leading-tight">Section Advisory</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewFacultyAdvisoryRole('Non-Adviser')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center space-x-2.5 ${
+                      newFacultyAdvisoryRole === 'Non-Adviser'
+                        ? 'bg-slate-100 border-slate-500 ring-2 ring-slate-400/30 text-slate-900 shadow-2xs font-bold'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-lg">👤</span>
+                    <div>
+                      <div className="font-bold text-[11px] leading-tight">Non-Adviser</div>
+                      <div className="text-[9px] opacity-75 font-sans leading-tight">Subject Teacher</div>
                     </div>
                   </button>
                 </div>
@@ -3729,6 +3922,17 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               </li>
             </ul>
           </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 5: COORDINATOR SUBMISSION REPORT (CLASS ADVISERS ONLY) */}
+      {adminSubTab === 'submission-report' && isCoordinator && (
+        <div className="space-y-6 animate-fadeIn">
+          <SubmissionReportView
+            currentUser={currentUser}
+            facultyFolders={facultyFolders}
+            initialCategory="class-advisers"
+          />
         </div>
       )}
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { UserProfile, FacultyFolder } from '../types';
 import {
   subscribeFaculty,
+  getStoredFaculty,
   subscribeFacultySubmissions,
   saveFacultySubmissionToFirestore,
   batchSaveFacultySubmissionsToFirestore,
@@ -25,6 +26,11 @@ import {
   getStoredActiveTermId,
   saveActiveTermIdToFirestore,
   subscribeActiveTermId,
+  ClassAdviserSchoolFormsRecord,
+  saveClassAdviserFormCheckboxToFirestore,
+  batchSaveClassAdviserSchoolFormsToFirestore,
+  subscribeClassAdviserSchoolForms,
+  getStoredClassAdviserSchoolForms,
 } from '../lib/firebase';
 import {
   BarChart,
@@ -79,11 +85,14 @@ import {
   ArrowLeft,
   MessageSquare,
   Info,
+  GraduationCap,
+  CheckCheck,
 } from 'lucide-react';
 
 interface SubmissionReportViewProps {
   currentUser: UserProfile;
   facultyFolders?: FacultyFolder[];
+  initialCategory?: SubmissionCategoryTab;
 }
 
 export interface TermDefinition {
@@ -99,8 +108,10 @@ export const BASE_TERMS: TermDefinition[] = [
   { id: 'term-3', name: '3rd Term', description: 'Weeks 1 to 11' },
 ];
 
+export type SubmissionCategoryTab = SubmissionCategory | 'class-advisers';
+
 export interface CategoryDefinition {
-  id: SubmissionCategory;
+  id: SubmissionCategoryTab;
   name: string;
   fullName: string;
   shortDescription: string;
@@ -108,10 +119,47 @@ export interface CategoryDefinition {
   badgeColor: string;
   activeBg: string;
   borderColor: string;
-  itemType: 'weekly' | 'terms';
+  itemType: 'weekly' | 'terms' | 'school-forms';
 }
 
+// Section 1 Columns: SF 1, SF 3, SF 4, SF 5, SF 6, SF 8, SF 10
+export const STANDARD_SF_COLUMNS = [
+  { key: 'sf1' as const, label: 'SF 1', name: 'School Register', desc: 'Master list of enrolled learners per section' },
+  { key: 'sf3' as const, label: 'SF 3', name: 'Books Issued & Returned', desc: 'Textbook and instructional material inventory' },
+  { key: 'sf4' as const, label: 'SF 4', name: "Learner's Movement", desc: 'Monthly summary of learner transfers and dropouts' },
+  { key: 'sf5' as const, label: 'SF 5', name: 'Report on Promotion', desc: 'Promotion, retained, and conditional learner grades' },
+  { key: 'sf6' as const, label: 'SF 6', name: 'Summarized Promotion', desc: 'Consolidated promotion report per track and strand' },
+  { key: 'sf8' as const, label: 'SF 8', name: 'Health & Nutrition', desc: 'Learner BMI, nutritional status, and health summary' },
+  { key: 'sf10' as const, label: 'SF 10', name: 'Permanent Academic Record', desc: 'Official learner Form 137 / transcript permanent file' },
+] as const;
+
+// Section 2 Columns: SF 2 Monthly Checklist (June to April)
+export const SF2_MONTH_COLUMNS = [
+  { key: 'sf2_june' as const, label: 'JUNE', fullMonth: 'June Attendance' },
+  { key: 'sf2_july' as const, label: 'JULY', fullMonth: 'July Attendance' },
+  { key: 'sf2_august' as const, label: 'AUGUST', fullMonth: 'August Attendance' },
+  { key: 'sf2_september' as const, label: 'SEPTEMBER', fullMonth: 'September Attendance' },
+  { key: 'sf2_october' as const, label: 'OCTOBER', fullMonth: 'October Attendance' },
+  { key: 'sf2_november' as const, label: 'NOVEMBER', fullMonth: 'November Attendance' },
+  { key: 'sf2_december' as const, label: 'DECEMBER', fullMonth: 'December Attendance' },
+  { key: 'sf2_january' as const, label: 'JANUARY', fullMonth: 'January Attendance' },
+  { key: 'sf2_february' as const, label: 'FEBRUARY', fullMonth: 'February Attendance' },
+  { key: 'sf2_march' as const, label: 'MARCH', fullMonth: 'March Attendance' },
+  { key: 'sf2_april' as const, label: 'APRIL', fullMonth: 'April Attendance' },
+] as const;
+
 export const CATEGORIES: CategoryDefinition[] = [
+  {
+    id: 'class-advisers',
+    name: 'Class Advisers',
+    fullName: 'Class Adviser School Forms (SF 1-10 & SF 2 Monthly)',
+    shortDescription: 'Section 1: SF 1, 3, 4, 5, 6, 8, 10 & Section 2: SF 2 Monthly Attendance (June-April)',
+    icon: '🎓',
+    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    activeBg: 'bg-emerald-600 text-white',
+    borderColor: 'border-emerald-500',
+    itemType: 'school-forms',
+  },
   {
     id: 'dll',
     name: 'DLL',
@@ -140,9 +188,9 @@ export const CATEGORIES: CategoryDefinition[] = [
     fullName: 'Test Questions',
     shortDescription: 'Summative & periodic exam questionnaires for Term 1 TQ, Term 2 TQ, and Term 3 TQ',
     icon: '📑',
-    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    activeBg: 'bg-emerald-600 text-white',
-    borderColor: 'border-emerald-500',
+    badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
+    activeBg: 'bg-amber-600 text-white',
+    borderColor: 'border-amber-500',
     itemType: 'terms',
   },
 ];
@@ -150,15 +198,143 @@ export const CATEGORIES: CategoryDefinition[] = [
 export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   currentUser,
   facultyFolders = [],
+  initialCategory,
 }) => {
-  // Check if current user has administrator role
+  // Check if current user has coordinator or administrator role
+  const isCoordinator =
+    currentUser.designation === 'Coordinator' ||
+    (currentUser.designation?.toLowerCase().includes('coordinator') ?? false) ||
+    currentUser.role === 'Coordinator' ||
+    currentUser.role?.toLowerCase() === 'coordinator' ||
+    (currentUser.email?.toLowerCase().includes('coordinator') ?? false);
+
+  const userEmailClean = (currentUser.email || '').toLowerCase().trim();
+  const isMasterAdmin =
+    currentUser.role === 'Admin' && (
+      userEmailClean === 'johnvic.garnica@deped.gov.ph' ||
+      userEmailClean === 'johnvicgarnica@deped.gov.ph' ||
+      userEmailClean === 'garjohn@deped.gov.ph' ||
+      userEmailClean === 'johnvicgarnica1@gmail.com' ||
+      (currentUser.designation?.toLowerCase().includes('master admin') ?? false) ||
+      currentUser.name?.toLowerCase().includes('garnica')
+    );
+
+  // ONLY THE COORDINATOR AND THE MASTER ADMIN CAN SEE THE CLASS ADVISER PAGE AND CAN EDIT
+  const canManageClassAdvisers = isCoordinator || isMasterAdmin;
+
+  // ONLY SCHOOL PRINCIPAL, MASTER TEACHER, AND MASTER ADMIN CAN EDIT DLL, TOS, AND TQ
+  const designationLower = (currentUser.designation || '').toLowerCase().trim();
+  const isPrincipal =
+    designationLower.includes('school principal') ||
+    designationLower.includes('principal');
+  const isMasterTeacher = designationLower.includes('master teacher');
+  const canEditDllTosTq = isMasterAdmin || isPrincipal || isMasterTeacher;
+
   const isAdmin =
     currentUser.role === 'Admin' ||
     (currentUser as any).isAdmin === true ||
-    currentUser.role?.toLowerCase() === 'admin';
+    currentUser.role?.toLowerCase() === 'admin' ||
+    isCoordinator;
 
-  // Navigation & Category States
-  const [activeCategory, setActiveCategory] = useState<SubmissionCategory>('dll');
+  // Registered faculty state from Firebase & localStorage cache
+  const [registeredFaculty, setRegisteredFaculty] = useState<FacultyDoc[]>(() => getStoredFaculty());
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Dynamically & robustly resolve whether current user is a Class Adviser
+  const isClassAdviser = useMemo(() => {
+    // 1. Direct advisoryRole check (case-insensitive & trimmed)
+    const roleClean = (currentUser.advisoryRole || '').toLowerCase().trim();
+    if (roleClean === 'class adviser' || roleClean === 'class-adviser' || roleClean === 'adviser') {
+      return true;
+    }
+    // 2. Direct designation / role check
+    const desigClean = (currentUser.designation || '').toLowerCase().trim();
+    if (desigClean.includes('class adviser') || desigClean.includes('adviser')) {
+      return true;
+    }
+    const roleStr = (currentUser.role || '').toLowerCase().trim();
+    if (roleStr.includes('adviser')) {
+      return true;
+    }
+
+    // 3. User email lookup against registered faculty or cache
+    const emailClean = (currentUser.email || '').toLowerCase().trim();
+    if (emailClean) {
+      const match = registeredFaculty.find((f) => (f.email || '').toLowerCase().trim() === emailClean);
+      if (match) {
+        const mRole = (match.advisoryRole || '').toLowerCase().trim();
+        if (mRole === 'class adviser' || mRole === 'class-adviser' || mRole === 'adviser') {
+          return true;
+        }
+      }
+
+      const stored = getStoredFaculty();
+      const storedMatch = stored.find((f) => (f.email || '').toLowerCase().trim() === emailClean);
+      if (storedMatch) {
+        const sRole = (storedMatch.advisoryRole || '').toLowerCase().trim();
+        if (sRole === 'class adviser' || sRole === 'class-adviser' || sRole === 'adviser') {
+          return true;
+        }
+      }
+
+      // Default demo faculty accounts designated as Class Advisers
+      const DEMO_ADVISERS = [
+        'johnvic.garnica@deped.gov.ph',
+        'maria.santos@deped.gov.ph',
+        'roberto.delacruz@deped.gov.ph',
+        'elena.bautista@deped.gov.ph',
+      ];
+      if (DEMO_ADVISERS.includes(emailClean)) {
+        return true;
+      }
+    }
+    return false;
+  }, [currentUser, registeredFaculty]);
+
+  // Navigation & Category States:
+  // Coordinators ONLY see Class Advisers (DLL, TOS, TQ removed)
+  // Non-Advisers only see DLL, TOS, TQ (defaults to DLL)
+  // Class Advisers see CLASS ADVISERS, DLL, TOS, TQ (defaults to Class Advisers)
+  // Master Admin sees CLASS ADVISERS, DLL, TOS, TQ (defaults to Class Advisers)
+  const [activeCategory, setActiveCategory] = useState<SubmissionCategoryTab>(() => {
+    if (isCoordinator) {
+      return 'class-advisers';
+    }
+    if (initialCategory) {
+      if (initialCategory === 'class-advisers' && !canManageClassAdvisers && !isClassAdviser) {
+        return 'dll';
+      }
+      return initialCategory;
+    }
+    if (!canManageClassAdvisers && !isClassAdviser) {
+      return 'dll';
+    }
+    return 'class-advisers';
+  });
+
+  // Sync when initialCategory prop changes
+  useEffect(() => {
+    if (isCoordinator) {
+      setActiveCategory('class-advisers');
+      return;
+    }
+    if (initialCategory) {
+      if (initialCategory === 'class-advisers' && (canManageClassAdvisers || isClassAdviser)) {
+        setActiveCategory('class-advisers');
+      } else if (initialCategory !== 'class-advisers') {
+        setActiveCategory(initialCategory);
+      }
+    }
+  }, [initialCategory, canManageClassAdvisers, isClassAdviser, isCoordinator]);
+
+  // Keep Coordinator on class-advisers, and keep non-adviser faculty on DLL, TOS, or TQ (never class-advisers)
+  useEffect(() => {
+    if (isCoordinator && activeCategory !== 'class-advisers') {
+      setActiveCategory('class-advisers');
+    } else if (!canManageClassAdvisers && !isClassAdviser && activeCategory === 'class-advisers') {
+      setActiveCategory('dll');
+    }
+  }, [isCoordinator, canManageClassAdvisers, isClassAdviser, activeCategory]);
   const [activeDefaultTermId, setActiveDefaultTermId] = useState<string>(() => getStoredActiveTermId());
   const [selectedTermId, setSelectedTermId] = useState<string>(() => getStoredActiveTermId());
   const [isSettingActiveTerm, setIsSettingActiveTerm] = useState<boolean>(false);
@@ -168,6 +344,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const [viewMode, setViewMode] = useState<'faculty-chart' | 'weekly-chart' | 'pie-chart'>('faculty-chart');
   const [facultyPieTab, setFacultyPieTab] = useState<'both' | 'compliance' | 'volume' | 'periods'>('both');
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
+
+  // Class Adviser School Forms Data Map (SF 1, 3, 4, 5, 6, 8, 10 & SF 2 Monthly)
+  const [classAdviserData, setClassAdviserData] = useState<Record<string, ClassAdviserSchoolFormsRecord>>(() => getStoredClassAdviserSchoolForms());
+
+  // Subscribe to real-time Class Adviser School Forms from Firebase
+  useEffect(() => {
+    const unsub = subscribeClassAdviserSchoolForms((map) => {
+      setClassAdviserData(map || {});
+    });
+    return () => unsub();
+  }, []);
 
   // Term Weeks Configuration (Max 12 weeks per term)
   const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => getStoredTermWeeksConfig());
@@ -183,10 +370,6 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const [isSavingAll, setIsSavingAll] = useState<boolean>(false);
   const [selectedItemToSave, setSelectedItemToSave] = useState<number>(0);
   const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
-
-  // Registered faculty state
-  const [registeredFaculty, setRegisteredFaculty] = useState<FacultyDoc[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Subscribe to real-time term weeks configuration from Firebase
   useEffect(() => {
@@ -272,15 +455,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Subscribe to faculty submissions whenever category or term changes
   useEffect(() => {
-    const cachedSub = getStoredFacultySubmissions(effectiveTermId, activeCategory);
-    const cachedStat = getStoredFacultyStatuses(effectiveTermId, activeCategory);
-    const cachedComm = getStoredFacultyComments(effectiveTermId, activeCategory);
+    if (activeCategory === 'class-advisers') return;
+    const cat = activeCategory as SubmissionCategory;
+    const cachedSub = getStoredFacultySubmissions(effectiveTermId, cat);
+    const cachedStat = getStoredFacultyStatuses(effectiveTermId, cat);
+    const cachedComm = getStoredFacultyComments(effectiveTermId, cat);
 
     setSubmissions(cachedSub || {});
     setItemStatuses(cachedStat || {});
     setItemComments(cachedComm || {});
 
-    const unsub = subscribeFacultySubmissions(effectiveTermId, activeCategory, (subs, stats, comms) => {
+    const unsub = subscribeFacultySubmissions(effectiveTermId, cat, (subs, stats, comms) => {
       setSubmissions(subs || {});
       if (stats) setItemStatuses(stats);
       if (comms) setItemComments(comms);
@@ -291,7 +476,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Combine registered faculty from Firestore with any unique faculty found in facultyFolders
   const allFaculty = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; email: string; department: string; surname: string }>();
+    const map = new Map<string, { id: string; name: string; email: string; department: string; surname: string; advisoryRole?: 'Class Adviser' | 'Non-Adviser' }>();
 
     // Add registered faculty from collection
     registeredFaculty.forEach((f) => {
@@ -303,6 +488,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           email: email,
           department: f.department || 'Senior High School Dept.',
           surname: extractFacultySurname(f.name || email),
+          advisoryRole: f.advisoryRole || 'Non-Adviser',
         });
       }
     });
@@ -317,6 +503,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           email: email,
           department: 'Senior High School Dept.',
           surname: f.facultySurname || extractFacultySurname(f.facultyName || email),
+          advisoryRole: 'Non-Adviser',
         });
       }
     });
@@ -324,12 +511,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     // If still empty (e.g. fresh database before initial sign-in), provide default template faculty for demonstration
     if (map.size === 0) {
       const demoFaculty = [
-        { id: 'f-1', name: 'John Vic Garnica', email: 'johnvic.garnica@deped.gov.ph', department: 'TVL / ICT Strand', surname: 'GARNICA' },
-        { id: 'f-2', name: 'Maria Santos', email: 'maria.santos@deped.gov.ph', department: 'STEM Strand', surname: 'SANTOS' },
-        { id: 'f-3', name: 'Roberto Dela Cruz', email: 'roberto.delacruz@deped.gov.ph', department: 'HUMSS Strand', surname: 'DELA CRUZ' },
-        { id: 'f-4', name: 'Elena Bautista', email: 'elena.bautista@deped.gov.ph', department: 'ABM Strand', surname: 'BAUTISTA' },
-        { id: 'f-5', name: 'Mark Anthony Reyes', email: 'mark.reyes@deped.gov.ph', department: 'GAS Strand', surname: 'REYES' },
-        { id: 'f-6', name: 'Grace Lim', email: 'grace.lim@deped.gov.ph', department: 'Core Academics', surname: 'LIM' },
+        { id: 'f-1', name: 'John Vic Garnica', email: 'johnvic.garnica@deped.gov.ph', department: 'TVL / ICT Strand', surname: 'GARNICA', advisoryRole: 'Class Adviser' as const },
+        { id: 'f-2', name: 'Maria Santos', email: 'maria.santos@deped.gov.ph', department: 'STEM Strand', surname: 'SANTOS', advisoryRole: 'Class Adviser' as const },
+        { id: 'f-3', name: 'Roberto Dela Cruz', email: 'roberto.delacruz@deped.gov.ph', department: 'HUMSS Strand', surname: 'DELA CRUZ', advisoryRole: 'Class Adviser' as const },
+        { id: 'f-4', name: 'Elena Bautista', email: 'elena.bautista@deped.gov.ph', department: 'ABM Strand', surname: 'BAUTISTA', advisoryRole: 'Class Adviser' as const },
+        { id: 'f-5', name: 'Mark Anthony Reyes', email: 'mark.reyes@deped.gov.ph', department: 'GAS Strand', surname: 'REYES', advisoryRole: 'Non-Adviser' as const },
+        { id: 'f-6', name: 'Grace Lim', email: 'grace.lim@deped.gov.ph', department: 'Core Academics', surname: 'LIM', advisoryRole: 'Non-Adviser' as const },
       ];
       demoFaculty.forEach((d) => map.set(d.email, d));
     }
@@ -338,6 +525,89 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     // Sort alphabetically by surname
     return list.sort((a, b) => a.surname.localeCompare(b.surname));
   }, [registeredFaculty, facultyFolders]);
+
+  // Class Advisers list: ONLY faculty members designated as "Class Adviser"
+  const classAdvisersList = useMemo(() => {
+    return allFaculty.filter((f) => f.advisoryRole === 'Class Adviser');
+  }, [allFaculty]);
+
+  // Filtered Class Advisers based on search and department
+  const filteredClassAdvisers = useMemo(() => {
+    return classAdvisersList.filter((f) => {
+      if (departmentFilter !== 'all' && !(f.department || '').toLowerCase().includes(departmentFilter.toLowerCase())) {
+        return false;
+      }
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase().trim();
+        const matchesName = (f.name || '').toLowerCase().includes(q);
+        const matchesEmail = (f.email || '').toLowerCase().includes(q);
+        const matchesSurname = (f.surname || '').toLowerCase().includes(q);
+        const matchesDept = (f.department || '').toLowerCase().includes(q);
+        if (!matchesName && !matchesEmail && !matchesSurname && !matchesDept) return false;
+      }
+      return true;
+    });
+  }, [classAdvisersList, departmentFilter, searchTerm]);
+
+  // Overall compliance metrics for Class Advisers
+  const adviserStats = useMemo(() => {
+    const totalAdvisers = classAdvisersList.length;
+    if (totalAdvisers === 0) {
+      return {
+        totalAdvisers: 0,
+        sfTotalComplied: 0,
+        sfTotalPossible: 0,
+        sfPercentage: 0,
+        sf2TotalComplied: 0,
+        sf2TotalPossible: 0,
+        sf2Percentage: 0,
+        fullyCompliantAdvisers: 0,
+      };
+    }
+
+    let sfTotalComplied = 0;
+    const sfTotalPossible = totalAdvisers * STANDARD_SF_COLUMNS.length; // 7 forms
+
+    let sf2TotalComplied = 0;
+    const sf2TotalPossible = totalAdvisers * SF2_MONTH_COLUMNS.length; // 11 months
+
+    let fullyCompliantCount = 0;
+
+    classAdvisersList.forEach((adviser) => {
+      const emailKey = adviser.email.toLowerCase().trim();
+      const rec = classAdviserData[emailKey] || {};
+
+      let adviserSfComplied = 0;
+      STANDARD_SF_COLUMNS.forEach((col) => {
+        if (rec[col.key]) adviserSfComplied++;
+      });
+      sfTotalComplied += adviserSfComplied;
+
+      let adviserSf2Complied = 0;
+      SF2_MONTH_COLUMNS.forEach((col) => {
+        if (rec[col.key]) adviserSf2Complied++;
+      });
+      sf2TotalComplied += adviserSf2Complied;
+
+      if (adviserSfComplied === STANDARD_SF_COLUMNS.length && adviserSf2Complied === SF2_MONTH_COLUMNS.length) {
+        fullyCompliantCount++;
+      }
+    });
+
+    const sfPercentage = sfTotalPossible > 0 ? Math.round((sfTotalComplied / sfTotalPossible) * 100) : 0;
+    const sf2Percentage = sf2TotalPossible > 0 ? Math.round((sf2TotalComplied / sf2TotalPossible) * 100) : 0;
+
+    return {
+      totalAdvisers,
+      sfTotalComplied,
+      sfTotalPossible,
+      sfPercentage,
+      sf2TotalComplied,
+      sf2TotalPossible,
+      sf2Percentage,
+      fullyCompliantAdvisers: fullyCompliantCount,
+    };
+  }, [classAdvisersList, classAdviserData]);
 
   // Unique departments for filter
   const departments = useMemo(() => {
@@ -386,9 +656,168 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     setTimeout(() => setCopiedToast(null), 3000);
   };
 
+  // Toggle individual School Form or SF 2 Month checkbox for a Class Adviser
+  const handleToggleAdviserCheckbox = async (
+    facultyEmail: string,
+    field: string,
+    currentValue: boolean,
+    facultyName: string,
+    department: string
+  ) => {
+    // ONLY COORDINATOR AND MASTER ADMIN CAN EDIT
+    if (!canManageClassAdvisers) {
+      showToast('⚠️ Only the Coordinator and Master Admin can edit Class Adviser compliance records.');
+      return;
+    }
+
+    const nextVal = !currentValue;
+    const cleanEmail = facultyEmail.toLowerCase().trim();
+
+    // Optimistic UI update
+    setClassAdviserData((prev) => {
+      const existing = prev[cleanEmail] || {
+        facultyEmail: cleanEmail,
+        facultyName,
+        department,
+      };
+      return {
+        ...prev,
+        [cleanEmail]: {
+          ...existing,
+          [field]: nextVal,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser.name || (isCoordinator ? 'Coordinator' : 'Master Admin'),
+        },
+      };
+    });
+
+    try {
+      await saveClassAdviserFormCheckboxToFirestore(cleanEmail, field, nextVal, {
+        facultyName,
+        department,
+        updatedBy: currentUser.name || (isCoordinator ? 'Coordinator' : 'Master Admin'),
+      });
+      setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      const fieldTitle = field.startsWith('sf2_')
+        ? `SF 2 ${field.replace('sf2_', '').toUpperCase()}`
+        : field.toUpperCase();
+      showToast(`⚡ ${fieldTitle}: ${nextVal ? 'COMPLIED ✓' : 'UNCHECKED'} for ${facultyName} (Saved to Firebase)`);
+    } catch (err) {
+      console.error('Error saving checkbox to Firestore:', err);
+      showToast('⚠️ Error saving to Firebase');
+    }
+  };
+
+  // Batch toggle all 7 School Forms (SF 1, 3, 4, 5, 6, 8, 10) for one Class Adviser
+  const handleBatchToggleAdviserSf = async (
+    facultyEmail: string,
+    targetState: boolean,
+    facultyName: string,
+    department: string
+  ) => {
+    // ONLY COORDINATOR AND MASTER ADMIN CAN EDIT
+    if (!canManageClassAdvisers) {
+      showToast('⚠️ Only the Coordinator and Master Admin can edit Class Adviser compliance records.');
+      return;
+    }
+
+    const cleanEmail = facultyEmail.toLowerCase().trim();
+    const updates: Partial<ClassAdviserSchoolFormsRecord> = {
+      sf1: targetState,
+      sf3: targetState,
+      sf4: targetState,
+      sf5: targetState,
+      sf6: targetState,
+      sf8: targetState,
+      sf10: targetState,
+    };
+
+    // Optimistic
+    setClassAdviserData((prev) => {
+      const existing = prev[cleanEmail] || { facultyEmail: cleanEmail, facultyName, department };
+      return {
+        ...prev,
+        [cleanEmail]: {
+          ...existing,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser.name || (isCoordinator ? 'Coordinator' : 'Master Admin'),
+        },
+      };
+    });
+
+    try {
+      await batchSaveClassAdviserSchoolFormsToFirestore(cleanEmail, updates, {
+        facultyName,
+        department,
+        updatedBy: currentUser.name || (isCoordinator ? 'Coordinator' : 'Master Admin'),
+      });
+      setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      showToast(`⚡ All 7 SF Forms marked as ${targetState ? 'COMPLIED ✓' : 'CLEARED'} for ${facultyName}`);
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ Error saving to Firebase');
+    }
+  };
+
+  // Batch toggle all 11 SF 2 Months for one Class Adviser
+  const handleBatchToggleAdviserSf2 = async (
+    facultyEmail: string,
+    targetState: boolean,
+    facultyName: string,
+    department: string
+  ) => {
+    // ONLY COORDINATOR AND MASTER ADMIN CAN EDIT
+    if (!canManageClassAdvisers) {
+      showToast('⚠️ Only the Coordinator and Master Admin can edit Class Adviser compliance records.');
+      return;
+    }
+    const cleanEmail = facultyEmail.toLowerCase().trim();
+    const updates: Partial<ClassAdviserSchoolFormsRecord> = {
+      sf2_june: targetState,
+      sf2_july: targetState,
+      sf2_august: targetState,
+      sf2_september: targetState,
+      sf2_october: targetState,
+      sf2_november: targetState,
+      sf2_december: targetState,
+      sf2_january: targetState,
+      sf2_february: targetState,
+      sf2_march: targetState,
+      sf2_april: targetState,
+    };
+
+    // Optimistic
+    setClassAdviserData((prev) => {
+      const existing = prev[cleanEmail] || { facultyEmail: cleanEmail, facultyName, department };
+      return {
+        ...prev,
+        [cleanEmail]: {
+          ...existing,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser.name || currentUser.designation || 'Coordinator',
+        },
+      };
+    });
+
+    try {
+      await batchSaveClassAdviserSchoolFormsToFirestore(cleanEmail, updates, {
+        facultyName,
+        department,
+        updatedBy: currentUser.name || currentUser.designation || 'Coordinator',
+      });
+      setLastSavedTimestamp(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      showToast(`⚡ All 11 SF 2 Months marked as ${targetState ? 'COMPLIED ✓' : 'CLEARED'} for ${facultyName}`);
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ Error saving to Firebase');
+    }
+  };
+
   // Handle setting official active academic term (Default across all users and page refreshes)
   const handleSetCurrentActiveTerm = async (termIdToSet: string) => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
     setIsSettingActiveTerm(true);
     try {
       await saveActiveTermIdToFirestore(termIdToSet);
@@ -408,7 +837,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Handle saving configured weeks for a specific single term immediately to Firebase
   const handleSaveSingleTermWeeks = async (termId: 'term-1' | 'term-2' | 'term-3', customWeeks?: number) => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
     setIsSavingSingleTerm(termId);
     try {
       const targetWeeks = customWeeks !== undefined ? customWeeks : (tempWeeksConfig[termId] || 11);
@@ -440,7 +869,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Quick adjustment with optional auto-save to Firebase
   const handleQuickChangeTermWeeks = async (termId: 'term-1' | 'term-2' | 'term-3', newWeeks: number) => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
     const sanitizedWeeks = Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(newWeeks) || 11));
     const updated: TermWeeksConfig = {
       ...tempWeeksConfig,
@@ -461,7 +890,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Handle saving configured weeks per term (All terms at once)
   const handleSaveWeeksConfiguration = async () => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
     setIsSavingWeeksConfig(true);
     try {
       const sanitized: TermWeeksConfig = {
@@ -511,7 +940,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     faculty: { email: string; name: string; surname: string; department: string },
     col: { index: number; fullLabel: string }
   ) => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
     const currentStatus = getItemStatus(faculty.email, col.index);
     const currentComment = getItemComment(faculty.email, col.index);
     setActiveCellAction({
@@ -538,7 +967,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     newStatus: ItemSubmissionStatus,
     commentText: string
   ) => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
 
     const cleanEmail = facultyEmail.toLowerCase().trim();
     const currentWeeks = submissions[cleanEmail] ? [...submissions[cleanEmail]] : Array(totalItemCount).fill(false);
@@ -610,7 +1039,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Legacy direct toggle handler: redirects to handleOpenCellAction for full options
   const handleToggleItem = async (facultyEmail: string, itemIndex: number) => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
     const facultyObj = allFaculty.find((f) => f.email.toLowerCase().trim() === facultyEmail.toLowerCase().trim());
     const colObj = columnItems[itemIndex];
     if (facultyObj && colObj) {
@@ -620,7 +1049,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Check all items for a single faculty member
   const handleCheckAllItems = async (facultyEmail: string, checkValue: boolean) => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
 
     const cleanEmail = facultyEmail.toLowerCase().trim();
     const currentWeeks = Array(totalItemCount).fill(checkValue);
@@ -660,7 +1089,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Save data for a specific column/term/week to Firebase Firestore
   const handleSaveItemToFirebase = async (itemIndex: number) => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
     setIsSavingIndex(itemIndex);
     const itemObj = columnItems[itemIndex];
     try {
@@ -685,7 +1114,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Save all items for the current category to Firebase
   const handleSaveAllToFirebase = async () => {
-    if (!isAdmin) return;
+    if (!canEditDllTosTq) return;
     setIsSavingAll(true);
     try {
       await batchSaveFacultySubmissionsToFirestore(
@@ -1227,6 +1656,672 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     return '#94A3B8'; // Slate 400
   };
 
+  // Render Personal Class Adviser View (For logged in faculty who are designated Class Advisers)
+  const renderClassAdviserFacultyPersonalView = () => {
+    const myEmailKey = (currentUser.email || '').toLowerCase().trim();
+    const rec = classAdviserData[myEmailKey] || {};
+    let mySfComplied = 0;
+    STANDARD_SF_COLUMNS.forEach((col) => {
+      if (rec[col.key]) mySfComplied++;
+    });
+    let mySf2Complied = 0;
+    SF2_MONTH_COLUMNS.forEach((m) => {
+      if (rec[m.key]) mySf2Complied++;
+    });
+    const totalForms = STANDARD_SF_COLUMNS.length + SF2_MONTH_COLUMNS.length;
+    const totalComplied = mySfComplied + mySf2Complied;
+    const overallPct = Math.round((totalComplied / totalForms) * 100);
+    const isAllComplete = mySfComplied === STANDARD_SF_COLUMNS.length && mySf2Complied === SF2_MONTH_COLUMNS.length;
+
+    return (
+      <div className="space-y-6">
+        {/* Header / Summary Card */}
+        <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <span className="text-xl">🎓</span>
+                <h3 className="text-base font-bold text-slate-100 font-sans">
+                  My Class Adviser School Forms Compliance Portal
+                </h3>
+                <span className="bg-emerald-600 text-white text-[11px] font-mono px-2.5 py-0.5 rounded-full font-bold">
+                  {currentUser.name} • Class Adviser
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 font-mono">
+                Fast-track your submitted documents! Review Section 1 (Standard School Forms SF 1–10) and Section 2 (SF 2 Monthly Attendance June–April) verified by Coordinator / Administrator.
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <div className="text-right">
+                <div className="text-2xl font-extrabold text-emerald-400 font-mono">
+                  {totalComplied} / {totalForms} Checkpoints
+                </div>
+                <div className="text-xs text-slate-400 font-mono font-bold">
+                  {overallPct}% Overall Compliance
+                </div>
+              </div>
+              <div className="w-14 h-14 rounded-2xl bg-[#0d1524] border border-emerald-500/30 flex items-center justify-center font-bold text-emerald-400 shadow-2xs text-lg font-mono">
+                {overallPct}%
+              </div>
+            </div>
+          </div>
+
+          {/* Status Pills */}
+          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#24334b]">
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-blue-500/20 text-blue-300 rounded-xl text-xs font-mono font-bold border border-blue-500/40">
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+              <span>Section 1: {mySfComplied} / {STANDARD_SF_COLUMNS.length} SF Forms Verified</span>
+            </div>
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-purple-500/20 text-purple-300 rounded-xl text-xs font-mono font-bold border border-purple-500/40">
+              <CalendarDays className="w-3.5 h-3.5" />
+              <span>Section 2: {mySf2Complied} / {SF2_MONTH_COLUMNS.length} Months Verified</span>
+            </div>
+            {isAllComplete && (
+              <div className="flex items-center space-x-1.5 px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-mono font-bold border border-emerald-500/40">
+                <CheckCheck className="w-3.5 h-3.5" />
+                <span>100% Fully Compliant Class Adviser</span>
+              </div>
+            )}
+            {rec.updatedAt && (
+              <div className="flex items-center space-x-1 px-3 py-1 bg-[#0d1524] text-slate-400 rounded-xl text-[11px] font-mono border border-[#24334b]">
+                <span>Last verified: {new Date(rec.updatedAt).toLocaleDateString()} {new Date(rec.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* SECTION 1: MY STANDARD SCHOOL FORMS */}
+        <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[#24334b]">
+            <div className="flex items-center space-x-2">
+              <span className="bg-blue-600 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg uppercase tracking-wider">
+                Section 1
+              </span>
+              <h4 className="text-base font-bold text-slate-100 font-sans">
+                Standard School Forms (SF 1, SF 3, SF 4, SF 5, SF 6, SF 8, SF 10)
+              </h4>
+            </div>
+            <span className="text-xs text-slate-400 font-mono">
+              DepEd Verification Status
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {STANDARD_SF_COLUMNS.map((col) => {
+              const isComplied = Boolean(rec[col.key]);
+              return (
+                <div
+                  key={col.key}
+                  className={`p-4 rounded-2xl border transition-all space-y-2 ${
+                    isComplied
+                      ? 'bg-emerald-950/30 border-emerald-500/40 text-slate-100'
+                      : 'bg-[#0d1524] border-[#24334b] text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-extrabold font-mono text-emerald-400">
+                      {col.label}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold uppercase ${
+                        isComplied
+                          ? 'bg-emerald-500 text-white shadow-2xs'
+                          : 'bg-slate-800 text-slate-400 border border-slate-700'
+                      }`}
+                    >
+                      {isComplied ? 'COMPLIED ✓' : 'PENDING'}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-100">{col.name}</div>
+                    <div className="text-[11px] text-slate-400 font-mono mt-0.5 leading-snug">{col.desc}</div>
+                  </div>
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-slate-400">
+                      {isComplied ? 'Proof of Compliance on file' : 'Awaiting verification'}
+                    </span>
+                    {isComplied && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* SECTION 2: MY SCHOOL FORM 2 MONTHLY ATTENDANCE */}
+        <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[#24334b]">
+            <div className="flex items-center space-x-2">
+              <span className="bg-purple-600 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg uppercase tracking-wider">
+                Section 2
+              </span>
+              <h4 className="text-base font-bold text-slate-100 font-sans">
+                School Form 2 (SF 2) Monthly Learner Attendance Record
+              </h4>
+            </div>
+            <span className="text-xs text-purple-400 font-mono font-bold">
+              June to April (11 Months)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5">
+            {SF2_MONTH_COLUMNS.map((m) => {
+              const isComplied = Boolean(rec[m.key]);
+              return (
+                <div
+                  key={m.key}
+                  className={`p-3 rounded-2xl border text-center transition-all space-y-1.5 ${
+                    isComplied
+                      ? 'bg-purple-950/30 border-purple-500/40 text-slate-100'
+                      : 'bg-[#0d1524] border-[#24334b] text-slate-300'
+                  }`}
+                >
+                  <div className="text-xs font-mono font-extrabold text-purple-300">
+                    {m.label}
+                  </div>
+                  <div
+                    className={`inline-block px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold uppercase ${
+                      isComplied
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}
+                  >
+                    {isComplied ? 'COMPLIED ✓' : 'PENDING'}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate">
+                    {m.fullMonth.split(' ')[0]}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Render Administrator & Coordinator Matrix for Class Advisers (Section 1 SF 1-10 & Section 2 SF 2)
+  const renderClassAdviserMatrix = () => {
+    return (
+      <div className="space-y-6">
+        {/* Filter & Search Bar */}
+        <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-xs p-4 sm:p-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#24334b]">
+            <div className="flex items-center space-x-2.5">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+                🎓
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-100 font-sans">
+                  Class Adviser School Forms Compliance Matrix
+                </h3>
+                <p className="text-xs text-slate-400 font-mono">
+                  Tick checkboxes when documents are received and verified. Changes persist immediately to Firebase as official proof of compliance.
+                </p>
+              </div>
+            </div>
+
+            {/* Cloud Sync Status */}
+            <div className="flex items-center space-x-2 text-xs font-mono text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-3 py-1.5 rounded-xl">
+              <Cloud className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span>Real-Time Firebase Compliance Sync</span>
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-3">
+            <div className="sm:col-span-7 relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search class advisers by name, surname, or DepEd email..."
+                className="w-full pl-9 pr-4 py-2.5 bg-[#0d1524] border border-[#24334b] rounded-xl text-xs font-mono text-slate-100 placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs font-mono"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="sm:col-span-5">
+              <select
+                value={departmentFilter}
+                onChange={(e) => setDepartmentFilter(e.target.value)}
+                aria-label="Filter by department"
+                className="w-full px-3 py-2.5 bg-[#0d1524] border border-[#24334b] rounded-xl text-xs font-mono text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              >
+                <option value="all" className="bg-[#0d1524] text-slate-100">All Departments ({classAdvisersList.length} Advisers)</option>
+                <option value="Senior High School" className="bg-[#0d1524] text-slate-100">Senior High School Department</option>
+                <option value="Junior High School" className="bg-[#0d1524] text-slate-100">Junior High School Department</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* SECTION 1: STANDARD SCHOOL FORMS (SF 1, SF 3, SF 4, SF 5, SF 6, SF 8, SF 10) */}
+        <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-xs overflow-hidden">
+          <div className="p-4 sm:p-5 bg-[#0f1725] border-b border-[#24334b] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <span className="bg-blue-600 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg uppercase tracking-wider">
+                  Section 1
+                </span>
+                <h4 className="text-base font-bold text-slate-100 font-sans">
+                  List of Class Advisers — School Forms (SF 1, SF 3, SF 4, SF 5, SF 6, SF 8, SF 10)
+                </h4>
+              </div>
+              <p className="text-xs text-slate-400 font-mono">
+                Beside each class adviser's name are checkboxes for SF 1, SF 3, SF 4, SF 5, SF 6, SF 8, and SF 10. Ticking saves proof of compliance to Firebase.
+              </p>
+            </div>
+
+            <div className="text-xs font-mono text-slate-300 flex items-center space-x-2">
+              <span className="px-2.5 py-1 bg-[#1a2638] rounded-xl border border-[#2d4060]">
+                Total Advisers: <strong className="text-emerald-400">{filteredClassAdvisers.length}</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Section 1 Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[850px]">
+              <thead>
+                <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
+                  <th className="py-3 px-4 w-60 sm:w-72">Class Adviser</th>
+                  <th className="py-3 px-3 w-36 sm:w-44">Department</th>
+                  {STANDARD_SF_COLUMNS.map((col) => (
+                    <th
+                      key={col.key}
+                      className="py-3 px-2 text-center border-l border-[#24334b] w-14 sm:w-16"
+                      title={`${col.label}: ${col.name} — ${col.desc}`}
+                    >
+                      <div className="flex flex-col items-center justify-center">
+                        <span className="text-emerald-400 font-extrabold text-xs">{col.label}</span>
+                        <span className="text-[9px] text-slate-400 font-normal truncate max-w-[55px] hidden sm:inline">
+                          {col.name.split(' ')[0]}
+                        </span>
+                      </div>
+                    </th>
+                  ))}
+                  <th className="py-3 px-3 text-center w-28 border-l border-[#24334b]">
+                    Progress
+                  </th>
+                  <th className="py-3 px-3 text-center w-36 border-l border-[#24334b]">
+                    Batch Action
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#24334b] text-xs font-mono">
+                {filteredClassAdvisers.length === 0 ? (
+                  <tr>
+                    <td colSpan={4 + STANDARD_SF_COLUMNS.length} className="py-12 text-center text-slate-400 bg-[#141c2c]">
+                      <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                      <div className="font-bold text-sm text-slate-200">No Class Advisers found</div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {classAdvisersList.length === 0
+                          ? 'No faculty members have been designated as "Class Adviser" yet. Designate faculty in Faculty Account Directory.'
+                          : 'Try adjusting your search query or department filter.'}
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredClassAdvisers.map((adviser) => {
+                    const emailKey = adviser.email.toLowerCase().trim();
+                    const record = classAdviserData[emailKey] || {};
+                    const isJHS = (adviser.department || '').toLowerCase().includes('junior');
+
+                    // Count compiled in Section 1
+                    let compliedCount = 0;
+                    STANDARD_SF_COLUMNS.forEach((col) => {
+                      if (record[col.key]) compliedCount++;
+                    });
+                    const isAllComplied = compliedCount === STANDARD_SF_COLUMNS.length;
+
+                    return (
+                      <tr
+                        key={adviser.email}
+                        className="bg-[#141c2c] hover:bg-[#1a2538] transition-colors border-b border-[#24334b]"
+                      >
+                        {/* Class Adviser Info */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center space-x-2.5">
+                            <div className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs text-emerald-300 shrink-0 bg-emerald-950/70 border border-emerald-500/40">
+                              🎓
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-100 truncate text-xs flex items-center space-x-1.5">
+                                <span>{adviser.surname}, {adviser.name}</span>
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-sans font-bold">
+                                  Adviser
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate font-mono">
+                                {adviser.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Department */}
+                        <td className="py-3 px-3 text-slate-300 text-[11px]">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                            isJHS
+                              ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                              : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          }`}>
+                            {isJHS ? 'Junior High' : 'Senior High'}
+                          </span>
+                        </td>
+
+                        {/* Section 1 Checkboxes: SF 1, SF 3, SF 4, SF 5, SF 6, SF 8, SF 10 */}
+                        {STANDARD_SF_COLUMNS.map((col) => {
+                          const isChecked = Boolean(record[col.key]);
+                          return (
+                            <td
+                              key={col.key}
+                              className="py-2.5 px-2 text-center border-l border-[#24334b]"
+                            >
+                              <div className="flex items-center justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleToggleAdviserCheckbox(
+                                      adviser.email,
+                                      col.key,
+                                      isChecked,
+                                      adviser.name,
+                                      adviser.department
+                                    )
+                                  }
+                                  className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all cursor-pointer border ${
+                                    isChecked
+                                      ? 'bg-emerald-600 border-emerald-400 text-white shadow-xs scale-105'
+                                      : 'bg-[#0d1524] border-[#2d4060] hover:border-emerald-500/60 hover:bg-[#1a2638] text-transparent'
+                                  }`}
+                                  title={`${adviser.name} - ${col.label} (${col.name}): ${isChecked ? 'COMPLIED ✓ (Click to uncheck)' : 'Click to tick as Complied'}`}
+                                  aria-label={`Toggle ${col.label} for ${adviser.name}`}
+                                >
+                                  <Check className={`w-4 h-4 stroke-[3] ${isChecked ? 'text-white' : 'opacity-0'}`} />
+                                </button>
+                              </div>
+                            </td>
+                          );
+                        })}
+
+                        {/* Section 1 Progress */}
+                        <td className="py-3 px-3 text-center border-l border-[#24334b]">
+                          <div className="flex flex-col items-center">
+                            <span className={`text-[11px] font-bold ${
+                              isAllComplied ? 'text-emerald-400' : 'text-slate-300'
+                            }`}>
+                              {compliedCount} / {STANDARD_SF_COLUMNS.length}
+                            </span>
+                            <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                              isAllComplied
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {isAllComplied ? 'COMPLIED ✓' : `${Math.round((compliedCount / STANDARD_SF_COLUMNS.length) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Quick Action: Batch 7 SF */}
+                        <td className="py-3 px-3 text-center border-l border-[#24334b]">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleBatchToggleAdviserSf(
+                                adviser.email,
+                                !isAllComplied,
+                                adviser.name,
+                                adviser.department
+                              )
+                            }
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer border ${
+                              isAllComplied
+                                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                                : 'bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border-emerald-500/40'
+                            }`}
+                            title={isAllComplied ? 'Clear all 7 SF for this adviser' : 'Check all 7 SF as Complied'}
+                          >
+                            {isAllComplied ? 'Clear SF' : 'Check 7 SF'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Section 1 Footer */}
+          <div className="p-3 bg-[#0f1725] border-t border-[#24334b] flex flex-col sm:flex-row items-center justify-between text-[11px] font-mono text-slate-400 gap-2">
+            <div className="flex items-center space-x-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
+              <span>Section 1 Forms: <strong>SF 1, SF 3, SF 4, SF 5, SF 6, SF 8, SF 10</strong></span>
+            </div>
+            <div>
+              Saved in Firebase Firestore collection: <span className="text-emerald-400 font-bold">classAdviserSchoolForms</span>
+            </div>
+          </div>
+        </div>
+
+        {/* SECTION 2 (BELOW): EXCLUSIVELY FOR SCHOOL FORM 2 (SF 2) WITH CHECKBOXES FOR JUNE TO APRIL */}
+        <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-xs overflow-hidden">
+          <div className="p-4 sm:p-5 bg-[#0f1725] border-b border-[#24334b] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <span className="bg-purple-600 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg uppercase tracking-wider">
+                  Section 2
+                </span>
+                <h4 className="text-base font-bold text-slate-100 font-sans">
+                  School Form 2 (SF 2) Monthly Attendance Record — Exclusive Dashboard
+                </h4>
+              </div>
+              <p className="text-xs text-slate-400 font-mono">
+                Exclusively for School Form 2 with the same list of Class Advisers. Beside their names are checkboxes for "JUNE" "JULY" "AUGUST" "SEPTEMBER" "OCTOBER" "NOVEMBER" "DECEMBER" "JANUARY" "FEBRUARY" "MARCH" "APRIL".
+              </p>
+            </div>
+
+            <div className="text-xs font-mono text-slate-300 flex items-center space-x-2">
+              <span className="px-2.5 py-1 bg-[#1a2638] rounded-xl border border-[#2d4060]">
+                11 Months Tracked: <strong className="text-purple-400">June–April</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Section 2 Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[950px]">
+              <thead>
+                <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
+                  <th className="py-3 px-4 w-56 sm:w-64">Class Adviser</th>
+                  <th className="py-3 px-3 w-32 sm:w-36">Department</th>
+                  {SF2_MONTH_COLUMNS.map((m) => (
+                    <th
+                      key={m.key}
+                      className="py-3 px-1 text-center border-l border-[#24334b] w-12 sm:w-14"
+                      title={`School Form 2 - ${m.fullMonth}`}
+                    >
+                      <div className="flex flex-col items-center justify-center">
+                        <span className="text-purple-400 font-extrabold text-[10px] sm:text-xs">{m.label.substring(0, 3)}</span>
+                        <span className="text-[8px] text-slate-400 font-normal hidden lg:inline">
+                          {m.label}
+                        </span>
+                      </div>
+                    </th>
+                  ))}
+                  <th className="py-3 px-3 text-center w-28 border-l border-[#24334b]">
+                    SF 2 Status
+                  </th>
+                  <th className="py-3 px-3 text-center w-36 border-l border-[#24334b]">
+                    Batch Action
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#24334b] text-xs font-mono">
+                {filteredClassAdvisers.length === 0 ? (
+                  <tr>
+                    <td colSpan={4 + SF2_MONTH_COLUMNS.length} className="py-12 text-center text-slate-400 bg-[#141c2c]">
+                      <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                      <div className="font-bold text-sm text-slate-200">No Class Advisers found for SF 2</div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredClassAdvisers.map((adviser) => {
+                    const emailKey = adviser.email.toLowerCase().trim();
+                    const record = classAdviserData[emailKey] || {};
+                    const isJHS = (adviser.department || '').toLowerCase().includes('junior');
+
+                    // Count compiled months in Section 2
+                    let compliedCount = 0;
+                    SF2_MONTH_COLUMNS.forEach((m) => {
+                      if (record[m.key]) compliedCount++;
+                    });
+                    const isAllComplied = compliedCount === SF2_MONTH_COLUMNS.length;
+
+                    return (
+                      <tr
+                        key={`sf2-${adviser.email}`}
+                        className="bg-[#141c2c] hover:bg-[#1a2538] transition-colors border-b border-[#24334b]"
+                      >
+                        {/* Class Adviser Info */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center space-x-2.5">
+                            <div className="w-7 h-7 rounded-xl flex items-center justify-center font-bold text-xs text-purple-300 shrink-0 bg-purple-950/70 border border-purple-500/40">
+                              📋
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-100 truncate text-xs">
+                                {adviser.surname}, {adviser.name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate font-mono">
+                                {adviser.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Department */}
+                        <td className="py-3 px-3 text-slate-300 text-[11px]">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                            isJHS
+                              ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                              : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          }`}>
+                            {isJHS ? 'Junior High' : 'Senior High'}
+                          </span>
+                        </td>
+
+                        {/* Section 2 Checkboxes: JUNE, JULY, AUGUST, SEPTEMBER, OCTOBER, NOVEMBER, DECEMBER, JANUARY, FEBRUARY, MARCH, APRIL */}
+                        {SF2_MONTH_COLUMNS.map((m) => {
+                          const isChecked = Boolean(record[m.key]);
+                          return (
+                            <td
+                              key={m.key}
+                              className="py-2.5 px-1 text-center border-l border-[#24334b]"
+                            >
+                              <div className="flex items-center justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleToggleAdviserCheckbox(
+                                      adviser.email,
+                                      m.key,
+                                      isChecked,
+                                      adviser.name,
+                                      adviser.department
+                                    )
+                                  }
+                                  className={`w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer border ${
+                                    isChecked
+                                      ? 'bg-emerald-600 border-emerald-400 text-white shadow-xs scale-105'
+                                      : 'bg-[#0d1524] border-[#2d4060] hover:border-purple-500/60 hover:bg-[#1a2638] text-transparent'
+                                  }`}
+                                  title={`${adviser.name} - SF 2 ${m.label}: ${isChecked ? 'COMPLIED ✓ (Click to uncheck)' : 'Click to tick as Complied'}`}
+                                  aria-label={`Toggle SF 2 ${m.label} for ${adviser.name}`}
+                                >
+                                  <Check className={`w-3.5 h-3.5 stroke-[3] ${isChecked ? 'text-white' : 'opacity-0'}`} />
+                                </button>
+                              </div>
+                            </td>
+                          );
+                        })}
+
+                        {/* Section 2 Progress */}
+                        <td className="py-3 px-3 text-center border-l border-[#24334b]">
+                          <div className="flex flex-col items-center">
+                            <span className={`text-[11px] font-bold ${
+                              isAllComplied ? 'text-purple-400' : 'text-slate-300'
+                            }`}>
+                              {compliedCount} / {SF2_MONTH_COLUMNS.length}
+                            </span>
+                            <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                              isAllComplied
+                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {isAllComplied ? 'COMPLIED ✓' : `${Math.round((compliedCount / SF2_MONTH_COLUMNS.length) * 100)}%`}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Quick Action: Batch SF 2 */}
+                        <td className="py-3 px-3 text-center border-l border-[#24334b]">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleBatchToggleAdviserSf2(
+                                adviser.email,
+                                !isAllComplied,
+                                adviser.name,
+                                adviser.department
+                              )
+                            }
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer border ${
+                              isAllComplied
+                                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                                : 'bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border-purple-500/40'
+                            }`}
+                            title={isAllComplied ? 'Clear all 11 SF 2 months for this adviser' : 'Check all 11 months as Complied'}
+                          >
+                            {isAllComplied ? 'Clear SF 2' : 'Check 11 Months'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Section 2 Footer */}
+          <div className="p-3 bg-[#0f1725] border-t border-[#24334b] flex flex-col sm:flex-row items-center justify-between text-[11px] font-mono text-slate-400 gap-2">
+            <div className="flex items-center space-x-2">
+              <span className="w-2 h-2 rounded-full bg-purple-400 inline-block animate-pulse" />
+              <span>Exclusively School Form 2: <strong>JUNE • JULY • AUGUST • SEPTEMBER • OCTOBER • NOVEMBER • DECEMBER • JANUARY • FEBRUARY • MARCH • APRIL</strong></span>
+            </div>
+            <div className="text-emerald-300 font-bold">
+              ✓ Proof of compliance saved directly to Firebase on tick
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const currentTerm = termsList.find((t) => t.id === selectedTermId) || termsList[0];
 
   return (
@@ -1308,7 +2403,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   </div>
 
                   {/* Admin Button: Set as Current Term to persist in Firebase across refreshes */}
-                  {isAdmin ? (
+                  {canEditDllTosTq ? (
                     selectedTermId === activeDefaultTermId ? (
                       <div
                         className="flex items-center space-x-1.5 px-3 py-2 bg-amber-500/20 text-amber-200 border border-amber-400/40 rounded-2xl text-xs font-mono font-bold shadow-xs select-none"
@@ -1357,8 +2452,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   )}
                 </div>
 
-                {/* Inline Week Adjuster & Immediate Save Button (Admin) or Indicator (Faculty) */}
-                {isAdmin ? (
+                {/* Inline Week Adjuster & Immediate Save Button (Principal, MT, Master Admin) or Indicator */}
+                {canEditDllTosTq ? (
                   <div className="flex items-center space-x-1.5 bg-white/10 border border-white/20 p-1 rounded-2xl shadow-inner backdrop-blur-xs">
                     <span className="text-[11px] font-mono font-bold text-blue-200 pl-2 hidden sm:inline">
                       Weeks:
@@ -1498,11 +2593,25 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         </div>
       </div>
 
-      {/* SECTION SELECTOR TABS: DLL, TOS, and TQ */}
+      {/* SECTION SELECTOR TABS: Class Advisers, DLL, TOS, and TQ */}
       <div className="bg-[#141c2c] p-2.5 sm:p-3 rounded-3xl border border-[#24334b] shadow-2xs">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 flex-1">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 flex-1">
             {CATEGORIES.map((cat) => {
+              // FOR COORDINATOR: ONLY show the "Class Advisers" tab and REMOVE the DLL, TOS, and TQ tabs!
+              // Since only "School Principal", "Master Teacher", and "Master Admin" can edit DLL, TOS, and TQ.
+              if (isCoordinator && cat.id !== 'class-advisers') {
+                return null;
+              }
+
+              // Show CLASS ADVISERS tab ONLY to Coordinator, Master Admin, and designated Class Advisers!
+              // Those designated with "Non-Adviser" role will ONLY see DLL, TOS, and TQ!
+              if (cat.id === 'class-advisers') {
+                const canSeeClassAdviserTab = canManageClassAdvisers || isClassAdviser;
+                if (!canSeeClassAdviserTab) {
+                  return null;
+                }
+              }
               const isActive = activeCategory === cat.id;
               return (
                 <button
@@ -1512,7 +2621,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     setActiveCategory(cat.id);
                     setSelectedItemToSave(0);
                   }}
-                  className={`px-3 py-3 rounded-2xl font-sans font-bold text-xs sm:text-sm transition-all duration-200 flex flex-col sm:flex-row items-center justify-center space-y-1 sm:space-y-0 sm:space-x-2 cursor-pointer border ${
+                  className={`flex-1 min-w-[130px] px-3 py-3 rounded-2xl font-sans font-bold text-xs sm:text-sm transition-all duration-200 flex flex-col sm:flex-row items-center justify-center space-y-1 sm:space-y-0 sm:space-x-2 cursor-pointer border ${
                     isActive
                       ? `${cat.activeBg} border-transparent shadow-md scale-[1.01] text-white`
                       : 'bg-[#0d1524] text-slate-200 hover:text-white hover:bg-[#1a2638] border-[#24334b]'
@@ -1551,7 +2660,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             <span className="text-slate-300">{currentCategory.fullName} — {currentCategory.shortDescription}</span>
           </div>
           <div className="text-slate-400 font-medium">
-            {isWeeklyCategory ? (
+            {activeCategory === 'class-advisers' ? (
+              <span className="font-bold text-emerald-400">
+                Section 1: SF 1, 3, 4, 5, 6, 8, 10 • Section 2: SF 2 Monthly Attendance (June–April)
+              </span>
+            ) : isWeeklyCategory ? (
               <>
                 Active: <span className="font-bold text-blue-400">{currentTerm.name}</span> • <span className="font-bold text-indigo-400">Weeks 1 to {currentTermWeeks}</span>
               </>
@@ -1566,6 +2679,135 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       {/* Top Metrics Cards (Administrator Only) */}
       {isAdmin && (
+        activeCategory === 'class-advisers' ? (
+          canManageClassAdvisers ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+            {/* Metric 1: Total Class Advisers */}
+            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
+                <span>Class Advisers</span>
+                <div className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
+                  <GraduationCap className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
+                  {adviserStats.totalAdvisers}
+                </span>
+                <span className="text-xs text-slate-400 font-mono">advisers</span>
+              </div>
+              <p className="text-[11px] text-emerald-400 truncate font-mono">
+                Designated Class Advisers
+              </p>
+            </div>
+
+            {/* Metric 2: Section 1 Compliance (SF 1, 3, 4, 5, 6, 8, 10) */}
+            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
+                <span>Section 1 (SF 1-10)</span>
+                <div className="p-1.5 bg-blue-500/20 text-blue-400 rounded-xl">
+                  <CheckSquare className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
+                  {adviserStats.sfPercentage}%
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  ({adviserStats.sfTotalComplied}/{adviserStats.sfTotalPossible})
+                </span>
+              </div>
+              <div className="w-full bg-[#0d1524] rounded-full h-2 overflow-hidden border border-[#24334b]">
+                <div
+                  className="bg-blue-600 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${adviserStats.sfPercentage}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Metric 3: Section 2 Compliance (SF 2 June to April) */}
+            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
+                <span>Section 2 (SF 2 Monthly)</span>
+                <div className="p-1.5 bg-purple-500/20 text-purple-400 rounded-xl">
+                  <CalendarDays className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
+                  {adviserStats.sf2Percentage}%
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  ({adviserStats.sf2TotalComplied}/{adviserStats.sf2TotalPossible})
+                </span>
+              </div>
+              <div className="w-full bg-[#0d1524] rounded-full h-2 overflow-hidden border border-[#24334b]">
+                <div
+                  className="bg-purple-600 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${adviserStats.sf2Percentage}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Metric 4: 100% Fully Compliant Advisers */}
+            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
+                <span>100% Compliant</span>
+                <div className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono">
+                  {adviserStats.fullyCompliantAdvisers}
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  / {adviserStats.totalAdvisers}
+                </span>
+              </div>
+              <p className="text-[11px] text-emerald-300 font-mono truncate font-medium">
+                Completed all SF & SF 2
+              </p>
+            </div>
+
+            {/* Metric 5: SF 1 to 10 Forms */}
+            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
+                <span>Forms Monitored</span>
+                <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-xl">
+                  <FileText className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-amber-400 font-mono">
+                  7 Forms
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 font-mono truncate">
+                SF 1, 3, 4, 5, 6, 8, 10
+              </p>
+            </div>
+
+            {/* Metric 6: SF 2 Attendance Months */}
+            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2 col-span-2 sm:col-span-1">
+              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
+                <span>SF 2 Months</span>
+                <div className="p-1.5 bg-teal-500/20 text-teal-400 rounded-xl">
+                  <Clock className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-teal-300 font-mono">
+                  11 Months
+                </span>
+              </div>
+              <p className="text-[11px] text-teal-400 truncate font-mono font-medium">
+                June to April School Year
+              </p>
+            </div>
+          </div>
+          ) : null
+        ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           {/* Metric 1: Overall Compliance */}
           <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
@@ -1694,10 +2936,28 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </p>
           </div>
         </div>
+        )
       )}
 
       {/* NON-ADMIN FACULTY HIGHLIGHT CARD (When Directory Table is Hidden) */}
       {!isAdmin && (
+        activeCategory === 'class-advisers' ? (
+          isClassAdviser ? (
+            renderClassAdviserFacultyPersonalView()
+          ) : (
+            <div className="bg-[#141c2c] border border-amber-500/30 rounded-3xl p-8 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-xl mx-auto">
+                🔒
+              </div>
+              <h3 className="text-lg font-bold text-slate-100 font-sans">
+                Class Adviser Section Restricted
+              </h3>
+              <p className="text-xs text-slate-300 font-mono max-w-md mx-auto">
+                You are currently designated with the "Non-Adviser" role. Only designated Class Advisers, the Coordinator, and Master Admin have access to Class Adviser school forms.
+              </p>
+            </div>
+          )
+        ) : (
         <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
@@ -1995,10 +3255,28 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
           )}
         </div>
+        )
       )}
 
       {/* SECTION 1: FACULTY SUBMISSION DIRECTORY (ADMINISTRATOR ONLY) */}
       {isAdmin ? (
+        activeCategory === 'class-advisers' ? (
+          canManageClassAdvisers ? (
+            renderClassAdviserMatrix()
+          ) : (
+            <div className="bg-[#141c2c] border border-amber-500/30 rounded-3xl p-8 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-xl mx-auto">
+                🔒
+              </div>
+              <h3 className="text-lg font-bold text-slate-100 font-sans">
+                Class Adviser Compliance Matrix Restricted
+              </h3>
+              <p className="text-xs text-slate-300 font-mono max-w-md mx-auto">
+                Only the Coordinator and the Master Admin have permission to view and edit the Class Adviser compliance matrix.
+              </p>
+            </div>
+          )
+        ) : (
         <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-xs overflow-hidden">
           {/* Controls & Filter Bar */}
           <div className="p-4 sm:p-5 border-b border-[#24334b] bg-[#0f1725] space-y-3">
@@ -2020,63 +3298,69 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               </div>
 
               {/* Administrator Per-Item Retention & Save Controls */}
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Auto-Save Live Badge */}
-                <div
-                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-2xl text-xs font-mono font-bold select-none shadow-2xs"
-                  title="Checkbox changes are automatically and immediately synced to Firebase Firestore in real-time"
-                >
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Auto-Save Active</span>
-                </div>
-
-                {/* Specific Column Save Dropdown */}
-                <div className="flex items-center space-x-1 bg-[#0d1524] border border-[#24334b] p-1 rounded-2xl shadow-2xs">
-                  <span className="text-[11px] font-mono font-bold text-slate-400 pl-2">Save:</span>
-                  <select
-                    value={selectedItemToSave}
-                    onChange={(e) => setSelectedItemToSave(Number(e.target.value))}
-                    aria-label="Select item to save"
-                    className="bg-transparent text-xs font-mono font-bold text-slate-100 px-2 py-1 cursor-pointer focus:outline-hidden"
+              {canEditDllTosTq ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Auto-Save Live Badge */}
+                  <div
+                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-2xl text-xs font-mono font-bold select-none shadow-2xs"
+                    title="Checkbox changes are automatically and immediately synced to Firebase Firestore in real-time"
                   >
-                    {columnItems.map((col, i) => (
-                      <option key={col.key} value={i} className="bg-[#0d1524] text-slate-100">
-                        {col.fullLabel}
-                      </option>
-                    ))}
-                  </select>
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Auto-Save Active</span>
+                  </div>
+
+                  {/* Specific Column Save Dropdown */}
+                  <div className="flex items-center space-x-1 bg-[#0d1524] border border-[#24334b] p-1 rounded-2xl shadow-2xs">
+                    <span className="text-[11px] font-mono font-bold text-slate-400 pl-2">Save:</span>
+                    <select
+                      value={selectedItemToSave}
+                      onChange={(e) => setSelectedItemToSave(Number(e.target.value))}
+                      aria-label="Select item to save"
+                      className="bg-transparent text-xs font-mono font-bold text-slate-100 px-2 py-1 cursor-pointer focus:outline-hidden"
+                    >
+                      {columnItems.map((col, i) => (
+                        <option key={col.key} value={i} className="bg-[#0d1524] text-slate-100">
+                          {col.fullLabel}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveItemToFirebase(selectedItemToSave)}
+                      disabled={isSavingIndex === selectedItemToSave}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-mono font-bold rounded-xl transition-all flex items-center space-x-1 cursor-pointer active:scale-95 shadow-2xs"
+                      title={`Save ${columnItems[selectedItemToSave]?.fullLabel} data permanently to Firebase`}
+                    >
+                      {isSavingIndex === selectedItemToSave ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Save className="w-3.5 h-3.5" />
+                      )}
+                      <span>Save {columnItems[selectedItemToSave]?.shortLabel}</span>
+                    </button>
+                  </div>
+
+                  {/* Save All to Firebase Button */}
                   <button
                     type="button"
-                    onClick={() => handleSaveItemToFirebase(selectedItemToSave)}
-                    disabled={isSavingIndex === selectedItemToSave}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-mono font-bold rounded-xl transition-all flex items-center space-x-1 cursor-pointer active:scale-95 shadow-2xs"
-                    title={`Save ${columnItems[selectedItemToSave]?.fullLabel} data permanently to Firebase`}
+                    onClick={handleSaveAllToFirebase}
+                    disabled={isSavingAll}
+                    className="px-3.5 py-2 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-mono font-bold rounded-2xl transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer active:scale-95"
+                    title={`Save all ${currentCategory.name} records to Firebase Firestore for permanent retention`}
                   >
-                    {isSavingIndex === selectedItemToSave ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    {isSavingAll ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
                     ) : (
-                      <Save className="w-3.5 h-3.5" />
+                      <Cloud className="w-4 h-4 text-indigo-200" />
                     )}
-                    <span>Save {columnItems[selectedItemToSave]?.shortLabel}</span>
+                    <span>Save All to Firebase</span>
                   </button>
                 </div>
-
-                {/* Save All to Firebase Button */}
-                <button
-                  type="button"
-                  onClick={handleSaveAllToFirebase}
-                  disabled={isSavingAll}
-                  className="px-3.5 py-2 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-mono font-bold rounded-2xl transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer active:scale-95"
-                  title={`Save all ${currentCategory.name} records to Firebase Firestore for permanent retention`}
-                >
-                  {isSavingAll ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Cloud className="w-4 h-4 text-indigo-200" />
-                  )}
-                  <span>Save All to Firebase</span>
-                </button>
-              </div>
+              ) : (
+                <div className="text-xs font-mono text-slate-400 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
+                  <span>View Only Mode (Only Principal, Master Teacher, and Master Admin can edit)</span>
+                </div>
+              )}
             </div>
 
             {/* Search, Filter & Status Badges */}
@@ -2209,19 +3493,21 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         <span className={`text-[11px] font-extrabold ${isWeeklyCategory ? 'text-blue-400' : 'text-purple-400'}`}>
                           {col.headerLabel}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => handleSaveItemToFirebase(col.index)}
-                          disabled={isSavingIndex === col.index}
-                          className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
-                          title={`Save ${col.fullLabel} data to Firebase`}
-                        >
-                          {isSavingIndex === col.index ? (
-                            <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
-                          ) : (
-                            <Save className="w-3 h-3" />
-                          )}
-                        </button>
+                        {canEditDllTosTq && (
+                          <button
+                            type="button"
+                            onClick={() => handleSaveItemToFirebase(col.index)}
+                            disabled={isSavingIndex === col.index}
+                            className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
+                            title={`Save ${col.fullLabel} data to Firebase`}
+                          >
+                            {isSavingIndex === col.index ? (
+                              <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
+                            ) : (
+                              <Save className="w-3 h-3" />
+                            )}
+                          </button>
+                        )}
                       </div>
                     </th>
                   ))}
@@ -2298,9 +3584,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                             >
                               <button
                                 type="button"
-                                onClick={() => handleOpenCellAction(faculty, col)}
+                                onClick={() => canEditDllTosTq && handleOpenCellAction(faculty, col)}
+                                disabled={!canEditDllTosTq}
                                 aria-label={`Review ${col.fullLabel} for ${faculty.name}`}
-                                className={`rounded-lg border flex items-center justify-center mx-auto transition-all cursor-pointer active:scale-90 relative ${
+                                className={`rounded-lg border flex items-center justify-center mx-auto transition-all ${canEditDllTosTq ? 'cursor-pointer active:scale-90' : 'cursor-default'} relative ${
                                   isWeeklyCategory ? 'w-7 h-7' : 'w-9 h-7 px-1'
                                 } ${
                                   isChecked
@@ -2360,13 +3647,16 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         <td className="py-3 px-3 text-center">
                           <button
                             type="button"
-                            onClick={() => handleCheckAllItems(faculty.email, !isAllChecked)}
-                            className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold transition-all cursor-pointer ${
-                              isAllChecked
-                                ? 'bg-[#1c273a] text-slate-300 hover:bg-[#25344d] border border-[#2d3e57]'
-                                : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/40'
+                            onClick={() => canEditDllTosTq && handleCheckAllItems(faculty.email, !isAllChecked)}
+                            disabled={!canEditDllTosTq}
+                            className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold transition-all ${
+                              !canEditDllTosTq
+                                ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border border-slate-700'
+                                : isAllChecked
+                                ? 'bg-[#1c273a] text-slate-300 hover:bg-[#25344d] border border-[#2d3e57] cursor-pointer'
+                                : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/40 cursor-pointer'
                             }`}
-                            title={isAllChecked ? `Clear all ${currentCategory.name} submissions` : `Mark all ${currentCategory.name} complete (Checked)`}
+                            title={!canEditDllTosTq ? 'Only Principal, Master Teacher, and Master Admin can edit' : isAllChecked ? `Clear all ${currentCategory.name} submissions` : `Mark all ${currentCategory.name} complete (Checked)`}
                           >
                             {isAllChecked ? 'Reset' : 'Check All'}
                           </button>
@@ -2415,10 +3705,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
           </div>
         </div>
+        )
       ) : null}
 
       {/* SECTION 2: FACULTY SUBMISSION PROGRESS VISUALIZER (ADMINISTRATOR ONLY) */}
-      {isAdmin ? (
+      {isAdmin && activeCategory !== 'class-advisers' ? (
         <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-xs p-5 sm:p-6 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#24334b] pb-4">
             <div className="flex items-center space-x-3">
@@ -3224,7 +4515,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       )}
 
       {/* ADMIN STATUS REVIEW MODAL (Checked vs With Comments vs Incomplete) */}
-      {isAdmin && activeCellAction && (
+      {canEditDllTosTq && activeCellAction && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-2xl max-w-lg w-full overflow-hidden text-slate-100 animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}

@@ -28,6 +28,7 @@ export interface FacultyDoc {
   name: string;
   email: string;
   department: string;
+  advisoryRole?: 'Class Adviser' | 'Non-Adviser';
   createdAt?: string;
 }
 
@@ -124,11 +125,36 @@ export const saveFacultyToFirestore = async (facultyList: FacultyDoc[]) => {
         name: f.name,
         email: f.email.toLowerCase(),
         department: f.department || 'Senior High School Dept.',
+        advisoryRole: f.advisoryRole || 'Non-Adviser',
         createdAt: f.createdAt || new Date().toISOString(),
       }, { merge: true });
     }
   } catch (err) {
     console.error('Error saving faculty to Firestore:', err);
+  }
+};
+
+export const updateFacultyAdvisoryRoleInFirestore = async (email: string, advisoryRole: 'Class Adviser' | 'Non-Adviser') => {
+  try {
+    const docId = emailToDocId(email);
+    await setDoc(doc(db, FACULTY_COL, docId), {
+      advisoryRole: advisoryRole,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (err) {
+    console.error('Error updating faculty advisory role in Firestore:', err);
+  }
+};
+
+export const updateFacultyDepartmentInFirestore = async (email: string, department: string) => {
+  try {
+    const docId = emailToDocId(email);
+    await setDoc(doc(db, FACULTY_COL, docId), {
+      department: department,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (err) {
+    console.error('Error updating faculty department in Firestore:', err);
   }
 };
 
@@ -140,12 +166,39 @@ export const deleteFacultyFromFirestore = async (email: string) => {
   }
 };
 
+export const FACULTY_STORAGE_KEY = 'svnhs_faculty_cache_v1';
+
+export const getStoredFaculty = (): FacultyDoc[] => {
+  try {
+    const raw = localStorage.getItem(FACULTY_STORAGE_KEY);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.error('Error reading stored faculty:', e);
+  }
+  return [];
+};
+
+export const saveFacultyToLocalStorage = (list: FacultyDoc[]) => {
+  try {
+    localStorage.setItem(FACULTY_STORAGE_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.error('Error saving faculty to localStorage:', e);
+  }
+};
+
 export const subscribeFaculty = (onUpdate: (facultyList: FacultyDoc[]) => void) => {
   return onSnapshot(collection(db, FACULTY_COL), (snapshot) => {
     const list: FacultyDoc[] = snapshot.docs.map((d) => d.data() as FacultyDoc);
+    if (list && list.length > 0) {
+      saveFacultyToLocalStorage(list);
+    }
     onUpdate(list);
   }, (err) => {
     console.error('Error subscribing to faculty collection:', err);
+    const cached = getStoredFaculty();
+    onUpdate(cached);
   });
 };
 
@@ -171,8 +224,11 @@ export const deleteAdminFromFirestore = async (email: string) => {
   try {
     const cleanEmail = (email || '').toLowerCase().trim();
     if (!cleanEmail) return;
-    await deleteDoc(doc(db, ADMINS_COL, emailToDocId(cleanEmail)));
-    await deleteDoc(doc(db, PASSWORDS_COL, emailToDocId(cleanEmail)));
+    const docId = emailToDocId(cleanEmail);
+    await deleteDoc(doc(db, ADMINS_COL, docId));
+    await deleteDoc(doc(db, PASSWORDS_COL, docId));
+    await deleteDoc(doc(db, PASSWORDS_COL, `admin_${docId}`));
+    await deleteDoc(doc(db, PASSWORDS_COL, `faculty_${docId}`));
 
     if (cleanEmail === 'marivic.villaluz@deped.gov.ph') {
       await deleteDoc(doc(db, ADMINS_COL, 'admin-marivic'));
@@ -768,13 +824,19 @@ export const seedInitialAdminIfEmpty = async () => {
 
     // Ensure deleted admins (Marivic R. Villaluz & SHS Department Coordinator) are purged from Firestore
     try {
-      await deleteDoc(doc(db, ADMINS_COL, emailToDocId('marivic.villaluz@deped.gov.ph')));
+      const marivicDocId = emailToDocId('marivic.villaluz@deped.gov.ph');
+      await deleteDoc(doc(db, ADMINS_COL, marivicDocId));
       await deleteDoc(doc(db, ADMINS_COL, 'admin-marivic'));
-      await deleteDoc(doc(db, PASSWORDS_COL, emailToDocId('marivic.villaluz@deped.gov.ph')));
+      await deleteDoc(doc(db, PASSWORDS_COL, marivicDocId));
+      await deleteDoc(doc(db, PASSWORDS_COL, `admin_${marivicDocId}`));
+      await deleteDoc(doc(db, PASSWORDS_COL, `faculty_${marivicDocId}`));
 
-      await deleteDoc(doc(db, ADMINS_COL, emailToDocId('coordinator@deped.gov.ph')));
+      const coordDocId = emailToDocId('coordinator@deped.gov.ph');
+      await deleteDoc(doc(db, ADMINS_COL, coordDocId));
       await deleteDoc(doc(db, ADMINS_COL, 'admin-coordinator'));
-      await deleteDoc(doc(db, PASSWORDS_COL, emailToDocId('coordinator@deped.gov.ph')));
+      await deleteDoc(doc(db, PASSWORDS_COL, coordDocId));
+      await deleteDoc(doc(db, PASSWORDS_COL, `admin_${coordDocId}`));
+      await deleteDoc(doc(db, PASSWORDS_COL, `faculty_${coordDocId}`));
 
       // Scan and delete any remaining document in ADMINS_COL matching the deleted admins
       const existingAdminsSnap = await getDocs(collection(db, ADMINS_COL));
@@ -1938,6 +2000,195 @@ export const seedInitialSchoolPermanentFoldersIfEmpty = async () => {
   } catch (err) {
     console.error('Error seeding initial school permanent folders:', err);
   }
+};
+
+// ==========================================
+// 14. CLASS ADVISER SCHOOL FORMS COMPLIANCE
+// Section 1: SF 1, SF 3, SF 4, SF 5, SF 6, SF 8, SF 10
+// Section 2: SF 2 Monthly (JUNE to APRIL)
+// ==========================================
+export interface ClassAdviserSchoolFormsRecord {
+  facultyEmail: string;
+  facultyName: string;
+  department?: string;
+  // Section 1: Standard School Forms
+  sf1?: boolean;
+  sf3?: boolean;
+  sf4?: boolean;
+  sf5?: boolean;
+  sf6?: boolean;
+  sf8?: boolean;
+  sf10?: boolean;
+  // Section 2: SF 2 Monthly Attendance Compliance
+  sf2_june?: boolean;
+  sf2_july?: boolean;
+  sf2_august?: boolean;
+  sf2_september?: boolean;
+  sf2_october?: boolean;
+  sf2_november?: boolean;
+  sf2_december?: boolean;
+  sf2_january?: boolean;
+  sf2_february?: boolean;
+  sf2_march?: boolean;
+  sf2_april?: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+const CLASS_ADVISER_FORMS_COL = 'classAdviserSchoolForms';
+const CLASS_ADVISER_FORMS_STORAGE_KEY = 'svnhs_class_adviser_forms_cache_v2';
+
+export const getStoredClassAdviserSchoolForms = (): Record<string, ClassAdviserSchoolFormsRecord> => {
+  try {
+    const raw = localStorage.getItem(CLASS_ADVISER_FORMS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+export const saveClassAdviserSchoolFormsToLocalStorage = (data: Record<string, ClassAdviserSchoolFormsRecord>) => {
+  try {
+    localStorage.setItem(CLASS_ADVISER_FORMS_STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.error('Error caching Class Adviser School Forms:', e);
+  }
+};
+
+export const saveClassAdviserFormCheckboxToFirestore = async (
+  facultyEmail: string,
+  field: string,
+  value: boolean,
+  metadata?: { facultyName?: string; department?: string; updatedBy?: string }
+) => {
+  try {
+    const cleanEmail = facultyEmail.toLowerCase().trim();
+    if (!cleanEmail) return;
+    const docId = emailToDocId(cleanEmail);
+
+    const currentCached = getStoredClassAdviserSchoolForms();
+    const existing: ClassAdviserSchoolFormsRecord = currentCached[cleanEmail] || {
+      facultyEmail: cleanEmail,
+      facultyName: metadata?.facultyName || '',
+      department: metadata?.department || '',
+    };
+    (existing as any)[field] = value;
+    existing.updatedAt = new Date().toISOString();
+    if (metadata?.updatedBy) existing.updatedBy = metadata.updatedBy;
+    currentCached[cleanEmail] = existing;
+    saveClassAdviserSchoolFormsToLocalStorage(currentCached);
+
+    await setDoc(
+      doc(db, CLASS_ADVISER_FORMS_COL, docId),
+      {
+        id: docId,
+        facultyEmail: cleanEmail,
+        facultyName: metadata?.facultyName || existing.facultyName || '',
+        department: metadata?.department || existing.department || '',
+        [field]: value,
+        updatedAt: new Date().toISOString(),
+        ...(metadata?.updatedBy ? { updatedBy: metadata.updatedBy } : {}),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error saving class adviser form checkbox to Firestore:', err);
+  }
+};
+
+export const batchSaveClassAdviserSchoolFormsToFirestore = async (
+  facultyEmail: string,
+  updates: Partial<ClassAdviserSchoolFormsRecord>,
+  metadata?: { facultyName?: string; department?: string; updatedBy?: string }
+) => {
+  try {
+    const cleanEmail = facultyEmail.toLowerCase().trim();
+    if (!cleanEmail) return;
+    const docId = emailToDocId(cleanEmail);
+
+    const currentCached = getStoredClassAdviserSchoolForms();
+    const existing: ClassAdviserSchoolFormsRecord = currentCached[cleanEmail] || {
+      facultyEmail: cleanEmail,
+      facultyName: metadata?.facultyName || '',
+      department: metadata?.department || '',
+    };
+    const merged: ClassAdviserSchoolFormsRecord = {
+      ...existing,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+      ...(metadata?.updatedBy ? { updatedBy: metadata.updatedBy } : {}),
+    };
+    currentCached[cleanEmail] = merged;
+    saveClassAdviserSchoolFormsToLocalStorage(currentCached);
+
+    await setDoc(
+      doc(db, CLASS_ADVISER_FORMS_COL, docId),
+      {
+        id: docId,
+        facultyEmail: cleanEmail,
+        facultyName: metadata?.facultyName || existing.facultyName || '',
+        department: metadata?.department || existing.department || '',
+        ...updates,
+        updatedAt: new Date().toISOString(),
+        ...(metadata?.updatedBy ? { updatedBy: metadata.updatedBy } : {}),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error batch updating class adviser form in Firestore:', err);
+  }
+};
+
+export const subscribeClassAdviserSchoolForms = (
+  onUpdate: (dataMap: Record<string, ClassAdviserSchoolFormsRecord>) => void
+) => {
+  return onSnapshot(
+    collection(db, CLASS_ADVISER_FORMS_COL),
+    (snapshot) => {
+      const map: Record<string, ClassAdviserSchoolFormsRecord> = {};
+      snapshot.docs.forEach((d) => {
+        const data = d.data();
+        if (data.facultyEmail) {
+          const emailKey = data.facultyEmail.toLowerCase().trim();
+          map[emailKey] = {
+            facultyEmail: emailKey,
+            facultyName: data.facultyName || '',
+            department: data.department || '',
+            sf1: Boolean(data.sf1),
+            sf3: Boolean(data.sf3),
+            sf4: Boolean(data.sf4),
+            sf5: Boolean(data.sf5),
+            sf6: Boolean(data.sf6),
+            sf8: Boolean(data.sf8),
+            sf10: Boolean(data.sf10),
+            sf2_june: Boolean(data.sf2_june),
+            sf2_july: Boolean(data.sf2_july),
+            sf2_august: Boolean(data.sf2_august),
+            sf2_september: Boolean(data.sf2_september),
+            sf2_october: Boolean(data.sf2_october),
+            sf2_november: Boolean(data.sf2_november),
+            sf2_december: Boolean(data.sf2_december),
+            sf2_january: Boolean(data.sf2_january),
+            sf2_february: Boolean(data.sf2_february),
+            sf2_march: Boolean(data.sf2_march),
+            sf2_april: Boolean(data.sf2_april),
+            updatedAt: data.updatedAt || '',
+            updatedBy: data.updatedBy || '',
+          };
+        }
+      });
+
+      const localCached = getStoredClassAdviserSchoolForms();
+      const merged = { ...localCached, ...map };
+      saveClassAdviserSchoolFormsToLocalStorage(merged);
+      onUpdate(merged);
+    },
+    (err) => {
+      console.error('Error subscribing to Class Adviser School Forms:', err);
+      const cached = getStoredClassAdviserSchoolForms();
+      onUpdate(cached);
+    }
+  );
 };
 
 

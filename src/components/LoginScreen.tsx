@@ -260,7 +260,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         const isMaster = cleanTarget === masterAdminEmail.toLowerCase() || cleanTarget === 'johnvic.garnica@deped.gov.ph';
         if (isMaster || adminMatch) {
           setForgotUserFound({
-            name: adminMatch ? adminMatch.name : 'Administrator',
+            name: adminMatch ? adminMatch.name : (isMaster ? 'Master Admin (John Vic Garnica)' : 'Administrator'),
             email: cleanTarget,
             role: 'Admin',
             department: adminMatch?.designation || 'Administration',
@@ -288,30 +288,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     setIsForgotPassOpen(true);
   };
 
-  // Verify Temporary Password ("svnhs304868")
-  const handleVerifyTemporaryPassword = (e: React.FormEvent) => {
+  // Submit Password Change Request for Master Admin Approval
+  const handleSubmitNewPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setForgotError(null);
 
     let cleanEmail = forgotEmail.trim().toLowerCase();
     if (!cleanEmail) {
-      setForgotError('Please enter your official DepEd email address.');
+      setForgotError(`Please enter your official DepEd ${forgotPortalMode} email address.`);
       return;
     }
     if (!cleanEmail.endsWith('@deped.gov.ph')) {
       cleanEmail += '@deped.gov.ph';
     }
 
-    const cleanTemp = forgotTempPass.trim();
-    if (!cleanTemp) {
-      setForgotError('Please enter the temporary password.');
-      return;
-    }
-
-    if (cleanTemp !== TEMPORARY_PASSWORD) {
-      setForgotError('Invalid temporary password. Please enter the authorized temporary password.');
-      return;
-    }
+    let resolvedName = cleanEmail.split('@')[0];
 
     // Role-specific verification: Faculty Portal vs Admin Portal
     if (forgotPortalMode === 'Admin') {
@@ -321,22 +312,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       if (!isMaster && !adminMatch) {
         const isFaculty = facultyList.some((f) => f.email.toLowerCase() === cleanEmail);
         if (isFaculty) {
-          setForgotError('Faculty Account Detected: This email is registered as a Faculty member. Please switch to the Faculty Portal on the login screen to request a faculty password change.');
+          setForgotError('Faculty Account Detected: This email is registered as a Faculty member. Please switch to the Faculty Portal (tab above) to request a faculty password change.');
         } else {
-          setForgotError('Administrator Account Not Found: This email is not registered in the Admin Directory. Please check your credentials or apply for an admin account.');
+          setForgotError('Administrator Account Not Found: This email is not registered in the Admin Directory. Please verify your credentials or submit an admin registration request.');
         }
         return;
       }
-
-      setForgotEmail(cleanEmail);
-      setForgotUserFound({
-        name: adminMatch ? adminMatch.name : 'Administrator',
-        email: cleanEmail,
-        role: 'Admin',
-        department: adminMatch?.designation || 'Administration',
-      });
-      setIsTempVerified(true);
-      setForgotError(null);
+      resolvedName = adminMatch ? adminMatch.name : (isMaster ? 'Master Admin (John Vic Garnica)' : 'Administrator');
     } else {
       // Faculty Portal check
       const facultyMatch = facultyList.find((f) => f.email.toLowerCase() === cleanEmail);
@@ -347,29 +329,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           cleanEmail === 'johnvic.garnica@deped.gov.ph';
 
         if (isAdmin) {
-          setForgotError('Administrator Account Detected: This email is registered as an Administrator. Please switch to the Admin Portal on the login screen to request an admin password change.');
+          setForgotError('Administrator Account Detected: This email is registered as an Administrator. Please switch to the Admin Portal (tab above) to request an admin password change.');
         } else {
-          setForgotError('Faculty Account Not Found: This email is not registered in the Faculty Directory. Please check your credentials or register for a faculty account.');
+          setForgotError('Faculty Account Not Found: This email is not registered in the Faculty Directory. Please verify your email or click "Create Faculty Account".');
         }
         return;
       }
-
-      setForgotEmail(cleanEmail);
-      setForgotUserFound({
-        name: facultyMatch.name,
-        email: cleanEmail,
-        role: 'Faculty',
-        department: facultyMatch.department,
-      });
-      setIsTempVerified(true);
-      setForgotError(null);
+      resolvedName = facultyMatch.name;
     }
-  };
-
-  // Submit New Password for Master Admin Approval
-  const handleSubmitNewPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setForgotError(null);
 
     const cleanNew = forgotNewPass.trim();
     const cleanConfirm = forgotConfirmPass.trim();
@@ -383,7 +350,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       return;
     }
     if (cleanNew === TEMPORARY_PASSWORD) {
-      setForgotError('New password cannot be the temporary password. Please create a personalized password.');
+      setForgotError('New password cannot be the temporary key. Please choose a personalized password.');
       return;
     }
     if (cleanNew !== cleanConfirm) {
@@ -391,11 +358,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       return;
     }
 
-    const cleanEmail = forgotEmail.trim().toLowerCase();
     const reqDoc: PasswordResetReqDoc = {
       id: `reset-${Date.now()}`,
       email: cleanEmail,
-      name: forgotUserFound?.name || cleanEmail.split('@')[0],
+      name: resolvedName,
       role: forgotPortalMode,
       requestedNewPassword: cleanNew,
       requestedAt: new Date().toLocaleDateString('en-US', {
@@ -410,8 +376,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
     try {
       await savePasswordResetRequestToFirestore(reqDoc);
+      setForgotEmail(cleanEmail);
       setForgotSuccess(true);
-      setSuccessMsg(`✅ Password reset request submitted for ${forgotPortalMode} account "${cleanEmail}"! Master Admin (John Vic Garnica) has been notified to accept your new password.`);
+      setSuccessMsg(`✅ Password change request submitted for ${forgotPortalMode} account "${cleanEmail}"! Master Admin (John Vic Garnica) has been notified to accept your new password.`);
     } catch {
       setForgotError('Failed to submit password reset request. Please check network connection.');
     }
@@ -449,14 +416,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
         setForgotPortalMode('Admin');
         setForgotEmail(cleanEmail);
-        setForgotTempPass(TEMPORARY_PASSWORD);
+        setForgotNewPass('');
+        setForgotConfirmPass('');
         setForgotUserFound({
-          name: registeredAdmin ? registeredAdmin.name : 'Administrator',
+          name: registeredAdmin ? registeredAdmin.name : (isMaster ? 'Master Admin (John Vic Garnica)' : 'Administrator'),
           email: cleanEmail,
           role: 'Admin',
           department: registeredAdmin?.designation || 'Administration',
         });
-        setIsTempVerified(true);
         setForgotError(null);
         setForgotSuccess(false);
         setIsForgotPassOpen(true);
@@ -470,14 +437,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
         setForgotPortalMode('Faculty');
         setForgotEmail(cleanEmail);
-        setForgotTempPass(TEMPORARY_PASSWORD);
+        setForgotNewPass('');
+        setForgotConfirmPass('');
         setForgotUserFound({
           name: registeredFaculty.name,
           email: cleanEmail,
           role: 'Faculty',
           department: registeredFaculty.department,
         });
-        setIsTempVerified(true);
         setForgotError(null);
         setForgotSuccess(false);
         setIsForgotPassOpen(true);
@@ -489,6 +456,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     let name = 'Faculty Member';
     let userDepartment = 'Senior High School Department';
     let userDesignation: string | undefined = undefined;
+    let userAdvisoryRole: 'Class Adviser' | 'Non-Adviser' | undefined = undefined;
 
     if (loginMode === 'admin') {
       const cleanMasterEmail = masterAdminEmail.toLowerCase();
@@ -541,7 +509,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         } else if (cleanEmail.includes('coordinator') || registeredAdmin.designation === 'Coordinator') {
           userDesignation = 'Coordinator';
         } else {
-          userDesignation = registeredAdmin.designation || 'Coordinator';
+          userDesignation = registeredAdmin.designation || 'School Administrator';
         }
       }
     } else {
@@ -580,6 +548,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       name = registeredFaculty.name;
       userDepartment = registeredFaculty.department || 'Senior High School Department';
+      userAdvisoryRole = registeredFaculty.advisoryRole || 'Non-Adviser';
     }
 
     setIsLoading(true);
@@ -592,6 +561,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         role: role,
         department: userDepartment,
         designation: userDesignation,
+        advisoryRole: userAdvisoryRole,
       };
 
       if (rememberMe) {
@@ -1631,7 +1601,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
       )}
 
-      {/* MODAL: FORGOT PASSWORD & TEMPORARY PASSWORD DIALOG */}
+      {/* MODAL: FORGOT PASSWORD & CHANGE REQUEST DIALOG */}
       {isForgotPassOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
           <div className={`bg-white border-2 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 font-mono relative text-slate-800 ${
@@ -1665,9 +1635,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     </span>
                   </div>
                   <p className="text-[10px] text-slate-500 font-sans mt-0.5">
-                    {!isTempVerified
-                      ? `Authenticate with your DepEd ${forgotPortalMode} email & temporary key`
-                      : `Set new ${forgotPortalMode} password for Master Admin approval`}
+                    Submit password change request for Master Admin approval
                   </p>
                 </div>
               </div>
@@ -1677,6 +1645,40 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 className="p-1 hover:bg-slate-100 text-slate-500 rounded-lg cursor-pointer transition-colors"
               >
                 <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Portal Switcher Tab */}
+            <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setForgotPortalMode('Faculty');
+                  setForgotError(null);
+                }}
+                className={`py-1.5 px-3 rounded-lg font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                  forgotPortalMode === 'Faculty'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>Faculty Portal</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setForgotPortalMode('Admin');
+                  setForgotError(null);
+                }}
+                className={`py-1.5 px-3 rounded-lg font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                  forgotPortalMode === 'Admin'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Admin Portal</span>
               </button>
             </div>
 
@@ -1724,23 +1726,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   Return to {forgotPortalMode} Login
                 </button>
               </div>
-            ) : !isTempVerified ? (
-              /* STEP 1: Enter DepEd Email & Temporary Password */
-              <form onSubmit={handleVerifyTemporaryPassword} className="space-y-4">
-                <div className={`border rounded-xl p-3 text-[11px] space-y-1 ${
-                  forgotPortalMode === 'Admin'
-                    ? 'bg-amber-50 border-amber-200 text-amber-900'
-                    : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                }`}>
-                  <div className="flex items-center space-x-1.5 font-bold">
-                    <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-amber-600" />
-                    <span>{forgotPortalMode} Security Verification</span>
-                  </div>
-                  <p className="font-sans leading-relaxed text-[10.5px]">
-                    Enter your registered <strong>{forgotPortalMode}</strong> DepEd email and the authorized temporary authentication password.
-                  </p>
-                </div>
-
+            ) : (
+              /* Password Change Request Form */
+              <form onSubmit={handleSubmitNewPassword} className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
                     <Mail className={`w-3.5 h-3.5 ${
@@ -1758,86 +1746,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
                     }`}
                   />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
-                      <Lock className={`w-3.5 h-3.5 ${
-                        forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
-                      }`} />
-                      <span>Temporary Password</span>
-                    </label>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type={showForgotTempPass ? 'text' : 'password'}
-                      value={forgotTempPass}
-                      onChange={(e) => setForgotTempPass(e.target.value)}
-                      placeholder="Enter temporary password..."
-                      required
-                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
-                        forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowForgotTempPass(!showForgotTempPass)}
-                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
-                    >
-                      {showForgotTempPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setIsForgotPassOpen(false)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className={`px-5 py-2 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5 ${
-                      forgotPortalMode === 'Admin'
-                        ? 'bg-amber-600 hover:bg-amber-500'
-                        : 'bg-emerald-700 hover:bg-emerald-800'
-                    }`}
-                  >
-                    <Key className="w-3.5 h-3.5 text-white" />
-                    <span>Verify {forgotPortalMode} Key</span>
-                  </button>
-                </div>
-              </form>
-            ) : (
-              /* STEP 2: Change Current Password Form */
-              <form onSubmit={handleSubmitNewPassword} className="space-y-4">
-                {/* User Verification Banner */}
-                <div className={`border rounded-xl p-3 text-xs space-y-1 ${
-                  forgotPortalMode === 'Admin'
-                    ? 'bg-amber-50 border-amber-200'
-                    : 'bg-emerald-50 border-emerald-200'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 flex items-center space-x-1">
-                      <CheckCircle2 className={`w-3.5 h-3.5 ${
-                        forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
-                      }`} />
-                      <span>{forgotUserFound?.name || forgotEmail}</span>
-                    </span>
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
-                      forgotPortalMode === 'Admin'
-                        ? 'bg-amber-200 text-amber-900'
-                        : 'bg-emerald-200/80 text-emerald-900'
-                    }`}>
-                      {forgotPortalMode} Account
-                    </span>
-                  </div>
-                  <p className="text-[10px] font-mono text-slate-600">
-                    {forgotEmail} • Temporary Key Verified ✅
-                  </p>
                 </div>
 
                 <div className="space-y-1">
@@ -1910,13 +1818,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsTempVerified(false);
-                      setForgotTempPass('');
-                    }}
+                    onClick={() => setIsForgotPassOpen(false)}
                     className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 cursor-pointer"
                   >
-                    Back
+                    Cancel
                   </button>
                   <button
                     type="submit"
@@ -1927,7 +1832,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     }`}
                   >
                     <Send className="w-3.5 h-3.5 text-white" />
-                    <span>Submit for Admin Approval</span>
+                    <span>Submit {forgotPortalMode} Request</span>
                   </button>
                 </div>
               </form>

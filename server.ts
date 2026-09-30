@@ -9,16 +9,9 @@ const PORT = 3000;
 
 app.enable('trust proxy');
 
-// Enforce HTTPS and security headers in production
+// Security headers
 app.use((req, res, next) => {
-  if (process.env.NODE_ENV === 'production') {
-    const proto = req.headers['x-forwarded-proto'];
-    if (proto && proto !== 'https') {
-      return res.redirect(301, `https://${req.headers.host}${req.url}`);
-    }
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-  }
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   next();
 });
 
@@ -188,7 +181,7 @@ async function startServer() {
   const distAssets = path.join(distPath, 'assets');
   const hasSrc = fs.existsSync(path.join(process.cwd(), 'src/main.tsx'));
 
-  // Ensure dist artifacts exist for static serving
+  // Ensure dist directories exist
   if (!fs.existsSync(distPath)) {
     fs.mkdirSync(distPath, { recursive: true });
   }
@@ -197,16 +190,9 @@ async function startServer() {
   }
   const rootHtml = path.join(process.cwd(), 'index.html');
   const destHtml = path.join(distPath, 'index.html');
-  if (fs.existsSync(rootHtml)) {
+  // Only copy rootHtml if destHtml does not already exist
+  if (!fs.existsSync(destHtml) && fs.existsSync(rootHtml)) {
     fs.copyFileSync(rootHtml, destHtml);
-  }
-  const publicDir = path.join(process.cwd(), 'public');
-  if (fs.existsSync(publicDir)) {
-    fs.cpSync(publicDir, distPath, { recursive: true });
-  }
-  const srcImagesDir = path.join(process.cwd(), 'src/assets/images');
-  if (fs.existsSync(srcImagesDir)) {
-    fs.cpSync(srcImagesDir, distAssets, { recursive: true });
   }
 
   if (process.env.NODE_ENV !== 'production' && hasSrc) {
@@ -216,7 +202,7 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Disable all caching for static assets to ensure preview updates instantly
+    // Disable caching for preview updates
     app.use((req, res, next) => {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
       res.setHeader('Pragma', 'no-cache');
@@ -228,21 +214,22 @@ async function startServer() {
       maxAge: 0,
       etag: false,
       lastModified: false,
-      setHeaders: (res) => {
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-      }
     }));
-    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+    app.use('/assets', express.static(distAssets, {
       maxAge: 0,
       etag: false,
       lastModified: false,
-      setHeaders: (res) => {
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-      }
     }));
     app.get('*', (req, res) => {
+      if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: 'Endpoint not found' });
+      }
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (fs.existsSync(destHtml)) {
+        res.sendFile(destHtml);
+      } else {
+        res.sendFile(rootHtml);
+      }
     });
   }
 

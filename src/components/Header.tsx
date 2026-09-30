@@ -55,7 +55,10 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const isCoordinator =
     currentUser?.designation === 'Coordinator' ||
-    (currentUser?.designation?.toLowerCase().includes('coordinator') ?? false);
+    (currentUser?.designation?.toLowerCase().includes('coordinator') ?? false) ||
+    currentUser?.role === 'Coordinator' ||
+    (currentUser?.role?.toLowerCase() === 'coordinator') ||
+    (currentUser?.email?.toLowerCase().includes('coordinator') ?? false);
 
   useEffect(() => {
     const updateClock = () => {
@@ -152,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
               </button>
 
-              {currentUser?.role === 'Admin' && (
+              {(currentUser?.role === 'Admin' || isCoordinator) && (
                 <button
                   onClick={() => setActiveTab('admin')}
                   className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer relative ${
@@ -162,12 +165,12 @@ export const Header: React.FC<HeaderProps> = ({
                   }`}
                 >
                   <ShieldCheck className={`w-4 h-4 ${activeTab === 'admin' ? 'text-amber-300' : 'text-amber-400'}`} />
-                  <span>Admin Dashboard</span>
+                  <span>{isCoordinator ? 'Coordinator Dashboard' : 'Admin Dashboard'}</span>
                 </button>
               )}
 
-              {/* Submission Report Button next to Admin Dashboard (Hidden for Coordinator) */}
-              {!isCoordinator && (
+              {/* Submission Report Button in Navigation (Hidden beside Coordinator Dashboard for Coordinator) */}
+              {currentUser && !isCoordinator && (
                 <button
                   onClick={() => setActiveTab('submission-report')}
                   className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer relative ${
@@ -262,7 +265,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>Announcements</span>
               </button>
 
-              {currentUser?.role === 'Admin' && (
+              {(currentUser?.role === 'Admin' || isCoordinator) && (
                 <button
                   onClick={() => {
                     setActiveTab('admin');
@@ -275,11 +278,11 @@ export const Header: React.FC<HeaderProps> = ({
                   }`}
                 >
                   <ShieldCheck className={`w-4 h-4 mb-1 ${activeTab === 'admin' ? 'text-amber-300' : 'text-amber-400'}`} />
-                  <span>Admin</span>
+                  <span>{isCoordinator ? 'Coordinator' : 'Admin'}</span>
                 </button>
               )}
 
-              {!isCoordinator && (
+              {currentUser && !isCoordinator && (
                 <button
                   onClick={() => {
                     setActiveTab('submission-report');

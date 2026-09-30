@@ -5,6 +5,7 @@ export interface UserProfile {
   role: 'Faculty' | 'Student' | 'Admin';
   department: string;
   designation?: string;
+  advisoryRole?: 'Class Adviser' | 'Non-Adviser';
   avatarUrl?: string;
 }
 
