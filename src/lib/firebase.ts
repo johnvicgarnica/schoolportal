@@ -12,14 +12,14 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder } from '../types';
+import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder, GalleryPhoto } from '../types';
 import { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
 export { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const db = firebaseConfig.firestoreDatabaseId
-  ? initializeFirestore(app, {}, firebaseConfig.firestoreDatabaseId)
+  ? initializeFirestore(app, { ignoreUndefinedProperties: true }, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
 
 // Types
@@ -78,10 +78,12 @@ const FACULTY_FILES_COL = 'facultyFiles';
 const FACULTY_SUBMISSIONS_COL = 'facultySubmissions';
 const FACULTY_TOSTQ_COL = 'facultyTosTq';
 const FACULTY_SCHOOL_FORMS_COL = 'facultySchoolForms';
+const GALLERY_COL = 'gallery_photos';
 
 const FACULTY_SUBMISSIONS_STORAGE_KEY = 'svnhs_faculty_submissions_cache_v1';
 const FACULTY_TOSTQ_STORAGE_KEY = 'svnhs_faculty_tostq_cache_v1';
 const FACULTY_SCHOOL_FORMS_STORAGE_KEY = 'svnhs_faculty_school_forms_cache_v1';
+const GALLERY_STORAGE_KEY = 'svnhs_gallery_photos_cache_v1';
 
 // Helper: Sanitize email for doc ID
 const emailToDocId = (email: string) => email.trim().toLowerCase().replace(/[^a-z0-9]/gi, '_');
@@ -375,7 +377,7 @@ export const subscribeAdminRequests = (onUpdate: (requests: RegistrationReqDoc[]
   });
 };
 
-// 4.5. PASSWORD RESET REQUESTS (WITH TEMPORARY KEY svnhs304868)
+// 4.5. PASSWORD RESET REQUESTS (WITH TEMPORARY KEY changepass)
 export const savePasswordResetRequestToFirestore = async (request: PasswordResetReqDoc) => {
   try {
     await setDoc(doc(db, PASSWORD_RESET_REQ_COL, request.id), {
@@ -2189,6 +2191,214 @@ export const subscribeClassAdviserSchoolForms = (
       onUpdate(cached);
     }
   );
+};
+
+// ==========================================
+// 15. LOGIN PAGE AUTO-SWIPING GALLERY PHOTOS
+// ==========================================
+
+export const INITIAL_DEFAULT_GALLERY_PHOTOS: GalleryPhoto[] = [
+  {
+    id: 'gallery-svnhs-facade',
+    url: 'https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&w=1600&q=80',
+    title: 'San Vicente National High School Main Campus',
+    caption: 'Department of Education • CARAGA Region • Division of Bislig City • Dedicated to Academic & Moral Excellence',
+    uploadedAt: '2026-10-01',
+    uploadedBy: 'Master Admin',
+    order: 1,
+  },
+  {
+    id: 'gallery-shs-building',
+    url: 'https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&w=1600&q=80',
+    title: 'Senior High School Academic Wing & Quadrangle',
+    caption: 'Empowering Grade 11 & Grade 12 learners across Academic and TVL Tracks with modern DepEd facilities',
+    uploadedAt: '2026-10-01',
+    uploadedBy: 'Master Admin',
+    order: 2,
+  },
+  {
+    id: 'gallery-science-lab',
+    url: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=1600&q=80',
+    title: 'Science, Technology & Innovation Laboratory',
+    caption: 'Fostering future scientists, researchers, and innovators through comprehensive hands-on experimentation',
+    uploadedAt: '2026-10-01',
+    uploadedBy: 'Master Admin',
+    order: 3,
+  },
+  {
+    id: 'gallery-library-resource',
+    url: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=1600&q=80',
+    title: 'Learning Resource & Digital Research Center',
+    caption: 'Expanding educational horizons through reading literacy, instructional modules, and DepEd digital archives',
+    uploadedAt: '2026-10-01',
+    uploadedBy: 'Master Admin',
+    order: 4,
+  },
+  {
+    id: 'gallery-graduation-moving-up',
+    url: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1600&q=80',
+    title: 'Student Excellence & Moving Up Celebrations',
+    caption: 'Proudly recognizing the achievements, leadership, and exemplary character of San Vicente High School scholars',
+    uploadedAt: '2026-10-01',
+    uploadedBy: 'Master Admin',
+    order: 5,
+  },
+];
+
+export const getStoredGalleryPhotos = (): GalleryPhoto[] => {
+  try {
+    const raw = localStorage.getItem(GALLERY_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error reading gallery photos from localStorage:', err);
+  }
+  return INITIAL_DEFAULT_GALLERY_PHOTOS;
+};
+
+export const saveGalleryPhotoToLocalStorage = (photo: GalleryPhoto) => {
+  try {
+    const list = getStoredGalleryPhotos();
+    const idx = list.findIndex((p) => p.id === photo.id);
+    if (idx >= 0) {
+      list[idx] = photo;
+    } else {
+      list.push(photo);
+    }
+    localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.error('Error saving gallery photo to localStorage:', err);
+  }
+};
+
+export const deleteGalleryPhotoFromLocalStorage = (id: string) => {
+  try {
+    const list = getStoredGalleryPhotos();
+    const filtered = list.filter((p) => p.id !== id);
+    localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(filtered));
+  } catch (err) {
+    console.error('Error deleting gallery photo from localStorage:', err);
+  }
+};
+
+export const saveGalleryPhotoToFirestore = async (photo: GalleryPhoto): Promise<void> => {
+  // Defensive sanitization: Guarantee all fields are clean primitives and no undefined properties exist
+  const cleanPhoto: GalleryPhoto = {
+    id: photo.id || `gallery-${Date.now()}`,
+    url: photo.url || '',
+    title: photo.title?.trim() || 'SVNHS Campus Gallery',
+    caption: photo.caption?.trim() || '',
+    uploadedAt: photo.uploadedAt || new Date().toISOString().substring(0, 10),
+    uploadedBy: photo.uploadedBy || 'Master Admin',
+    order: typeof photo.order === 'number' ? photo.order : 1,
+  };
+
+  // 1. Authoritative write to Firestore
+  await setDoc(doc(db, GALLERY_COL, cleanPhoto.id), cleanPhoto, { merge: true });
+
+  // 2. Safe local storage sync with quota safety
+  try {
+    saveGalleryPhotoToLocalStorage(cleanPhoto);
+  } catch (storageErr) {
+    console.warn('LocalStorage gallery caching bypassed due to size limits:', storageErr);
+  }
+};
+
+export const deleteGalleryPhotoFromFirestore = async (id: string): Promise<void> => {
+  // Authoritative delete from Firestore
+  await deleteDoc(doc(db, GALLERY_COL, id));
+
+  // Safe local storage sync
+  try {
+    deleteGalleryPhotoFromLocalStorage(id);
+  } catch (storageErr) {
+    console.warn('LocalStorage gallery delete bypassed:', storageErr);
+  }
+};
+
+export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => void) => {
+  return onSnapshot(
+    collection(db, GALLERY_COL),
+    (snapshot) => {
+      if (snapshot.empty) {
+        // If Firestore gallery collection is currently empty, seed baseline photos and return defaults
+        seedInitialGalleryPhotosIfEmpty();
+        const cached = getStoredGalleryPhotos();
+        onUpdate(cached.length > 0 ? cached : INITIAL_DEFAULT_GALLERY_PHOTOS);
+        return;
+      }
+
+      const list: GalleryPhoto[] = snapshot.docs.map((d) => d.data() as GalleryPhoto);
+
+      // Sort by order asc, then uploadedAt desc
+      list.sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : 999;
+        const orderB = typeof b.order === 'number' ? b.order : 999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (b.uploadedAt || '').localeCompare(a.uploadedAt || '');
+      });
+
+      try {
+        localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {
+        console.warn('Could not cache full gallery snapshot to localStorage due to browser storage limits:', e);
+      }
+
+      onUpdate(list);
+    },
+    (err) => {
+      console.error('Error subscribing to gallery photos collection:', err);
+      const cached = getStoredGalleryPhotos();
+      onUpdate(cached.length > 0 ? cached : INITIAL_DEFAULT_GALLERY_PHOTOS);
+    }
+  );
+};
+
+export const seedInitialGalleryPhotosIfEmpty = async () => {
+  try {
+    const snap = await getDocs(collection(db, GALLERY_COL));
+    if (snap.empty) {
+      for (const photo of INITIAL_DEFAULT_GALLERY_PHOTOS) {
+        const cleanPhoto = {
+          ...photo,
+          caption: photo.caption || '',
+        };
+        await setDoc(doc(db, GALLERY_COL, photo.id), cleanPhoto, { merge: true });
+        try {
+          saveGalleryPhotoToLocalStorage(cleanPhoto);
+        } catch (_) {}
+      }
+      await setDoc(doc(db, SETTINGS_COL, 'gallery_photos_seeded_v1'), {
+        key: 'gallery_photos_seeded_v1',
+        value: 'true',
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    console.error('Error seeding initial gallery photos:', err);
+  }
+};
+
+export const reseedDefaultGalleryPhotos = async () => {
+  try {
+    for (const photo of INITIAL_DEFAULT_GALLERY_PHOTOS) {
+      const cleanPhoto = {
+        ...photo,
+        caption: photo.caption || '',
+      };
+      await setDoc(doc(db, GALLERY_COL, photo.id), cleanPhoto, { merge: true });
+      try {
+        saveGalleryPhotoToLocalStorage(cleanPhoto);
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.error('Error reseeding default gallery photos:', err);
+    throw err;
+  }
 };
 
 

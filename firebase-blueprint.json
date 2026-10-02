@@ -309,6 +309,27 @@
         "updatedBy": { "type": "string" }
       },
       "required": ["facultyEmail"]
+    },
+    "gallery_photos": {
+      "title": "Login Gallery Photos",
+      "description": "Showcase pictures displayed on the auto-swiping login page gallery",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "caption": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "uploadedBy": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "url", "title"]
+    }
+  },
+  "firestore": {
+    "/gallery_photos/{photoId}": {
+      "schema": "gallery_photos",
+      "description": "Public and administrative photos shown in the login screen auto-swiping gallery"
     }
   }
 }

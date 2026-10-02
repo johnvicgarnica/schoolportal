@@ -216,3 +216,13 @@ export interface PasswordResetRequest {
   reviewedBy?: string;
 }
 
+export interface GalleryPhoto {
+  id: string;
+  url: string;
+  title: string;
+  caption?: string;
+  uploadedAt: string;
+  uploadedBy?: string;
+  order?: number;
+}
+

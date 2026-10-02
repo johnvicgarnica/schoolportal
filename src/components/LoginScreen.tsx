@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserProfile, Announcement } from '../types';
+import { UserProfile, GalleryPhoto } from '../types';
 import {
   FacultyDoc,
   AdminDoc,
@@ -10,15 +10,17 @@ import {
   subscribeAdminRequests,
   subscribeUserPasswords,
   subscribeSettings,
-  subscribeAnnouncements,
-  getStoredAnnouncements,
   saveFacultyRequestsToFirestore,
   saveAdminRequestsToFirestore,
   seedInitialAdminIfEmpty,
   PasswordResetReqDoc,
   savePasswordResetRequestToFirestore,
   subscribePasswordResetRequests,
+  subscribeGalleryPhotos,
+  getStoredGalleryPhotos,
+  seedInitialGalleryPhotosIfEmpty,
 } from '../lib/firebase';
+import { AutoSwipingGallery } from './AutoSwipingGallery';
 import {
   Lock,
   Mail,
@@ -37,13 +39,7 @@ import {
   User,
   Clock,
   Send,
-  Megaphone,
   Bell,
-  BellOff,
-  Pin,
-  AlertTriangle,
-  Calendar,
-  Paperclip,
   Quote,
   Info
 } from 'lucide-react';
@@ -89,8 +85,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [masterAdminPassword, setMasterAdminPassword] = useState<string>('garjohn@1995');
   const [masterAdminEmail, setMasterAdminEmail] = useState<string>('johnvic.garnica@deped.gov.ph');
 
-  // Forgot Password / Temporary Password ("svnhs304868") Dialog State
-  const TEMPORARY_PASSWORD = 'svnhs304868';
+  // Forgot Password / Temporary Password ("changepass") Dialog State
+  const TEMPORARY_PASSWORD = 'changepass';
   const [isForgotPassOpen, setIsForgotPassOpen] = useState(false);
   const [forgotPortalMode, setForgotPortalMode] = useState<'Faculty' | 'Admin'>('Faculty');
   const [forgotEmail, setForgotEmail] = useState('');
@@ -111,43 +107,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   } | null>(null);
   const [passwordResetRequests, setPasswordResetRequests] = useState<PasswordResetReqDoc[]>([]);
 
-  // Load important announcements posted by Admin
-  const [importantAnnouncements, setImportantAnnouncements] = useState<Announcement[]>(() => {
-    const list = getStoredAnnouncements();
-    if (list && list.length > 0) {
-      return list.filter((a) => {
-        const isPublished = !a.status || a.status === 'published';
-        const isAdmin =
-          !a.authorRole ||
-          a.authorRole === 'Admin' ||
-          a.authorRole?.toLowerCase().includes('admin') ||
-          a.authorRole?.toLowerCase().includes('head');
-        return isPublished && isAdmin;
-      });
-    }
-    return [];
+  // Load auto-swiping gallery photos
+  const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>(() => {
+    return getStoredGalleryPhotos();
   });
 
   useEffect(() => {
-    // Seed initial admin account into Firestore if needed
+    // Seed initial admin account and default gallery photos into Firestore if needed
     seedInitialAdminIfEmpty();
+    seedInitialGalleryPhotosIfEmpty();
 
-    // 1. Subscribe to Announcements
-    const unsubAnnouncements = subscribeAnnouncements((list) => {
-      if (list && list.length > 0) {
-        const filtered = list.filter((a) => {
-          const isPublished = !a.status || a.status === 'published';
-          const isAdmin =
-            !a.authorRole ||
-            a.authorRole === 'Admin' ||
-            a.authorRole?.toLowerCase().includes('admin') ||
-            a.authorRole?.toLowerCase().includes('head');
-          return isPublished && isAdmin;
-        });
-        setImportantAnnouncements(filtered);
-      } else {
-        setImportantAnnouncements([]);
-      }
+    // 1. Subscribe to Gallery Photos
+    const unsubGallery = subscribeGalleryPhotos((photos) => {
+      setGalleryPhotos(photos || []);
     });
 
     // 2. Subscribe to Faculty Directory
@@ -195,7 +167,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     });
 
     return () => {
-      unsubAnnouncements();
+      unsubGallery();
       unsubFaculty();
       unsubAdmins();
       unsubFacultyReq();
@@ -246,10 +218,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     const targetMode = loginMode === 'admin' ? 'Admin' : 'Faculty';
     setForgotPortalMode(targetMode);
     setForgotEmail(targetEmail);
-    setForgotTempPass('');
+    if (password.trim() === TEMPORARY_PASSWORD) {
+      setForgotTempPass(TEMPORARY_PASSWORD);
+      setIsTempVerified(true);
+    } else {
+      setForgotTempPass('');
+      setIsTempVerified(false);
+    }
     setForgotNewPass('');
     setForgotConfirmPass('');
-    setIsTempVerified(false);
     setForgotError(null);
     setForgotSuccess(false);
 
@@ -338,6 +315,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       resolvedName = facultyMatch.name;
     }
 
+    const cleanTemp = forgotTempPass.trim();
+    if (cleanTemp !== TEMPORARY_PASSWORD) {
+      setForgotError('Invalid Temporary Key. Please enter the authorized temporary key ("changepass") to request a password change.');
+      return;
+    }
+
     const cleanNew = forgotNewPass.trim();
     const cleanConfirm = forgotConfirmPass.trim();
 
@@ -350,7 +333,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       return;
     }
     if (cleanNew === TEMPORARY_PASSWORD) {
-      setForgotError('New password cannot be the temporary key. Please choose a personalized password.');
+      setForgotError('New password cannot be the temporary key ("changepass"). Please choose a personalized password.');
       return;
     }
     if (cleanNew !== cleanConfirm) {
@@ -403,7 +386,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       return;
     }
 
-    // INTERCEPTION: If user entered the temporary password "svnhs304868", prompt the role-specific Change Password dialog
+    // INTERCEPTION: If user entered the temporary password "changepass", prompt the role-specific Change Password dialog
     if (cleanPassword === TEMPORARY_PASSWORD) {
       if (loginMode === 'admin') {
         const registeredAdmin = adminList.find((a) => a.email.toLowerCase() === cleanEmail);
@@ -416,6 +399,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
         setForgotPortalMode('Admin');
         setForgotEmail(cleanEmail);
+        setForgotTempPass(TEMPORARY_PASSWORD);
+        setIsTempVerified(true);
         setForgotNewPass('');
         setForgotConfirmPass('');
         setForgotUserFound({
@@ -437,6 +422,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
         setForgotPortalMode('Faculty');
         setForgotEmail(cleanEmail);
+        setForgotTempPass(TEMPORARY_PASSWORD);
+        setIsTempVerified(true);
         setForgotNewPass('');
         setForgotConfirmPass('');
         setForgotUserFound({
@@ -723,11 +710,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-[450px] h-[450px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
 
-      {/* Main Grid Wrapper (Left: Intro + Message + Announcements, Right: Login Card) */}
-      <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start relative z-10 my-auto">
+      {/* TOP SECTION: Auto-Swiping Gallery of Pictures */}
+      <div className="w-full max-w-6xl relative z-10 mb-6 sm:mb-8 animate-fadeIn">
+        <AutoSwipingGallery photos={galleryPhotos} />
+      </div>
+
+      {/* Main Grid Wrapper (Left: Intro + Message, Right: Login Card) */}
+      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-stretch relative z-10 my-auto">
         
         {/* LEFT SECTION: SVNHS Introduction & Principal Message & Announcements */}
-        <div className="lg:col-span-7 space-y-6 bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800">
+        <div className="lg:col-span-7 flex flex-col justify-between h-full space-y-6 bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800">
           {/* School Header & Badges */}
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -765,7 +757,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           </div>
 
           {/* School Principal's Message Section */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 relative overflow-hidden">
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 relative overflow-hidden flex-1 flex flex-col justify-between">
             <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
               <div className="flex items-center space-x-2 text-amber-900 font-bold text-xs font-mono">
                 <Quote className="w-4 h-4 text-amber-700 shrink-0" />
@@ -776,7 +768,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               </span>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 pt-1">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 pt-1 flex-1">
               {/* Principal Photo */}
               <div className="shrink-0 flex flex-col items-center space-y-1.5">
                 <div className="relative group">
@@ -791,7 +783,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               </div>
 
               {/* Message Content */}
-              <div className="flex-1 space-y-2.5 text-center sm:text-left">
+              <div className="flex-1 flex flex-col justify-between space-y-2.5 text-center sm:text-left h-full">
                 <div className="space-y-2 text-xs sm:text-[13px] text-slate-800 leading-relaxed font-sans italic">
                   <p>
                     "It is with immense pride that San Vicente National High School recognizes and showcases the excellence of its highly competent and dedicated teachers in both the Junior High School and Senior High School Departments. Their professionalism, expertise, and steadfast commitment to quality education serve as the foundation of our school’s success. Through their passion for teaching and genuine dedication to learner development, they continue to cultivate an environment where every student is guided to achieve their full potential.
@@ -801,7 +793,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   </p>
                 </div>
 
-                <div className="pt-2 border-t border-slate-200/80 flex flex-col items-center sm:items-end text-center sm:text-right">
+                <div className="pt-2 border-t border-slate-200/80 flex flex-col items-center sm:items-end text-center sm:text-right mt-auto">
                   <p className="text-xs sm:text-sm font-bold font-serif text-slate-900 tracking-wide">
                     Marivic R. Villaluz, School Principal I
                   </p>
@@ -817,7 +809,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
 
         {/* RIGHT SECTION: Main Login Portal Card */}
-        <div className="lg:col-span-5 w-full bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 backdrop-blur-md shadow-md relative z-10 space-y-6 animate-fadeIn text-slate-800">
+        <div className="lg:col-span-5 w-full flex flex-col justify-between h-full bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 backdrop-blur-md shadow-md relative z-10 space-y-6 animate-fadeIn text-slate-800">
           
           {/* School Logo & Header */}
           <div className="text-center space-y-3">
@@ -1123,120 +1115,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
 
       </div>
-
-        {/* BOTTOM SECTION: Official Admin Announcements */}
-        <div className="lg:col-span-12 bg-white border border-slate-200 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-sm animate-fadeIn space-y-4 text-slate-800">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-            <div className="flex items-center space-x-2 text-amber-700 font-bold text-xs sm:text-sm font-mono">
-              <Megaphone className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600 shrink-0 animate-pulse" />
-              <span>Official Admin Announcements</span>
-            </div>
-            {importantAnnouncements.length > 0 && (
-              <span className="text-[10px] sm:text-xs font-mono font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 sm:py-1 rounded-md border border-emerald-200">
-                {importantAnnouncements.length} {importantAnnouncements.length === 1 ? 'Announcement' : 'Announcements'}
-              </span>
-            )}
-          </div>
-
-          {importantAnnouncements.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
-              {importantAnnouncements.map((item) => (
-                <div
-                  key={item.id}
-                  className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2.5 relative flex flex-col justify-between hover:border-emerald-300 hover:bg-white transition-all shadow-2xs"
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center space-x-2 flex-wrap gap-1">
-                        {item.isPinned && (
-                          <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-mono px-1.5 py-0.5 rounded-sm font-bold flex items-center space-x-1">
-                            <Pin className="w-2.5 h-2.5 text-amber-700" />
-                            <span>PINNED</span>
-                          </span>
-                        )}
-                        {item.priority === 'urgent' && (
-                          <span className="bg-rose-100 text-rose-900 border border-rose-300 text-[9px] font-mono px-1.5 py-0.5 rounded-sm font-bold flex items-center space-x-1">
-                            <AlertTriangle className="w-2.5 h-2.5 text-rose-700" />
-                            <span>URGENT</span>
-                          </span>
-                        )}
-                        {item.priority === 'important' && (
-                          <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-mono px-1.5 py-0.5 rounded-sm font-bold flex items-center space-x-1">
-                            <Megaphone className="w-2.5 h-2.5 text-amber-700" />
-                            <span>IMPORTANT</span>
-                          </span>
-                        )}
-                        {item.priority === 'event' && (
-                          <span className="bg-sky-100 text-sky-900 border border-sky-300 text-[9px] font-mono px-1.5 py-0.5 rounded-sm font-bold flex items-center space-x-1">
-                            <Calendar className="w-2.5 h-2.5 text-sky-700" />
-                            <span>EVENT</span>
-                          </span>
-                        )}
-                        {(item.priority === 'general' || !item.priority) && (
-                          <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[9px] font-mono px-1.5 py-0.5 rounded-sm font-bold flex items-center space-x-1">
-                            <Info className="w-2.5 h-2.5 text-emerald-700" />
-                            <span>GENERAL</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 tracking-tight">
-                      {item.title}
-                    </h4>
-
-                    <p className="text-xs text-slate-600 leading-relaxed font-sans whitespace-pre-wrap">
-                      {item.content}
-                    </p>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-200/80 space-y-1.5 mt-2">
-                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 font-medium">
-                      <div className="flex items-center space-x-1">
-                        <User className="w-3 h-3 text-emerald-600" />
-                        <span>Admin</span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <Calendar className="w-3 h-3 text-emerald-600" />
-                        <span>{item.createdAt}</span>
-                      </div>
-                    </div>
-
-                    {(item.attachmentName || item.attachmentUrl) && (
-                      <div className="pt-0.5">
-                        <a
-                          href={item.attachmentUrl || '#'}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center space-x-1 text-[10px] font-mono text-amber-700 font-bold hover:underline"
-                        >
-                          <Paperclip className="w-3 h-3" />
-                          <span>{item.attachmentName || 'Attachment'}</span>
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-6 text-center space-y-2">
-              <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center">
-                <BellOff className="w-5 h-5 text-slate-400" />
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-xs font-mono font-bold text-slate-700">
-                  No Important Announcement
-                </p>
-                <p className="text-[10px] font-mono text-slate-500 max-w-xs">
-                  There are currently no urgent or important notices posted by the Department Admin.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-      </div>
+    </div>
 
       {/* INSTITUTIONAL & SECURITY FOOTER */}
       <footer className="w-full max-w-6xl mt-6 pt-4 pb-2 border-t border-[#24334b] text-center relative z-10 space-y-2">
@@ -1746,6 +1625,40 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
                     }`}
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span className="flex items-center space-x-1">
+                      <Key className={`w-3.5 h-3.5 ${
+                        forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
+                      }`} />
+                      <span>Temporary Key</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">Key: changepass</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showForgotTempPass ? 'text' : 'password'}
+                      value={forgotTempPass}
+                      onChange={(e) => setForgotTempPass(e.target.value)}
+                      placeholder="Enter temporary key (changepass)..."
+                      required
+                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
+                        forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotTempPass(!showForgotTempPass)}
+                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
+                    >
+                      {showForgotTempPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-sans">
+                    Enter the authorized temporary key <strong>changepass</strong> to authorize your password change request.
+                  </p>
                 </div>
 
                 <div className="space-y-1">

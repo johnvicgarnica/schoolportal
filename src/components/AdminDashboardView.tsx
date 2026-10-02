@@ -9,10 +9,12 @@ import {
   FacultyFolder,
   FacultyPersonalFile,
   SchoolPermanentFolder,
+  GalleryPhoto,
 } from '../types';
 import { AdminFacultyFoldersDirectory } from './AdminFacultyFoldersDirectory';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
 import { SubmissionReportView } from './SubmissionReportView';
+import { AdminGalleryManager } from './AdminGalleryManager';
 import {
   saveFacultyToFirestore,
   updateFacultyAdvisoryRoleInFirestore,
@@ -45,6 +47,9 @@ import {
   subscribePasswordResetRequests,
   updatePasswordResetRequestStatus,
   deletePasswordResetRequestFromFirestore,
+  subscribeGalleryPhotos,
+  getStoredGalleryPhotos,
+  seedInitialGalleryPhotosIfEmpty,
 } from '../lib/firebase';
 import {
   Megaphone,
@@ -86,6 +91,7 @@ import {
   Copy,
   Check,
   FileCheck2,
+  Images,
 } from 'lucide-react';
 
 interface AdminDashboardViewProps {
@@ -147,10 +153,23 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
-  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', or 'submission-report')
+  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', 'submission-report', or 'gallery')
   // Default to 'announcements' so passwords page is not exposed by default
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report'>('announcements');
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery'>('announcements');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
+
+  // Login Page Gallery Photos State (Master Admin)
+  const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>(() => {
+    return getStoredGalleryPhotos();
+  });
+
+  useEffect(() => {
+    seedInitialGalleryPhotosIfEmpty();
+    const unsub = subscribeGalleryPhotos((photos) => {
+      setGalleryPhotos(photos || []);
+    });
+    return () => unsub();
+  }, []);
 
   // School Permanent Folders State (SCHOOL FORMS & SCHOOL DOCUMENTS)
   const [schoolFolders, setSchoolFolders] = useState<SchoolPermanentFolder[]>(() => {
@@ -537,7 +556,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     if (!isMasterAdmin && adminSubTab === 'passwords') {
       setAdminSubTab('announcements');
     }
-    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders')) {
+    if (!isMasterAdmin && adminSubTab === 'gallery') {
+      setAdminSubTab('announcements');
+    }
+    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders' || adminSubTab === 'gallery')) {
       setAdminSubTab('announcements');
     }
     if (!isCoordinator && adminSubTab === 'submission-report') {
@@ -647,7 +669,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Password Reset Requests (svnhs304868) State for Master Admin
+  // Password Reset Requests (changepass) State for Master Admin
   const [passwordResetRequests, setPasswordResetRequests] = useState<PasswordResetReqDoc[]>([]);
   const [revealedResetPasswords, setRevealedResetPasswords] = useState<Record<string, boolean>>({});
 
@@ -1293,6 +1315,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     );
   }
 
+  const totalPendingAccountsAndResets = facultyRequests.length + adminRequests.length + pendingPasswordResets.length;
+
   return (
     <div className="space-y-6 pb-16 w-full font-sans animate-fadeIn">
       {/* Toast Notification Banner */}
@@ -1342,104 +1366,120 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Admin Sub-Navigation Tabs */}
-      <div className="bg-[#0f1725] p-2 rounded-2xl border border-[#24334b] flex flex-col sm:flex-row items-center justify-between gap-2.5 shadow-xs">
-        <div className="flex items-center flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
+      {/* Admin Sub-Navigation Tabs - Screen-Fitted, Compact, Non-Overlapping */}
+      <div className="bg-[#0f1725] p-1.5 sm:p-2 rounded-2xl border border-[#24334b] flex flex-wrap lg:flex-nowrap items-center justify-between gap-1.5 sm:gap-2 shadow-xs w-full">
+        <div className="flex items-center flex-wrap gap-1.5 sm:gap-2 flex-1 min-w-0">
           {/* Faculty & Admin Accounts & Passwords Tab: STRICTLY VISIBLE ONLY TO MASTER ADMIN */}
           {isMasterAdmin && !isCoordinator && (
-            <div className="flex items-center space-x-1 flex-1 sm:flex-none">
-              <button
-                type="button"
-                onClick={() => setAdminSubTab('passwords')}
-                className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
-                  adminSubTab === 'passwords'
-                    ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400 ring-offset-1 border border-emerald-600 scale-[1.02]'
-                    : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 hover:shadow-xs'
-                }`}
-              >
-                <Key className="w-4 h-4 text-emerald-200" />
-                <span>Faculty & Admin Accounts & Passwords</span>
-                {facultyRequests.length + adminRequests.length + pendingPasswordResets.length > 0 ? (
-                  <span className="bg-rose-500 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full animate-bounce ml-1 flex items-center space-x-1">
-                    <span>{facultyRequests.length + adminRequests.length + pendingPasswordResets.length} Pending</span>
-                    {pendingPasswordResets.length > 0 && (
-                      <span className="bg-amber-400 text-slate-900 px-1 rounded text-[9px] font-black">
-                        {pendingPasswordResets.length} Resets
-                      </span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="bg-emerald-900/60 text-emerald-100 border border-emerald-400/40 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ml-1">
-                    Master Admin Only
-                  </span>
-                )}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('passwords')}
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
+                adminSubTab === 'passwords'
+                  ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400/60 border border-emerald-500'
+                  : 'bg-emerald-600/90 hover:bg-emerald-600 text-white border border-emerald-500/60 hover:shadow-xs'
+              }`}
+            >
+              <Key className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
+              <span>Accounts & Passwords</span>
+              {totalPendingAccountsAndResets > 0 ? (
+                <span className="bg-rose-500 text-white font-black text-[9px] px-1.5 py-0.5 rounded-full animate-pulse ml-0.5">
+                  {totalPendingAccountsAndResets} Pending
+                </span>
+              ) : (
+                <span className="bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5 hidden xl:inline">
+                  Master
+                </span>
+              )}
+            </button>
           )}
 
           <button
             type="button"
             onClick={() => setAdminSubTab('announcements')}
-            className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
+            className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
               adminSubTab === 'announcements'
-                ? 'bg-blue-700 text-white shadow-md ring-2 ring-blue-400 ring-offset-1 border border-blue-600 scale-[1.02]'
-                : 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-500 hover:shadow-xs'
+                ? 'bg-blue-700 text-white shadow-md ring-2 ring-blue-400/60 border border-blue-500'
+                : 'bg-blue-600/90 hover:bg-blue-600 text-white border border-blue-500/60 hover:shadow-xs'
             }`}
           >
-            <Megaphone className="w-4 h-4 text-blue-200" />
-            <span>Department Bulletins ({announcements.length})</span>
+            <Megaphone className="w-3.5 h-3.5 text-blue-200 shrink-0" />
+            <span>Bulletins</span>
+            <span className="opacity-80 font-normal ml-0.5">({announcements.length})</span>
           </button>
 
           {!isCoordinator && (
             <button
               type="button"
               onClick={() => setAdminSubTab('faculty-folders')}
-              className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
                 adminSubTab === 'faculty-folders'
-                  ? 'bg-amber-700 text-white shadow-md ring-2 ring-amber-400 ring-offset-1 border border-amber-600 scale-[1.02]'
-                  : 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 hover:shadow-xs'
+                  ? 'bg-amber-700 text-white shadow-md ring-2 ring-amber-400/60 border border-amber-500'
+                  : 'bg-amber-600/90 hover:bg-amber-600 text-white border border-amber-500/60 hover:shadow-xs'
               }`}
             >
-              <FolderGit2 className="w-4 h-4 text-amber-200" />
-              <span>Faculty Folders ({facultyFolders.length})</span>
+              <FolderGit2 className="w-3.5 h-3.5 text-amber-200 shrink-0" />
+              <span>Faculty Folders</span>
+              <span className="opacity-80 font-normal ml-0.5">({facultyFolders.length})</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={() => setAdminSubTab('school-folders')}
-            className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
+            className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
               adminSubTab === 'school-folders'
-                ? 'bg-indigo-700 text-white shadow-md ring-2 ring-indigo-400 ring-offset-1 border border-indigo-600 scale-[1.02]'
-                : 'bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-500 hover:shadow-xs'
+                ? 'bg-indigo-700 text-white shadow-md ring-2 ring-indigo-400/60 border border-indigo-500'
+                : 'bg-indigo-600/90 hover:bg-indigo-600 text-white border border-indigo-500/60 hover:shadow-xs'
             }`}
           >
-            <FolderLock className="w-4 h-4 text-indigo-200" />
-            <span>School Forms & Documents ({schoolFolders.length})</span>
+            <FolderLock className="w-3.5 h-3.5 text-indigo-200 shrink-0" />
+            <span>School Forms</span>
+            <span className="opacity-80 font-normal ml-0.5">({schoolFolders.length})</span>
           </button>
+
+          {/* Master Admin Login Page Gallery Pictures Tab */}
+          {isMasterAdmin && !isCoordinator && (
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('gallery')}
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
+                adminSubTab === 'gallery'
+                  ? 'bg-rose-700 text-white shadow-md ring-2 ring-rose-400/60 border border-rose-500'
+                  : 'bg-rose-600/90 hover:bg-rose-600 text-white border border-rose-500/60 hover:shadow-xs'
+              }`}
+            >
+              <Images className="w-3.5 h-3.5 text-rose-200 shrink-0" />
+              <span>Login Gallery</span>
+              <span className="opacity-80 font-normal ml-0.5">({galleryPhotos.length})</span>
+              <span className="bg-rose-950/60 text-rose-300 border border-rose-500/30 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5 hidden xl:inline">
+                Master
+              </span>
+            </button>
+          )}
 
           {/* RETAINED FOR COORDINATOR DASHBOARD: Submission Report for Class Advisers */}
           {isCoordinator && (
             <button
               type="button"
               onClick={() => setAdminSubTab('submission-report')}
-              className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-xs ${
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
                 adminSubTab === 'submission-report'
-                  ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400 ring-offset-1 border border-emerald-600 scale-[1.02]'
-                  : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 hover:shadow-xs hover:scale-[1.02]'
+                  ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400/60 border border-emerald-500'
+                  : 'bg-emerald-600/90 hover:bg-emerald-600 text-white border border-emerald-500/60 hover:shadow-xs'
               }`}
               title="Open Submission Report (Class Advisers)"
             >
-              <FileCheck2 className="w-4 h-4 text-emerald-200" />
+              <FileCheck2 className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
               <span>Submission Report</span>
-              <span className="bg-emerald-800 text-emerald-100 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ml-1">
+              <span className="bg-emerald-950/60 text-emerald-300 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5">
                 Class Advisers
               </span>
             </button>
           )}
         </div>
 
-        <div className="text-[11px] font-mono text-slate-300 flex items-center space-x-1.5 px-3 py-1 bg-[#141c2c] rounded-lg border border-[#24334b] shadow-2xs">
+        <div className="hidden sm:flex text-[10px] font-mono text-slate-300 items-center space-x-1.5 px-2.5 py-1.5 bg-[#141c2c] rounded-xl border border-[#24334b] shadow-2xs shrink-0">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           <span className="font-medium">DepEd Firestore Synced</span>
         </div>
@@ -1449,7 +1489,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       {adminSubTab === 'passwords' && isMasterAdmin && (
         <div className="space-y-6">
 
-          {/* Pending Password Reset Requests (Triggered by Temporary Password svnhs304868) */}
+          {/* Pending Password Reset Requests (Triggered by Temporary Password changepass) */}
           <div className="bg-white border-2 border-emerald-500/40 rounded-2xl p-6 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
               <div className="flex items-center space-x-3">
@@ -3932,6 +3972,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             currentUser={currentUser}
             facultyFolders={facultyFolders}
             initialCategory="class-advisers"
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB 6: MASTER ADMIN LOGIN PAGE GALLERY PICTURES */}
+      {adminSubTab === 'gallery' && isMasterAdmin && (
+        <div className="space-y-6 animate-fadeIn">
+          <AdminGalleryManager
+            currentUser={currentUser}
+            photos={galleryPhotos}
           />
         </div>
       )}
