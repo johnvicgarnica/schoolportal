@@ -218,13 +218,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     const targetMode = loginMode === 'admin' ? 'Admin' : 'Faculty';
     setForgotPortalMode(targetMode);
     setForgotEmail(targetEmail);
-    if (password.trim() === TEMPORARY_PASSWORD) {
-      setForgotTempPass(TEMPORARY_PASSWORD);
-      setIsTempVerified(true);
-    } else {
-      setForgotTempPass('');
-      setIsTempVerified(false);
-    }
+    // User must always enter the key first before changing password
+    setForgotTempPass('');
+    setIsTempVerified(false);
     setForgotNewPass('');
     setForgotConfirmPass('');
     setForgotError(null);
@@ -265,10 +261,89 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     setIsForgotPassOpen(true);
   };
 
-  // Submit Password Change Request for Master Admin Approval
+  // Step 1: Verify the Temporary Key & Account before allowing password change
+  const handleVerifyKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotError(null);
+
+    let cleanEmail = forgotEmail.trim().toLowerCase();
+    if (!cleanEmail) {
+      setForgotError(`Please enter your official DepEd ${forgotPortalMode} email address.`);
+      return;
+    }
+    if (!cleanEmail.endsWith('@deped.gov.ph')) {
+      cleanEmail += '@deped.gov.ph';
+    }
+
+    // Role-specific verification: Faculty Portal vs Admin Portal
+    if (forgotPortalMode === 'Admin') {
+      const adminMatch = adminList.find((a) => a.email.toLowerCase() === cleanEmail);
+      const isMaster = cleanEmail === masterAdminEmail.toLowerCase() || cleanEmail === 'johnvic.garnica@deped.gov.ph';
+
+      if (!isMaster && !adminMatch) {
+        const isFaculty = facultyList.some((f) => f.email.toLowerCase() === cleanEmail);
+        if (isFaculty) {
+          setForgotError('Faculty Account Detected: This email is registered as a Faculty member. Please switch to the Faculty Portal (tab above) to request a faculty password change.');
+        } else {
+          setForgotError('Administrator Account Not Found: This email is not registered in the Admin Directory. Please verify your credentials or submit an admin registration request.');
+        }
+        return;
+      }
+      setForgotUserFound({
+        name: adminMatch ? adminMatch.name : (isMaster ? 'Master Admin (John Vic Garnica)' : 'Administrator'),
+        email: cleanEmail,
+        role: 'Admin',
+        department: adminMatch?.designation || 'Administration',
+      });
+    } else {
+      // Faculty Portal check
+      const facultyMatch = facultyList.find((f) => f.email.toLowerCase() === cleanEmail);
+
+      if (!facultyMatch) {
+        const isAdmin = adminList.some((a) => a.email.toLowerCase() === cleanEmail) ||
+          cleanEmail === masterAdminEmail.toLowerCase() ||
+          cleanEmail === 'johnvic.garnica@deped.gov.ph';
+
+        if (isAdmin) {
+          setForgotError('Administrator Account Detected: This email is registered as an Administrator. Please switch to the Admin Portal (tab above) to request an admin password change.');
+        } else {
+          setForgotError('Faculty Account Not Found: This email is not registered in the Faculty Directory. Please verify your email or click "Create Faculty Account".');
+        }
+        return;
+      }
+      setForgotUserFound({
+        name: facultyMatch.name,
+        email: cleanEmail,
+        role: 'Faculty',
+        department: facultyMatch.department,
+      });
+    }
+
+    const cleanTemp = forgotTempPass.trim();
+    if (!cleanTemp) {
+      setForgotError('Please enter the authorization key to proceed.');
+      return;
+    }
+    if (cleanTemp !== TEMPORARY_PASSWORD) {
+      setForgotError('Invalid Authorization Key. Please enter the correct authorization key before changing your password.');
+      return;
+    }
+
+    // Key is verified! Allow user to proceed to Step 2
+    setForgotEmail(cleanEmail);
+    setIsTempVerified(true);
+    setForgotError(null);
+  };
+
+  // Step 2: Submit Password Change Request for Master Admin Approval
   const handleSubmitNewPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setForgotError(null);
+
+    if (!isTempVerified) {
+      setForgotError('Please enter and verify the authorization key first.');
+      return;
+    }
 
     let cleanEmail = forgotEmail.trim().toLowerCase();
     if (!cleanEmail) {
@@ -317,7 +392,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
     const cleanTemp = forgotTempPass.trim();
     if (cleanTemp !== TEMPORARY_PASSWORD) {
-      setForgotError('Invalid Temporary Key. Please enter the authorized temporary key ("changepass") to request a password change.');
+      setForgotError('Invalid Authorization Key. Please verify your key before requesting a password change.');
+      setIsTempVerified(false);
       return;
     }
 
@@ -333,7 +409,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       return;
     }
     if (cleanNew === TEMPORARY_PASSWORD) {
-      setForgotError('New password cannot be the temporary key ("changepass"). Please choose a personalized password.');
+      setForgotError('New password cannot match the temporary authorization key. Please choose a personalized password.');
       return;
     }
     if (cleanNew !== cleanConfirm) {
@@ -1137,8 +1213,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       {/* MODAL: FACULTY ACCOUNT SELF-REGISTRATION REQUEST */}
       {isRegisterOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 font-mono relative text-slate-800">
+        <div className="fixed inset-0 z-50 overflow-y-auto p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center min-h-screen animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full max-h-[92vh] overflow-y-auto my-auto p-6 shadow-2xl space-y-5 font-mono relative text-slate-800">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div className="flex items-center space-x-2.5 text-amber-800">
                 <div className="p-2 bg-amber-50 rounded-xl border border-amber-200">
@@ -1334,8 +1410,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       {/* MODAL: ADMIN APPLICATION REGISTRATION REQUEST */}
       {isAdminRegisterOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white border-2 border-amber-400 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 font-mono relative text-slate-800">
+        <div className="fixed inset-0 z-50 overflow-y-auto p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center min-h-screen animate-fadeIn">
+          <div className="bg-white border-2 border-amber-400 rounded-3xl max-w-md w-full max-h-[92vh] overflow-y-auto my-auto p-6 shadow-2xl space-y-5 font-mono relative text-slate-800">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div className="flex items-center space-x-2.5 text-amber-800">
                 <div className="p-2 bg-amber-50 rounded-xl border border-amber-200">
@@ -1482,12 +1558,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       {/* MODAL: FORGOT PASSWORD & CHANGE REQUEST DIALOG */}
       {isForgotPassOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className={`bg-white border-2 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 font-mono relative text-slate-800 ${
+        <div className="fixed inset-0 z-50 overflow-y-auto p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center min-h-screen animate-fadeIn">
+          <div className={`bg-white border-2 rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl font-mono relative text-slate-800 my-auto ${
             forgotPortalMode === 'Admin' ? 'border-amber-400' : 'border-emerald-500'
           }`}>
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+            {/* Header - Fixed & Pinned */}
+            <div className="flex items-center justify-between border-b border-slate-200 p-5 sm:p-6 pb-4 shrink-0 bg-white">
               <div className="flex items-center space-x-2.5">
                 <div className={`p-2 rounded-xl border ${
                   forgotPortalMode === 'Admin'
@@ -1505,7 +1581,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     <h3 className="text-sm font-bold text-slate-900">
                       {forgotPortalMode === 'Admin' ? 'Admin Password Reset' : 'Faculty Password Reset'}
                     </h3>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase border ${
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border ${
                       forgotPortalMode === 'Admin'
                         ? 'bg-amber-100 text-amber-900 border-amber-300'
                         : 'bg-emerald-100 text-emerald-900 border-emerald-300'
@@ -1514,242 +1590,352 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     </span>
                   </div>
                   <p className="text-[10px] text-slate-500 font-sans mt-0.5">
-                    Submit password change request for Master Admin approval
+                    {forgotSuccess 
+                      ? 'Request submitted successfully' 
+                      : isTempVerified 
+                        ? 'Step 2: Enter new password for Master Admin approval' 
+                        : 'Step 1: Enter temporary authorization key first'}
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsForgotPassOpen(false)}
-                className="p-1 hover:bg-slate-100 text-slate-500 rounded-lg cursor-pointer transition-colors"
+                className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer transition-colors"
+                title="Close"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Portal Switcher Tab */}
-            <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl font-mono text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setForgotPortalMode('Faculty');
-                  setForgotError(null);
-                }}
-                className={`py-1.5 px-3 rounded-lg font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                  forgotPortalMode === 'Faculty'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>Faculty Portal</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setForgotPortalMode('Admin');
-                  setForgotError(null);
-                }}
-                className={`py-1.5 px-3 rounded-lg font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                  forgotPortalMode === 'Admin'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Admin Portal</span>
-              </button>
-            </div>
-
-            {/* Error Message */}
-            {forgotError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-mono rounded-xl flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>{forgotError}</span>
-              </div>
-            )}
-
-            {/* Success View */}
-            {forgotSuccess ? (
-              <div className={`p-6 border rounded-2xl text-center space-y-3 ${
-                forgotPortalMode === 'Admin'
-                  ? 'bg-amber-50/70 border-amber-300 text-amber-950'
-                  : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-              }`}>
-                <CheckCircle2 className={`w-10 h-10 mx-auto animate-bounce ${
-                  forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
-                }`} />
-                <h4 className="font-bold text-sm text-slate-900">
-                  {forgotPortalMode} Password Change Request Submitted!
-                </h4>
-                <p className="text-xs leading-relaxed font-sans text-slate-700">
-                  Your request to update the password for {forgotPortalMode} account <span className="font-bold text-slate-900 font-mono">{forgotEmail}</span> has been forwarded to Master Admin (<strong>John Vic Garnica</strong>).
-                </p>
-                <div className={`text-[11px] pt-2 border-t font-medium font-sans ${
-                  forgotPortalMode === 'Admin' ? 'border-amber-200 text-amber-800' : 'border-emerald-200 text-emerald-700'
-                }`}>
-                  The Master Admin will verify and accept your request in the Admin Dashboard. Once accepted, you can log in immediately to the {forgotPortalMode} Portal!
-                </div>
+            {/* Scrollable Modal Body Container */}
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 min-h-0 overscroll-contain max-h-[calc(92vh-110px)]">
+              {/* Portal Switcher Tab */}
+              <div className="grid grid-cols-2 gap-1 bg-slate-100 p-1 rounded-xl font-mono text-xs shrink-0">
                 <button
                   type="button"
                   onClick={() => {
-                    setIsForgotPassOpen(false);
-                    setPassword('');
+                    setForgotPortalMode('Faculty');
+                    setForgotError(null);
+                    setIsTempVerified(false);
                   }}
-                  className={`w-full mt-3 py-2.5 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer ${
-                    forgotPortalMode === 'Admin'
-                      ? 'bg-amber-600 hover:bg-amber-700'
-                      : 'bg-emerald-700 hover:bg-emerald-800'
+                  className={`py-1.5 px-3 rounded-lg font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                    forgotPortalMode === 'Faculty'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Return to {forgotPortalMode} Login
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>Faculty Portal</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgotPortalMode('Admin');
+                    setForgotError(null);
+                    setIsTempVerified(false);
+                  }}
+                  className={`py-1.5 px-3 rounded-lg font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                    forgotPortalMode === 'Admin'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Admin Portal</span>
                 </button>
               </div>
-            ) : (
-              /* Password Change Request Form */
-              <form onSubmit={handleSubmitNewPassword} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
-                    <Mail className={`w-3.5 h-3.5 ${
-                      forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
-                    }`} />
-                    <span>{forgotPortalMode} Official DepEd Email</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
-                    placeholder="name@deped.gov.ph"
-                    required
-                    className={`w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
-                      forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
-                    }`}
-                  />
-                </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                    <span className="flex items-center space-x-1">
-                      <Key className={`w-3.5 h-3.5 ${
-                        forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
-                      }`} />
-                      <span>Temporary Key</span>
+              {/* Step Progression Indicator */}
+              {!forgotSuccess && (
+                <div className="flex items-center justify-between px-1 py-1 text-xs">
+                  <div className={`flex items-center space-x-1.5 font-bold ${
+                    !isTempVerified 
+                      ? (forgotPortalMode === 'Admin' ? 'text-amber-800' : 'text-emerald-800')
+                      : 'text-slate-500'
+                  }`}>
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      !isTempVerified 
+                        ? (forgotPortalMode === 'Admin' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white')
+                        : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                    }`}>
+                      {isTempVerified ? '✓' : '1'}
                     </span>
-                    <span className="text-[10px] text-slate-500 font-mono">Key: changepass</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showForgotTempPass ? 'text' : 'password'}
-                      value={forgotTempPass}
-                      onChange={(e) => setForgotTempPass(e.target.value)}
-                      placeholder="Enter temporary key (changepass)..."
-                      required
-                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
-                        forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowForgotTempPass(!showForgotTempPass)}
-                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
-                    >
-                      {showForgotTempPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+                    <span className="text-[11px]">1. Enter Key</span>
                   </div>
-                  <p className="text-[10px] text-slate-500 font-sans">
-                    Enter the authorized temporary key <strong>changepass</strong> to authorize your password change request.
+                  <div className="flex-1 mx-3 h-0.5 bg-slate-200" />
+                  <div className={`flex items-center space-x-1.5 font-bold ${
+                    isTempVerified 
+                      ? (forgotPortalMode === 'Admin' ? 'text-amber-800' : 'text-emerald-800')
+                      : 'text-slate-400'
+                  }`}>
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      isTempVerified 
+                        ? (forgotPortalMode === 'Admin' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white')
+                        : 'bg-slate-200 text-slate-500'
+                    }`}>
+                      2
+                    </span>
+                    <span className="text-[11px]">2. Change Password</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Error Message */}
+              {forgotError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs font-mono rounded-xl flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span>{forgotError}</span>
+                </div>
+              )}
+
+              {/* Success View */}
+              {forgotSuccess ? (
+                <div className={`p-6 border rounded-2xl text-center space-y-3 ${
+                  forgotPortalMode === 'Admin'
+                    ? 'bg-amber-50/70 border-amber-300 text-amber-950'
+                    : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                }`}>
+                  <CheckCircle2 className={`w-10 h-10 mx-auto animate-bounce ${
+                    forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
+                  }`} />
+                  <h4 className="font-bold text-sm text-slate-900">
+                    {forgotPortalMode} Password Change Request Submitted!
+                  </h4>
+                  <p className="text-xs leading-relaxed font-sans text-slate-700">
+                    Your request to update the password for {forgotPortalMode} account <span className="font-bold text-slate-900 font-mono">{forgotEmail}</span> has been forwarded to Master Admin (<strong>John Vic Garnica</strong>).
                   </p>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
-                    <Lock className={`w-3.5 h-3.5 ${
-                      forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
-                    }`} />
-                    <span>New {forgotPortalMode} Password</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showForgotNewPass ? 'text' : 'password'}
-                      value={forgotNewPass}
-                      onChange={(e) => setForgotNewPass(e.target.value)}
-                      placeholder="Enter new password (min. 4 characters)..."
-                      required
-                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
-                        forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowForgotNewPass(!showForgotNewPass)}
-                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
-                    >
-                      {showForgotNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+                  <div className={`text-[11px] pt-2 border-t font-medium font-sans ${
+                    forgotPortalMode === 'Admin' ? 'border-amber-200 text-amber-800' : 'border-emerald-200 text-emerald-700'
+                  }`}>
+                    The Master Admin will verify and accept your request in the Admin Dashboard. Once accepted, you can log in immediately to the {forgotPortalMode} Portal!
                   </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
-                    <Lock className={`w-3.5 h-3.5 ${
-                      forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
-                    }`} />
-                    <span>Confirm New Password</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showForgotConfirmPass ? 'text' : 'password'}
-                      value={forgotConfirmPass}
-                      onChange={(e) => setForgotConfirmPass(e.target.value)}
-                      placeholder="Confirm new password..."
-                      required
-                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
-                        forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowForgotConfirmPass(!showForgotConfirmPass)}
-                      className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
-                    >
-                      {showForgotConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Master Admin Approval Notice */}
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[10.5px] text-slate-600 space-y-1 font-sans">
-                  <div className="flex items-center space-x-1 font-bold text-amber-800 font-mono text-[11px]">
-                    <Clock className="w-3 h-3 text-amber-600" />
-                    <span>Master Admin Approval Required:</span>
-                  </div>
-                  <p>
-                    When you submit this request, it will be placed in the Master Admin Control Panel as a <strong>{forgotPortalMode} Account Password Request</strong>. <strong>Master Admin (John Vic Garnica)</strong> will review and accept your password change. Once accepted, your new password is immediately active.
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
                   <button
                     type="button"
-                    onClick={() => setIsForgotPassOpen(false)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className={`px-5 py-2 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5 ${
+                    onClick={() => {
+                      setIsForgotPassOpen(false);
+                      setPassword('');
+                    }}
+                    className={`w-full mt-3 py-2.5 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer ${
                       forgotPortalMode === 'Admin'
-                        ? 'bg-amber-600 hover:bg-amber-500'
+                        ? 'bg-amber-600 hover:bg-amber-700'
                         : 'bg-emerald-700 hover:bg-emerald-800'
                     }`}
                   >
-                    <Send className="w-3.5 h-3.5 text-white" />
-                    <span>Submit {forgotPortalMode} Request</span>
+                    Return to {forgotPortalMode} Login
                   </button>
                 </div>
-              </form>
-            )}
+              ) : !isTempVerified ? (
+                /* STEP 1: MUST ENTER KEY FIRST */
+                <form onSubmit={handleVerifyKey} className="space-y-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-sans text-slate-600 space-y-1">
+                    <div className="flex items-center space-x-1 font-bold text-slate-800 font-mono text-[11px]">
+                      <Key className={`w-3.5 h-3.5 ${forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'}`} />
+                      <span>Authorization Key Required:</span>
+                    </div>
+                    <p>
+                      You must enter your registered <strong>{forgotPortalMode}</strong> DepEd email and the authorized security key first before changing your password.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+                      <Mail className={`w-3.5 h-3.5 ${
+                        forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
+                      }`} />
+                      <span>{forgotPortalMode} Official DepEd Email</span>
+                    </label>
+                    <input
+                      type="email"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="name@deped.gov.ph"
+                      required
+                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
+                        forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
+                      }`}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                      <span className="flex items-center space-x-1">
+                        <Key className={`w-3.5 h-3.5 ${
+                          forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
+                        }`} />
+                        <span>Authorization Key</span>
+                      </span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showForgotTempPass ? 'text' : 'password'}
+                        value={forgotTempPass}
+                        onChange={(e) => setForgotTempPass(e.target.value)}
+                        placeholder="Enter authorization key..."
+                        required
+                        autoFocus
+                        className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
+                          forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotTempPass(!showForgotTempPass)}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-700 cursor-pointer"
+                        title={showForgotTempPass ? 'Hide key' : 'Show key'}
+                      >
+                        {showForgotTempPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-sans">
+                      Enter the security authorization key provided by school administration to unlock the password change form.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setIsForgotPassOpen(false)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className={`px-5 py-2 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5 ${
+                        forgotPortalMode === 'Admin'
+                          ? 'bg-amber-600 hover:bg-amber-500'
+                          : 'bg-emerald-700 hover:bg-emerald-800'
+                      }`}
+                    >
+                      <Key className="w-3.5 h-3.5 text-white" />
+                      <span>Verify Key & Proceed</span>
+                      <ArrowRight className="w-3.5 h-3.5 text-white" />
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* STEP 2: KEY VERIFIED - USER CAN NOW CHANGE PASSWORD */
+                <form onSubmit={handleSubmitNewPassword} className="space-y-4">
+                  {/* Verified Key Banner */}
+                  <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs font-mono text-emerald-900">
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <span className="font-bold">Authorization Key Verified</span>
+                        <p className="text-[10px] text-emerald-700 font-sans">
+                          {forgotUserFound?.name || forgotEmail} ({forgotPortalMode})
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTempVerified(false);
+                        setForgotError(null);
+                      }}
+                      className="text-[10px] underline text-emerald-800 hover:text-emerald-950 cursor-pointer font-bold"
+                    >
+                      Re-enter Key
+                    </button>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+                      <Lock className={`w-3.5 h-3.5 ${
+                        forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
+                      }`} />
+                      <span>New {forgotPortalMode} Password</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showForgotNewPass ? 'text' : 'password'}
+                        value={forgotNewPass}
+                        onChange={(e) => setForgotNewPass(e.target.value)}
+                        placeholder="Enter new password (min. 4 characters)..."
+                        required
+                        autoFocus
+                        className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
+                          forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotNewPass(!showForgotNewPass)}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-700 cursor-pointer"
+                        title={showForgotNewPass ? 'Hide password' : 'Show password'}
+                      >
+                        {showForgotNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+                      <Lock className={`w-3.5 h-3.5 ${
+                        forgotPortalMode === 'Admin' ? 'text-amber-600' : 'text-emerald-600'
+                      }`} />
+                      <span>Confirm New Password</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showForgotConfirmPass ? 'text' : 'password'}
+                        value={forgotConfirmPass}
+                        onChange={(e) => setForgotConfirmPass(e.target.value)}
+                        placeholder="Confirm new password..."
+                        required
+                        className={`w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white font-mono font-medium ${
+                          forgotPortalMode === 'Admin' ? 'focus:border-amber-500' : 'focus:border-emerald-600'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotConfirmPass(!showForgotConfirmPass)}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-700 cursor-pointer"
+                        title={showForgotConfirmPass ? 'Hide password' : 'Show password'}
+                      >
+                        {showForgotConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Master Admin Approval Notice */}
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[10.5px] text-slate-600 space-y-1 font-sans">
+                    <div className="flex items-center space-x-1 font-bold text-amber-800 font-mono text-[11px]">
+                      <Clock className="w-3 h-3 text-amber-600" />
+                      <span>Master Admin Approval Required:</span>
+                    </div>
+                    <p>
+                      When you submit this request, it will be placed in the Master Admin Control Panel as a <strong>{forgotPortalMode} Account Password Request</strong>. <strong>Master Admin (John Vic Garnica)</strong> will review and accept your password change. Once accepted, your new password is immediately active.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTempVerified(false);
+                        setForgotError(null);
+                      }}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 cursor-pointer"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      className={`px-5 py-2 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5 ${
+                        forgotPortalMode === 'Admin'
+                          ? 'bg-amber-600 hover:bg-amber-500'
+                          : 'bg-emerald-700 hover:bg-emerald-800'
+                      }`}
+                    >
+                      <Send className="w-3.5 h-3.5 text-white" />
+                      <span>Submit {forgotPortalMode} Request</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}
