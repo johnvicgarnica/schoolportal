@@ -22,7 +22,6 @@ import { GalleryPhoto, UserProfile } from '../types';
 import {
   saveGalleryPhotoToFirestore,
   deleteGalleryPhotoFromFirestore,
-  reseedDefaultGalleryPhotos,
 } from '../lib/firebase';
 import { AutoSwipingGallery } from './AutoSwipingGallery';
 
@@ -367,21 +366,6 @@ export const AdminGalleryManager: React.FC<AdminGalleryManagerProps> = ({
     }
   };
 
-  // Reseed defaults
-  const handleResetDefaults = async () => {
-    if (!window.confirm('Restore official default SVNHS campus pictures to Firebase? This will re-add baseline photos to the rotation.')) {
-      return;
-    }
-
-    try {
-      await reseedDefaultGalleryPhotos();
-      setActionMessage({ type: 'success', text: 'Baseline SVNHS pictures restored to Firebase gallery!' });
-    } catch (err: any) {
-      console.error('Error resetting defaults:', err);
-      setActionMessage({ type: 'error', text: `Failed to restore default pictures: ${err?.message || 'Error'}` });
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Toast Alert Message */}
@@ -444,16 +428,6 @@ export const AdminGalleryManager: React.FC<AdminGalleryManagerProps> = ({
               <Plus className="w-4 h-4 text-white" />
               <span>Upload New Picture</span>
             </button>
-
-            <button
-              type="button"
-              onClick={handleResetDefaults}
-              title="Restore official default SVNHS pictures"
-              className="px-3 py-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/20 font-mono font-semibold text-xs rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Reset Defaults</span>
-            </button>
           </div>
         </div>
       </div>
@@ -498,22 +472,16 @@ export const AdminGalleryManager: React.FC<AdminGalleryManagerProps> = ({
               No pictures currently saved in the Firebase gallery
             </p>
             <p className="font-sans text-xs text-slate-500 max-w-sm mx-auto">
-              Upload your first picture or restore the baseline campus photos to display on the login page.
+              Only pictures uploaded by the Master Admin are displayed in the Login Page gallery.
             </p>
             <div className="flex items-center justify-center gap-2 pt-2">
               <button
                 type="button"
                 onClick={handleOpenAddModal}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-xs cursor-pointer"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-xs cursor-pointer flex items-center space-x-1.5"
               >
-                Upload Picture
-              </button>
-              <button
-                type="button"
-                onClick={handleResetDefaults}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer"
-              >
-                Load Defaults
+                <Plus className="w-4 h-4 text-white" />
+                <span>Upload Picture</span>
               </button>
             </div>
           </div>

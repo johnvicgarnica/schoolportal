@@ -2197,67 +2197,51 @@ export const subscribeClassAdviserSchoolForms = (
 // 15. LOGIN PAGE AUTO-SWIPING GALLERY PHOTOS
 // ==========================================
 
-export const INITIAL_DEFAULT_GALLERY_PHOTOS: GalleryPhoto[] = [
-  {
-    id: 'gallery-svnhs-facade',
-    url: 'https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&w=1600&q=80',
-    title: 'San Vicente National High School Main Campus',
-    caption: 'Department of Education • CARAGA Region • Division of Bislig City • Dedicated to Academic & Moral Excellence',
-    uploadedAt: '2026-10-01',
-    uploadedBy: 'Master Admin',
-    order: 1,
-  },
-  {
-    id: 'gallery-shs-building',
-    url: 'https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&w=1600&q=80',
-    title: 'Senior High School Academic Wing & Quadrangle',
-    caption: 'Empowering Grade 11 & Grade 12 learners across Academic and TVL Tracks with modern DepEd facilities',
-    uploadedAt: '2026-10-01',
-    uploadedBy: 'Master Admin',
-    order: 2,
-  },
-  {
-    id: 'gallery-science-lab',
-    url: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=1600&q=80',
-    title: 'Science, Technology & Innovation Laboratory',
-    caption: 'Fostering future scientists, researchers, and innovators through comprehensive hands-on experimentation',
-    uploadedAt: '2026-10-01',
-    uploadedBy: 'Master Admin',
-    order: 3,
-  },
-  {
-    id: 'gallery-library-resource',
-    url: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=1600&q=80',
-    title: 'Learning Resource & Digital Research Center',
-    caption: 'Expanding educational horizons through reading literacy, instructional modules, and DepEd digital archives',
-    uploadedAt: '2026-10-01',
-    uploadedBy: 'Master Admin',
-    order: 4,
-  },
-  {
-    id: 'gallery-graduation-moving-up',
-    url: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1600&q=80',
-    title: 'Student Excellence & Moving Up Celebrations',
-    caption: 'Proudly recognizing the achievements, leadership, and exemplary character of San Vicente High School scholars',
-    uploadedAt: '2026-10-01',
-    uploadedBy: 'Master Admin',
-    order: 5,
-  },
-];
+export const PRELOAD_PHOTO_IDS = new Set([
+  'gallery-svnhs-facade',
+  'gallery-shs-building',
+  'gallery-science-lab',
+  'gallery-library-resource',
+  'gallery-graduation-moving-up',
+]);
+
+export const isPreloadPhoto = (photo: Partial<GalleryPhoto>): boolean => {
+  if (!photo) return false;
+  if (photo.id && PRELOAD_PHOTO_IDS.has(photo.id)) return true;
+  if (photo.url && typeof photo.url === 'string') {
+    if (
+      photo.url.includes('images.unsplash.com/photo-1541829070764') ||
+      photo.url.includes('images.unsplash.com/photo-1562774053') ||
+      photo.url.includes('images.unsplash.com/photo-1532094349884') ||
+      photo.url.includes('images.unsplash.com/photo-1521587760476') ||
+      photo.url.includes('images.unsplash.com/photo-1523240795612')
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
+// No preloaded photos: gallery only displays photos uploaded by Master Admin
+export const INITIAL_DEFAULT_GALLERY_PHOTOS: GalleryPhoto[] = [];
 
 export const getStoredGalleryPhotos = (): GalleryPhoto[] => {
   try {
     const raw = localStorage.getItem(GALLERY_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((p) => !isPreloadPhoto(p));
+        if (filtered.length !== parsed.length) {
+          localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(filtered));
+        }
+        return filtered;
       }
     }
   } catch (err) {
     console.error('Error reading gallery photos from localStorage:', err);
   }
-  return INITIAL_DEFAULT_GALLERY_PHOTOS;
+  return [];
 };
 
 export const saveGalleryPhotoToLocalStorage = (photo: GalleryPhoto) => {
@@ -2320,19 +2304,43 @@ export const deleteGalleryPhotoFromFirestore = async (id: string): Promise<void>
   }
 };
 
+export const cleanPreloadGalleryPhotosFromFirestore = async (): Promise<void> => {
+  try {
+    const snap = await getDocs(collection(db, GALLERY_COL));
+    if (!snap.empty) {
+      for (const d of snap.docs) {
+        const photo = d.data() as GalleryPhoto;
+        if (isPreloadPhoto(photo) || PRELOAD_PHOTO_IDS.has(d.id)) {
+          await deleteDoc(doc(db, GALLERY_COL, d.id));
+        }
+      }
+    }
+    // Clean localStorage
+    getStoredGalleryPhotos();
+  } catch (err) {
+    console.warn('Note on cleaning preload photos:', err);
+  }
+};
+
 export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => void) => {
+  // Purge any lingering legacy preloaded default pictures from Firestore
+  cleanPreloadGalleryPhotosFromFirestore();
+
   return onSnapshot(
     collection(db, GALLERY_COL),
     (snapshot) => {
       if (snapshot.empty) {
-        // If Firestore gallery collection is currently empty, seed baseline photos and return defaults
-        seedInitialGalleryPhotosIfEmpty();
-        const cached = getStoredGalleryPhotos();
-        onUpdate(cached.length > 0 ? cached : INITIAL_DEFAULT_GALLERY_PHOTOS);
+        try {
+          localStorage.removeItem(GALLERY_STORAGE_KEY);
+        } catch (_) {}
+        onUpdate([]);
         return;
       }
 
-      const list: GalleryPhoto[] = snapshot.docs.map((d) => d.data() as GalleryPhoto);
+      // Strictly only include pictures that were uploaded by Master Admin (exclude preloads)
+      const list: GalleryPhoto[] = snapshot.docs
+        .map((d) => d.data() as GalleryPhoto)
+        .filter((photo) => !isPreloadPhoto(photo));
 
       // Sort by order asc, then uploadedAt desc
       list.sort((a, b) => {
@@ -2353,52 +2361,19 @@ export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => voi
     (err) => {
       console.error('Error subscribing to gallery photos collection:', err);
       const cached = getStoredGalleryPhotos();
-      onUpdate(cached.length > 0 ? cached : INITIAL_DEFAULT_GALLERY_PHOTOS);
+      onUpdate(cached);
     }
   );
 };
 
 export const seedInitialGalleryPhotosIfEmpty = async () => {
-  try {
-    const snap = await getDocs(collection(db, GALLERY_COL));
-    if (snap.empty) {
-      for (const photo of INITIAL_DEFAULT_GALLERY_PHOTOS) {
-        const cleanPhoto = {
-          ...photo,
-          caption: photo.caption || '',
-        };
-        await setDoc(doc(db, GALLERY_COL, photo.id), cleanPhoto, { merge: true });
-        try {
-          saveGalleryPhotoToLocalStorage(cleanPhoto);
-        } catch (_) {}
-      }
-      await setDoc(doc(db, SETTINGS_COL, 'gallery_photos_seeded_v1'), {
-        key: 'gallery_photos_seeded_v1',
-        value: 'true',
-        updatedAt: new Date().toISOString(),
-      });
-    }
-  } catch (err) {
-    console.error('Error seeding initial gallery photos:', err);
-  }
+  // Preload pictures are removed; purge any legacy preloads from Firestore
+  await cleanPreloadGalleryPhotosFromFirestore();
 };
 
 export const reseedDefaultGalleryPhotos = async () => {
-  try {
-    for (const photo of INITIAL_DEFAULT_GALLERY_PHOTOS) {
-      const cleanPhoto = {
-        ...photo,
-        caption: photo.caption || '',
-      };
-      await setDoc(doc(db, GALLERY_COL, photo.id), cleanPhoto, { merge: true });
-      try {
-        saveGalleryPhotoToLocalStorage(cleanPhoto);
-      } catch (_) {}
-    }
-  } catch (err) {
-    console.error('Error reseeding default gallery photos:', err);
-    throw err;
-  }
+  // Preload pictures are permanently disabled
+  await cleanPreloadGalleryPhotosFromFirestore();
 };
 
 
