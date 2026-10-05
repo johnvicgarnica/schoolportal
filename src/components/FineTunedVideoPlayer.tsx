@@ -11,7 +11,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   embedCode,
   title,
   className = '',
-  aspectRatioClass = 'aspect-video max-h-[250px] w-full mx-auto',
+  aspectRatioClass = 'w-full h-[265px] sm:h-[305px] md:h-[325px]',
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const raw = (embedCode || '').trim();
@@ -56,10 +56,10 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     }
   }
 
-  // Generate safe iframe URL: strictly NO autoplay (shows video preview thumbnail)
+  // Generate safe iframe URL: strictly NO autoplay, mobile playsinline=1, controls=1, fullscreen fs=1
   const getIframeUrl = () => {
     if (youtubeId) {
-      return `https://www.youtube.com/embed/${youtubeId}?autoplay=0&enablejsapi=1&rel=0&modestbranding=1&playsinline=1`;
+      return `https://www.youtube.com/embed/${youtubeId}?autoplay=0&enablejsapi=1&rel=0&modestbranding=1&playsinline=1&controls=1&fs=1`;
     }
 
     if (gDriveId) {
@@ -71,37 +71,52 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       if (!url.includes('autoplay=')) {
         url += (url.includes('?') ? '&' : '?') + 'autoplay=0';
       }
+      if (!url.includes('playsinline=')) {
+        url += '&playsinline=1';
+      }
       return url;
     }
 
     return '';
   };
 
-  // Format raw code fallback to ensure no autoplay and proper sizing
+  // Format raw code fallback to ensure no autoplay, mobile friendliness and proper sizing
   const getSanitizedRawCode = () => {
     let formatted = raw.replace(/autoplay=1/gi, 'autoplay=0');
     formatted = formatted.replace(/\bautoplay\b/gi, '');
     formatted = formatted.replace(/allow=["']([^"']*?)autoplay;?([^"']*?)["']/gi, 'allow="$1$2"');
-    if (formatted.includes('<iframe') && !formatted.includes('loading=')) {
-      formatted = formatted.replace('<iframe', '<iframe loading="lazy"');
+    if (formatted.includes('<iframe')) {
+      if (!formatted.includes('loading=')) {
+        formatted = formatted.replace('<iframe', '<iframe loading="lazy"');
+      }
+      if (!formatted.includes('allowfullscreen')) {
+        formatted = formatted.replace('<iframe', '<iframe allowfullscreen');
+      }
     }
-    if (formatted.includes('<video') && !formatted.includes('controls')) {
-      formatted = formatted.replace('<video', '<video controls');
+    if (formatted.includes('<video')) {
+      if (!formatted.includes('controls')) {
+        formatted = formatted.replace('<video', '<video controls');
+      }
+      if (!formatted.includes('playsinline')) {
+        formatted = formatted.replace('<video', '<video playsinline webkit-playsinline="true"');
+      }
     }
     return formatted;
   };
 
-  // 1. Direct HTML5 Video Player: shows the video preview frame with native controls
+  // 1. Direct HTML5 Video Player: shows the video preview frame with full native mobile-friendly controls
   if (html5VideoSrc) {
     return (
       <div
-        className={`relative w-full ${aspectRatioClass} rounded-2xl overflow-hidden bg-black border border-slate-300 shadow-inner group ${className}`}
+        className={`relative w-full ${aspectRatioClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center ${className}`}
       >
         <video
           ref={videoRef}
           src={html5VideoSrc}
           controls
           playsInline
+          // @ts-expect-error webkit-playsinline for iOS Safari
+          webkit-playsinline="true"
           preload="metadata"
           autoPlay={false}
           className="w-full h-full object-contain bg-black cursor-pointer"
@@ -110,12 +125,12 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     );
   }
 
-  // 2. Iframe / YouTube / Google Drive Preview: shows the video preview thumbnail with native play/pause
+  // 2. Iframe / YouTube / Google Drive Preview: shows the video preview thumbnail with native play/pause and all controls visible
   const iframeSrc = getIframeUrl();
 
   return (
     <div
-      className={`relative w-full ${aspectRatioClass} rounded-2xl overflow-hidden bg-black border border-slate-300 shadow-inner group ${className}`}
+      className={`relative w-full ${aspectRatioClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center ${className}`}
     >
       {iframeSrc ? (
         <iframe

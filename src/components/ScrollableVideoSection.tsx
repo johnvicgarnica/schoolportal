@@ -28,16 +28,16 @@ export const formatEmbedCode = (rawCode: string): string => {
   const trimmed = (rawCode || '').trim();
   if (!trimmed) return '';
 
-  // 1. Direct YouTube watch URL - enforce autoplay=0
+  // 1. Direct YouTube watch URL - enforce autoplay=0, playsinline=1, controls=1, fs=1
   const ytWatchMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/i);
   if (ytWatchMatch && ytWatchMatch[1]) {
-    return `<iframe src="https://www.youtube.com/embed/${ytWatchMatch[1]}?autoplay=0&enablejsapi=1&rel=0" title="SVNHS Video" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy" class="w-full h-full"></iframe>`;
+    return `<iframe src="https://www.youtube.com/embed/${ytWatchMatch[1]}?autoplay=0&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy" class="w-full h-full"></iframe>`;
   }
 
-  // 2. Direct youtu.be short URL - enforce autoplay=0
+  // 2. Direct youtu.be short URL - enforce autoplay=0, playsinline=1, controls=1, fs=1
   const ytShortMatch = trimmed.match(/(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]+)/i);
   if (ytShortMatch && ytShortMatch[1]) {
-    return `<iframe src="https://www.youtube.com/embed/${ytShortMatch[1]}?autoplay=0&enablejsapi=1&rel=0" title="SVNHS Video" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy" class="w-full h-full"></iframe>`;
+    return `<iframe src="https://www.youtube.com/embed/${ytShortMatch[1]}?autoplay=0&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy" class="w-full h-full"></iframe>`;
   }
 
   // 3. Direct Google Drive preview URL - remove allow="autoplay"
@@ -46,9 +46,9 @@ export const formatEmbedCode = (rawCode: string): string => {
     return `<iframe src="https://drive.google.com/file/d/${gDriveMatch[1]}/preview" title="SVNHS Google Drive Video" allowfullscreen loading="lazy" class="w-full h-full"></iframe>`;
   }
 
-  // 4. HTML5 direct video file (.mp4, .webm) - no autoplay, controls enabled
+  // 4. HTML5 direct video file (.mp4, .webm) - no autoplay, controls enabled, mobile playsinline
   if (trimmed.match(/^https?:\/\/.+\.(mp4|webm|ogg)(\?.*)?$/i)) {
-    return `<video controls playsinline preload="metadata" class="w-full h-full object-contain bg-black"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
+    return `<video controls playsinline webkit-playsinline="true" preload="metadata" class="w-full h-full object-contain bg-black"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
   }
 
   // 5. Raw <iframe> or <video> code provided by Master Admin
@@ -142,64 +142,64 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
   return (
     <section
       aria-label="Campus Video Broadcasts"
-      className={`w-full bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-7 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800 flex flex-col justify-between h-[480px] space-y-4 ${className}`}
+      className={`w-full bg-white border border-slate-200/90 rounded-3xl p-3 sm:p-4 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800 flex flex-col justify-between h-[480px] overflow-hidden ${className}`}
     >
       {/* Section Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3.5">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-center shrink-0 shadow-2xs">
-            <Video className="w-5 h-5 text-emerald-700" />
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-2 shrink-0">
+        <div className="flex items-center space-x-2 sm:space-x-2.5">
+          <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-center shrink-0 shadow-2xs">
+            <Video className="w-4 h-4 text-emerald-700" />
           </div>
           <div>
-            <div className="flex items-center space-x-2">
-              <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+            <div className="flex items-center space-x-1.5 sm:space-x-2">
+              <h2 className="text-xs sm:text-sm md:text-base font-black text-slate-900 tracking-tight leading-tight">
                 Campus Video Presentations
               </h2>
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider">
-                <ShieldCheck className="w-3 h-3 text-emerald-600" />
+              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded text-[9px] font-mono font-bold uppercase tracking-wider">
+                <ShieldCheck className="w-2.5 h-2.5 text-emerald-600" />
                 Master Admin Verified
               </span>
             </div>
-            <p className="text-xs text-slate-500 font-sans">
-              Official instructional videos & multimedia broadcasts
+            <p className="text-[10px] sm:text-[11px] text-slate-500 font-sans leading-none truncate max-w-[200px] sm:max-w-none">
+              Official instructional videos & broadcasts
             </p>
           </div>
         </div>
 
         {/* Action Controls & Pagination */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5 shrink-0">
           {hasVideos ? (
             <>
-              <span className="text-[11px] font-mono font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+              <span className="text-[10px] sm:text-[11px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 sm:py-1 rounded-md border border-slate-200">
                 {videos.length} {videos.length === 1 ? 'Video' : 'Videos'}
               </span>
 
-              {/* Prev / Next buttons if multiple videos */}
+              {/* Prev / Next buttons if multiple videos - mobile-friendly touch targets */}
               {videos.length > 1 && (
-                <div className="flex items-center space-x-1 pl-1">
+                <div className="flex items-center space-x-1 pl-0.5">
                   <button
                     type="button"
                     onClick={scrollToPrev}
                     disabled={!canScrollLeft}
                     aria-label="Previous Video"
-                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs"
+                    className="p-1 sm:p-1.5 min-w-[30px] min-h-[30px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs flex items-center justify-center"
                   >
-                    <ChevronLeft className="w-4 h-4" />
+                    <ChevronLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </button>
                   <button
                     type="button"
                     onClick={scrollToNext}
                     disabled={!canScrollRight}
                     aria-label="Next Video"
-                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs"
+                    className="p-1 sm:p-1.5 min-w-[30px] min-h-[30px] rounded-lg border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer shadow-2xs flex items-center justify-center"
                   >
-                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </button>
                 </div>
               )}
             </>
           ) : (
-            <span className="text-[10px] font-mono font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+            <span className="text-[10px] font-mono font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
               Official Channel
             </span>
           )}
@@ -208,49 +208,47 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
 
       {/* Main Content Area */}
       {hasVideos ? (
-        <div className="space-y-4">
-          {/* Scrollable Container with Horizontal Snap */}
+        <div className="flex-1 flex flex-col justify-between overflow-hidden pt-1">
+          {/* Scrollable Container with Horizontal Snap & Touch Scroll */}
           <div
             ref={scrollContainerRef}
-            className="flex gap-4 sm:gap-6 overflow-x-auto snap-x snap-mandatory pb-3 pt-1 scroll-smooth focus:outline-hidden custom-scrollbar"
+            className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 pt-0.5 scroll-smooth focus:outline-hidden custom-scrollbar flex-1 items-stretch touch-pan-x"
             style={{ scrollbarWidth: 'thin' }}
           >
             {videos.map((video, index) => {
-              const formattedHtml = formatEmbedCode(video.embedCode);
               return (
                 <div
                   key={video.id || index}
-                  className="w-full shrink-0 snap-center flex flex-col space-y-3 bg-slate-50/80 border border-slate-200/90 rounded-2xl p-3 sm:p-4 shadow-2xs hover:shadow-xs transition-shadow"
+                  className="w-full shrink-0 snap-center flex flex-col justify-between bg-slate-50 border border-slate-200/90 rounded-2xl p-2 sm:p-2.5 shadow-2xs hover:shadow-xs transition-shadow h-full"
                 >
-                  {/* Embedded Video Player with Fine-Tuned Play/Pause & Zero Autoplay */}
-                  <FineTunedVideoPlayer
-                    embedCode={video.embedCode}
-                    title={video.title}
-                  />
+                  {/* Embedded Video Player with Fine-Tuned Play/Pause & Visible Buttons */}
+                  <div className="w-full flex-1 flex flex-col justify-center min-h-0">
+                    <FineTunedVideoPlayer
+                      embedCode={video.embedCode}
+                      title={video.title}
+                      aspectRatioClass="w-full h-[270px] sm:h-[310px] md:h-[330px]"
+                    />
+                  </div>
 
-                  {/* Video Meta Information */}
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 pt-1">
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100/70 border border-emerald-200 px-2 py-0.5 rounded-md">
-                          Video #{index + 1}
-                        </span>
-                        <h3 className="text-sm font-bold text-slate-900 line-clamp-1">
-                          {video.title}
-                        </h3>
-                      </div>
+                  {/* Compact Video Meta Information Bar */}
+                  <div className="flex items-center justify-between gap-2 pt-1.5 px-0.5 text-xs shrink-0">
+                    <div className="flex items-center space-x-1.5 truncate">
+                      <span className="text-[9px] sm:text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100/70 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0">
+                        #{index + 1}
+                      </span>
+                      <h3 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                        {video.title}
+                      </h3>
                       {video.description && (
-                        <p className="text-xs text-slate-600 line-clamp-2 font-sans">
-                          {video.description}
-                        </p>
+                        <span className="hidden sm:inline text-[11px] text-slate-500 truncate max-w-xs font-sans">
+                          — {video.description}
+                        </span>
                       )}
                     </div>
 
-                    <div className="shrink-0 flex items-center space-x-2 text-[11px] font-mono text-slate-500">
-                      <span className="flex items-center space-x-1">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        <span>{video.createdAt || 'Recent'}</span>
-                      </span>
+                    <div className="shrink-0 flex items-center space-x-1 text-[10px] font-mono text-slate-400">
+                      <Calendar className="w-3 h-3 text-slate-400" />
+                      <span>{video.createdAt || 'Recent'}</span>
                     </div>
                   </div>
                 </div>
@@ -260,7 +258,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
 
           {/* Dots Indicator for multiple videos */}
           {videos.length > 1 && (
-            <div className="flex items-center justify-center space-x-2 pt-1">
+            <div className="flex items-center justify-center space-x-1.5 pt-1 shrink-0">
               {videos.map((_, i) => (
                 <button
                   key={i}
@@ -269,8 +267,8 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
                   aria-label={`Go to video ${i + 1}`}
                   className={`transition-all rounded-full cursor-pointer ${
                     activeIndex === i
-                      ? 'w-6 h-2 bg-emerald-600'
-                      : 'w-2 h-2 bg-slate-300 hover:bg-slate-400'
+                      ? 'w-5 h-1.5 bg-emerald-600'
+                      : 'w-1.5 h-1.5 bg-slate-300 hover:bg-slate-400'
                   }`}
                 />
               ))}
