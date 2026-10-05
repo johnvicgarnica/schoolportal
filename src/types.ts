@@ -226,3 +226,13 @@ export interface GalleryPhoto {
   order?: number;
 }
 
+export interface EmbeddedVideo {
+  id: string;
+  title: string;
+  embedCode: string; // The HTML or iframe code provided by the master admin
+  description?: string;
+  createdAt: string;
+  createdBy?: string;
+  order?: number;
+}
+

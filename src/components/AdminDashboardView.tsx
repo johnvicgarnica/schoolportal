@@ -10,11 +10,13 @@ import {
   FacultyPersonalFile,
   SchoolPermanentFolder,
   GalleryPhoto,
+  EmbeddedVideo,
 } from '../types';
 import { AdminFacultyFoldersDirectory } from './AdminFacultyFoldersDirectory';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
 import { SubmissionReportView } from './SubmissionReportView';
 import { AdminGalleryManager } from './AdminGalleryManager';
+import { AdminVideoManager } from './AdminVideoManager';
 import {
   saveFacultyToFirestore,
   updateFacultyAdvisoryRoleInFirestore,
@@ -50,6 +52,8 @@ import {
   subscribeGalleryPhotos,
   getStoredGalleryPhotos,
   seedInitialGalleryPhotosIfEmpty,
+  subscribeEmbeddedVideos,
+  getStoredEmbeddedVideos,
 } from '../lib/firebase';
 import {
   Megaphone,
@@ -92,6 +96,7 @@ import {
   Check,
   FileCheck2,
   Images,
+  Video,
 } from 'lucide-react';
 
 interface AdminDashboardViewProps {
@@ -153,9 +158,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
-  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', 'submission-report', or 'gallery')
+  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', 'submission-report', 'gallery', or 'videos')
   // Default to 'announcements' so passwords page is not exposed by default
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery'>('announcements');
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery' | 'videos'>('announcements');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
 
   // Login Page Gallery Photos State (Master Admin)
@@ -169,6 +174,18 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       setGalleryPhotos(photos || []);
     });
     return () => unsub();
+  }, []);
+
+  // Login Page Embedded Videos State (Master Admin)
+  const [embeddedVideos, setEmbeddedVideos] = useState<EmbeddedVideo[]>(() => {
+    return getStoredEmbeddedVideos();
+  });
+
+  useEffect(() => {
+    const unsubVideos = subscribeEmbeddedVideos((videos) => {
+      setEmbeddedVideos(videos || []);
+    });
+    return () => unsubVideos();
   }, []);
 
   // School Permanent Folders State (SCHOOL FORMS & SCHOOL DOCUMENTS)
@@ -553,13 +570,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   // Restrict Accounts & Passwords tab strictly to Master Admin, and restrict Faculty Folders from Coordinator
   // Ensure non-coordinator admin does not have submission-report subtab in Admin Dashboard (redundant since there is outer Submission Report)
   useEffect(() => {
-    if (!isMasterAdmin && adminSubTab === 'passwords') {
+    if (!isMasterAdmin && (adminSubTab === 'passwords' || adminSubTab === 'gallery' || adminSubTab === 'videos')) {
       setAdminSubTab('announcements');
     }
-    if (!isMasterAdmin && adminSubTab === 'gallery') {
-      setAdminSubTab('announcements');
-    }
-    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders' || adminSubTab === 'gallery')) {
+    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders' || adminSubTab === 'gallery' || adminSubTab === 'videos')) {
       setAdminSubTab('announcements');
     }
     if (!isCoordinator && adminSubTab === 'submission-report') {
@@ -1453,6 +1467,26 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               <span>Login Gallery</span>
               <span className="opacity-80 font-normal ml-0.5">({galleryPhotos.length})</span>
               <span className="bg-rose-950/60 text-rose-300 border border-rose-500/30 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5 hidden xl:inline">
+                Master
+              </span>
+            </button>
+          )}
+
+          {/* Master Admin Login Page Embedded Videos Tab */}
+          {isMasterAdmin && !isCoordinator && (
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('videos')}
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
+                adminSubTab === 'videos'
+                  ? 'bg-purple-700 text-white shadow-md ring-2 ring-purple-400/60 border border-purple-500'
+                  : 'bg-purple-600/90 hover:bg-purple-600 text-white border border-purple-500/60 hover:shadow-xs'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5 text-purple-200 shrink-0" />
+              <span>Login Videos</span>
+              <span className="opacity-80 font-normal ml-0.5">({embeddedVideos.length})</span>
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-500/30 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5 hidden xl:inline">
                 Master
               </span>
             </button>
@@ -3982,6 +4016,17 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           <AdminGalleryManager
             currentUser={currentUser}
             photos={galleryPhotos}
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB 7: MASTER ADMIN LOGIN PAGE EMBEDDED VIDEOS */}
+      {adminSubTab === 'videos' && isMasterAdmin && (
+        <div className="space-y-6 animate-fadeIn">
+          <AdminVideoManager
+            currentUser={currentUser}
+            videos={embeddedVideos}
+            onSwitchToGallery={() => setAdminSubTab('gallery')}
           />
         </div>
       )}

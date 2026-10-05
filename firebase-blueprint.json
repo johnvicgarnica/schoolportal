@@ -324,12 +324,31 @@
         "order": { "type": "number" }
       },
       "required": ["id", "url", "title"]
+    },
+    "embedded_videos": {
+      "title": "Embedded Videos",
+      "description": "HTML or iframe embedded videos provided by Master Admin displayed on the Login View",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "embedCode": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "title", "embedCode"]
     }
   },
   "firestore": {
     "/gallery_photos/{photoId}": {
       "schema": "gallery_photos",
       "description": "Public and administrative photos shown in the login screen auto-swiping gallery"
+    },
+    "/embedded_videos/{videoId}": {
+      "schema": "embedded_videos",
+      "description": "Embedded videos provided by Master Admin shown on the Login View"
     }
   }
 }

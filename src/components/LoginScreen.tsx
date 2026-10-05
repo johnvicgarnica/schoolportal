@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserProfile, GalleryPhoto } from '../types';
+import { UserProfile, GalleryPhoto, EmbeddedVideo, Announcement } from '../types';
 import {
   FacultyDoc,
   AdminDoc,
@@ -19,8 +19,15 @@ import {
   subscribeGalleryPhotos,
   getStoredGalleryPhotos,
   seedInitialGalleryPhotosIfEmpty,
+  subscribeEmbeddedVideos,
+  getStoredEmbeddedVideos,
+  subscribeAnnouncements,
+  getStoredAnnouncements,
+  seedInitialAnnouncementsIfEmpty,
 } from '../lib/firebase';
 import { AutoSwipingGallery } from './AutoSwipingGallery';
+import { ScrollableVideoSection } from './ScrollableVideoSection';
+import { ScrollableAnnouncementSection } from './ScrollableAnnouncementSection';
 import {
   Lock,
   Mail,
@@ -112,14 +119,35 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     return getStoredGalleryPhotos();
   });
 
+  // Load embedded videos provided by Master Admin
+  const [embeddedVideos, setEmbeddedVideos] = useState<EmbeddedVideo[]>(() => {
+    return getStoredEmbeddedVideos();
+  });
+
+  // Load announcements
+  const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
+    return getStoredAnnouncements();
+  });
+
   useEffect(() => {
-    // Seed initial admin account and default gallery photos into Firestore if needed
+    // Seed initial admin account, default gallery photos, and default announcements into Firestore if needed
     seedInitialAdminIfEmpty();
     seedInitialGalleryPhotosIfEmpty();
+    seedInitialAnnouncementsIfEmpty();
 
     // 1. Subscribe to Gallery Photos
     const unsubGallery = subscribeGalleryPhotos((photos) => {
       setGalleryPhotos(photos || []);
+    });
+
+    // 1b. Subscribe to Embedded Videos (Master Admin provided)
+    const unsubVideos = subscribeEmbeddedVideos((videos) => {
+      setEmbeddedVideos(videos || []);
+    });
+
+    // 1c. Subscribe to Announcements
+    const unsubAnnouncements = subscribeAnnouncements((list) => {
+      setAnnouncements(list || []);
     });
 
     // 2. Subscribe to Faculty Directory
@@ -168,6 +196,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
     return () => {
       unsubGallery();
+      unsubVideos();
+      unsubAnnouncements();
       unsubFaculty();
       unsubAdmins();
       unsubFacultyReq();
@@ -793,103 +823,111 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
       )}
 
-      {/* Main Grid Wrapper (Left: Intro + Message, Right: Login Card) */}
+      {/* Main Grid Wrapper (Left: Intro + Message + Videos, Right: Login Card) */}
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-stretch relative z-10 my-auto">
         
-        {/* LEFT SECTION: SVNHS Introduction & Principal Message & Announcements */}
-        <div className="lg:col-span-7 flex flex-col justify-between h-full space-y-6 bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800">
-          {/* School Header & Badges */}
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-2xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                CARAGA Region • Division of Bislig City
-              </span>
-              <span className="px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider shadow-2xs">
-                DepEd Official School
-              </span>
-            </div>
-
-            <div className="flex items-center space-x-3 pt-1">
-              <div className="w-12 h-12 rounded-full bg-white p-0.5 border-2 border-emerald-500/60 shadow-md shrink-0">
-                <img
-                  src={svnhsLogo}
-                  alt="San Vicente National High School Seal"
-                  className="w-full h-full object-contain rounded-full"
-                  referrerPolicy="no-referrer"
-                />
+        {/* LEFT COLUMN: SVNHS Introduction & Principal Message + Videos Below */}
+        <div className="lg:col-span-7 flex flex-col space-y-6 h-full">
+          {/* Selected Component: SVNHS Introduction & Principal Message */}
+          <div className="flex-1 flex flex-col justify-between space-y-6 bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800">
+            {/* School Header & Badges */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                  CARAGA Region • Division of Bislig City
+                </span>
+                <span className="px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider shadow-2xs">
+                  DepEd Official School
+                </span>
               </div>
-              <div>
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">
-                  San Vicente National High School
-                </h1>
-                <p className="text-xs text-emerald-700 font-mono font-bold">
-                  Repository Portal
-                </p>
-              </div>
-            </div>
 
-            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-sans pt-1">
-              Welcome to the official Repository System of San Vicente National High School. Dedicated to empowering DepEd educators and students in Bislig City, Surigao del Sur with secure, centralized access to learning modules, research datasets, and academic records.
-            </p>
-          </div>
-
-          {/* School Principal's Message Section */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 relative overflow-hidden flex-1 flex flex-col justify-between">
-            <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
-              <div className="flex items-center space-x-2 text-amber-900 font-bold text-xs font-mono">
-                <Quote className="w-4 h-4 text-amber-700 shrink-0" />
-                <span className="font-bold">School Principal's Message</span>
-              </div>
-              <span className="text-xs font-mono font-bold text-white bg-emerald-800 px-2.5 py-1 rounded-md border border-emerald-900 shadow-xs tracking-wider uppercase inline-flex items-center">
-                OFFICIAL MESSAGE
-              </span>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 pt-1 flex-1">
-              {/* Principal Photo */}
-              <div className="shrink-0 flex flex-col items-center space-y-1.5">
-                <div className="relative group">
+              <div className="flex items-center space-x-3 pt-1">
+                <div className="w-12 h-12 rounded-full bg-white p-0.5 border-2 border-emerald-500/60 shadow-md shrink-0">
                   <img
-                    src={principalPortrait}
-                    alt="Marivic R. Villaluz, School Principal I"
-                    className="w-28 h-36 sm:w-32 sm:h-40 object-cover object-top rounded-xl border-2 border-amber-500/60 shadow-md"
+                    src={svnhsLogo}
+                    alt="San Vicente National High School Seal"
+                    className="w-full h-full object-contain rounded-full"
                     referrerPolicy="no-referrer"
                   />
-                  <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-amber-400/30 pointer-events-none" />
+                </div>
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">
+                    San Vicente National High School
+                  </h1>
+                  <p className="text-xs text-emerald-700 font-mono font-bold">
+                    Repository Portal
+                  </p>
                 </div>
               </div>
 
-              {/* Message Content */}
-              <div className="flex-1 flex flex-col justify-between space-y-2.5 text-center sm:text-left h-full">
-                <div className="space-y-2 text-xs sm:text-[13px] text-slate-800 leading-relaxed font-sans italic">
-                  <p>
-                    "It is with immense pride that San Vicente National High School recognizes and showcases the excellence of its highly competent and dedicated teachers in both the Junior High School and Senior High School Departments. Their professionalism, expertise, and steadfast commitment to quality education serve as the foundation of our school’s success. Through their passion for teaching and genuine dedication to learner development, they continue to cultivate an environment where every student is guided to achieve their full potential.
-                  </p>
-                  <p>
-                    Our Senior High School Department further exemplifies our commitment to responsive and relevant education through its Academic and TechPro – Manual Metal Arc Welding (MMAW) offerings. These programs provide learners with diverse opportunities to pursue higher education, gain industry-relevant competencies, and prepare for meaningful careers and productive livelihoods. With our highly qualified teachers and dynamic educational programs, San Vicente National High School remains committed to developing competent, confident, and future-ready learners who will contribute meaningfully to their communities and society."
-                  </p>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-sans pt-1">
+                Welcome to the official Repository System of San Vicente National High School. Dedicated to empowering DepEd educators and students in Bislig City, Surigao del Sur with secure, centralized access to learning modules, research datasets, and academic records.
+              </p>
+            </div>
+
+            {/* School Principal's Message Section */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 relative overflow-hidden flex-1 flex flex-col justify-between">
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+                <div className="flex items-center space-x-2 text-amber-900 font-bold text-xs font-mono">
+                  <Quote className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span className="font-bold">School Principal's Message</span>
+                </div>
+                <span className="text-xs font-mono font-bold text-white bg-emerald-800 px-2.5 py-1 rounded-md border border-emerald-900 shadow-xs tracking-wider uppercase inline-flex items-center">
+                  OFFICIAL MESSAGE
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 pt-1 flex-1">
+                {/* Principal Photo */}
+                <div className="shrink-0 flex flex-col items-center space-y-1.5">
+                  <div className="relative group">
+                    <img
+                      src={principalPortrait}
+                      alt="Marivic R. Villaluz, School Principal I"
+                      className="w-28 h-36 sm:w-32 sm:h-40 object-cover object-top rounded-xl border-2 border-amber-500/60 shadow-md"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-amber-400/30 pointer-events-none" />
+                  </div>
                 </div>
 
-                <div className="pt-2 border-t border-slate-200/80 flex flex-col items-center sm:items-end text-center sm:text-right mt-auto">
-                  <p className="text-xs sm:text-sm font-bold font-serif text-slate-900 tracking-wide">
-                    Marivic R. Villaluz, School Principal I
-                  </p>
-                  <p className="text-[11px] font-mono text-emerald-900 font-bold">
-                    San Vicente National High School • DepEd CARAGA Region
-                  </p>
+                {/* Message Content */}
+                <div className="flex-1 flex flex-col justify-between space-y-2.5 text-center sm:text-left h-full">
+                  <div className="space-y-2 text-xs sm:text-[13px] text-slate-800 leading-relaxed font-sans italic">
+                    <p>
+                      "It is with immense pride that San Vicente National High School recognizes and showcases the excellence of its highly competent and dedicated teachers in both the Junior High School and Senior High School Departments. Their professionalism, expertise, and steadfast commitment to quality education serve as the foundation of our school’s success. Through their passion for teaching and genuine dedication to learner development, they continue to cultivate an environment where every student is guided to achieve their full potential.
+                    </p>
+                    <p>
+                      Our Senior High School Department further exemplifies our commitment to responsive and relevant education through its Academic and TechPro – Manual Metal Arc Welding (MMAW) offerings. These programs provide learners with diverse opportunities to pursue higher education, gain industry-relevant competencies, and prepare for meaningful careers and productive livelihoods. With our highly qualified teachers and dynamic educational programs, San Vicente National High School remains committed to developing competent, confident, and future-ready learners who will contribute meaningfully to their communities and society."
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200/80 flex flex-col items-center sm:items-end text-center sm:text-right mt-auto">
+                    <p className="text-xs sm:text-sm font-bold font-serif text-slate-900 tracking-wide">
+                      Marivic R. Villaluz, School Principal I
+                    </p>
+                    <p className="text-[11px] font-mono text-emerald-900 font-bold">
+                      San Vicente National High School • DepEd CARAGA Region
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
+
+            {/* End of Left Card Content */}
           </div>
 
-          {/* End of Left Section */}
+          {/* NEW SECTION BELOW THE SELECTED COMPONENT: Scrollable Embedded Videos */}
+          <ScrollableVideoSection videos={embeddedVideos} className="shrink-0" />
         </div>
 
-        {/* RIGHT SECTION: Main Login Portal Card */}
-        <div className="lg:col-span-5 w-full flex flex-col justify-between h-full bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 backdrop-blur-md shadow-md relative z-10 space-y-6 animate-fadeIn text-slate-800">
-          
-          {/* School Logo & Header */}
+        {/* RIGHT COLUMN: Main Login Portal Card + Announcements Below */}
+        <div className="lg:col-span-5 flex flex-col space-y-6 h-full">
+          {/* Selected Section: Main Login Portal Card */}
+          <div className="w-full flex-1 flex flex-col justify-between bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 backdrop-blur-md shadow-md relative z-10 space-y-6 animate-fadeIn text-slate-800">
+            
+            {/* School Logo & Header */}
           <div className="text-center space-y-3">
             <div className="mx-auto w-16 h-16 rounded-full bg-slate-50 p-1 shadow-md border-2 border-emerald-500/50 flex items-center justify-center transition-transform hover:scale-105">
               <img
@@ -1171,7 +1209,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         )}
 
         {/* INSTITUTIONAL SECURITY & VERIFICATION NOTICE */}
-        <div className="pt-2 border-t border-slate-200 space-y-2">
+        <div className="pt-2 border-t border-slate-200 space-y-2 mt-auto">
           <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3 text-left space-y-1.5 shadow-2xs">
             <div className="flex items-center space-x-1.5 text-slate-800">
               <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -1192,7 +1230,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           </div>
         </div>
 
+        </div>
+
+        {/* Scrollable Announcement Viewer below the Login Portal Card (Same Size as Scrollable Video Section) */}
+        <ScrollableAnnouncementSection announcements={announcements} className="shrink-0" />
       </div>
+
     </div>
 
       {/* INSTITUTIONAL & SECURITY FOOTER */}

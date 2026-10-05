@@ -12,7 +12,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder, GalleryPhoto } from '../types';
+import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder, GalleryPhoto, EmbeddedVideo } from '../types';
 import { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
 export { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
 
@@ -2375,6 +2375,121 @@ export const reseedDefaultGalleryPhotos = async () => {
   // Preload pictures are permanently disabled
   await cleanPreloadGalleryPhotosFromFirestore();
 };
+
+// ==========================================
+// MASTER ADMIN EMBEDDED VIDEOS (LOGIN VIEW)
+// ==========================================
+export const EMBEDDED_VIDEOS_COL = 'embedded_videos';
+const VIDEOS_STORAGE_KEY = 'svnhs_embedded_videos_cache';
+
+export const getStoredEmbeddedVideos = (): EmbeddedVideo[] => {
+  try {
+    const raw = localStorage.getItem(VIDEOS_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as EmbeddedVideo[];
+  } catch (err) {
+    console.error('Error reading embedded videos from localStorage:', err);
+    return [];
+  }
+};
+
+export const saveEmbeddedVideoToLocalStorage = (video: EmbeddedVideo) => {
+  try {
+    const list = getStoredEmbeddedVideos();
+    const idx = list.findIndex((v) => v.id === video.id);
+    if (idx >= 0) {
+      list[idx] = video;
+    } else {
+      list.push(video);
+    }
+    localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.error('Error saving embedded video to localStorage:', err);
+  }
+};
+
+export const deleteEmbeddedVideoFromLocalStorage = (id: string) => {
+  try {
+    const list = getStoredEmbeddedVideos();
+    const filtered = list.filter((v) => v.id !== id);
+    localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(filtered));
+  } catch (err) {
+    console.error('Error deleting embedded video from localStorage:', err);
+  }
+};
+
+export const saveEmbeddedVideoToFirestore = async (video: EmbeddedVideo): Promise<void> => {
+  const cleanVideo: EmbeddedVideo = {
+    id: video.id || `video-${Date.now()}`,
+    title: video.title?.trim() || 'SVNHS Video Presentation',
+    embedCode: video.embedCode?.trim() || '',
+    description: video.description?.trim() || '',
+    createdAt: video.createdAt || new Date().toISOString().substring(0, 10),
+    createdBy: video.createdBy || 'Master Admin',
+    order: typeof video.order === 'number' ? video.order : 1,
+  };
+
+  // 1. Authoritative write to Firestore
+  await setDoc(doc(db, EMBEDDED_VIDEOS_COL, cleanVideo.id), cleanVideo, { merge: true });
+
+  // 2. Safe local storage sync
+  try {
+    saveEmbeddedVideoToLocalStorage(cleanVideo);
+  } catch (storageErr) {
+    console.warn('LocalStorage video caching bypassed:', storageErr);
+  }
+};
+
+export const deleteEmbeddedVideoFromFirestore = async (id: string): Promise<void> => {
+  // Authoritative delete from Firestore
+  await deleteDoc(doc(db, EMBEDDED_VIDEOS_COL, id));
+
+  // Safe local storage sync
+  try {
+    deleteEmbeddedVideoFromLocalStorage(id);
+  } catch (storageErr) {
+    console.warn('LocalStorage video delete bypassed:', storageErr);
+  }
+};
+
+export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => void) => {
+  return onSnapshot(
+    collection(db, EMBEDDED_VIDEOS_COL),
+    (snapshot) => {
+      if (snapshot.empty) {
+        try {
+          localStorage.removeItem(VIDEOS_STORAGE_KEY);
+        } catch (_) {}
+        onUpdate([]);
+        return;
+      }
+
+      const list: EmbeddedVideo[] = snapshot.docs.map((d) => d.data() as EmbeddedVideo);
+
+      // Sort by order asc, then createdAt desc
+      list.sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : 999;
+        const orderB = typeof b.order === 'number' ? b.order : 999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
+
+      try {
+        localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {
+        console.warn('Could not cache embedded videos snapshot to localStorage:', e);
+      }
+
+      onUpdate(list);
+    },
+    (err) => {
+      console.error('Error subscribing to embedded videos collection:', err);
+      const cached = getStoredEmbeddedVideos();
+      onUpdate(cached);
+    }
+  );
+};
+
 
 
 
