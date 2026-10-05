@@ -226,7 +226,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
                     <FineTunedVideoPlayer
                       embedCode={video.embedCode}
                       title={video.title}
-                      aspectRatioClass="w-full h-[270px] sm:h-[310px] md:h-[330px]"
+                      aspectRatioClass="w-full aspect-video max-h-[305px] md:max-h-[320px] mx-auto"
                     />
                   </div>
 
