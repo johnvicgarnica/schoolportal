@@ -101,7 +101,8 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
     // Calculate approx active index based on scroll position
     if (clientWidth > 0) {
       const idx = Math.round(scrollLeft / clientWidth);
-      setActiveIndex(Math.min(Math.max(idx, 0), (videos?.length || 1) - 1));
+      const clampedIdx = Math.min(Math.max(idx, 0), (videos?.length || 1) - 1);
+      setActiveIndex(clampedIdx);
     }
   };
 
@@ -120,14 +121,14 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
 
   const scrollToNext = () => {
     if (!scrollContainerRef.current) return;
-    const { clientWidth } = scrollContainerRef.current;
-    scrollContainerRef.current.scrollBy({ left: clientWidth * 0.9, behavior: 'smooth' });
+    const nextIdx = Math.min(activeIndex + 1, (videos?.length || 1) - 1);
+    scrollToIndex(nextIdx);
   };
 
   const scrollToPrev = () => {
     if (!scrollContainerRef.current) return;
-    const { clientWidth } = scrollContainerRef.current;
-    scrollContainerRef.current.scrollBy({ left: -clientWidth * 0.9, behavior: 'smooth' });
+    const prevIdx = Math.max(activeIndex - 1, 0);
+    scrollToIndex(prevIdx);
   };
 
   const scrollToIndex = (index: number) => {
@@ -227,6 +228,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
                       embedCode={video.embedCode}
                       title={video.title}
                       aspectRatioClass="w-full aspect-video max-h-[305px] md:max-h-[320px] mx-auto"
+                      isActive={index === activeIndex}
                     />
                   </div>
 

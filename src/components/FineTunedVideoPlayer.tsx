@@ -6,6 +6,7 @@ interface FineTunedVideoPlayerProps {
   title: string;
   className?: string;
   aspectRatioClass?: string;
+  isActive?: boolean;
 }
 
 export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
@@ -13,17 +14,22 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   title,
   className = '',
   aspectRatioClass = 'w-full aspect-video max-h-[310px] mx-auto',
+  isActive = true,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastTapRef = useRef<number>(0);
+  const singleTapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(true); // default muted ensures browser autoplay compliance
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [showControls, setShowControls] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [doubleTapFeedback, setDoubleTapFeedback] = useState<boolean>(false);
 
   const raw = (embedCode || '').trim();
 
@@ -69,8 +75,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
   // Generate safe iframe URL: clean, minimal controls, mobile playsinline=1, no annotations covering frame
   const getIframeUrl = () => {
+    const autoPlayVal = isActive ? '1' : '0';
     if (youtubeId) {
-      return `https://www.youtube.com/embed/${youtubeId}?autoplay=0&enablejsapi=1&rel=0&modestbranding=1&playsinline=1&controls=1&iv_load_policy=3`;
+      return `https://www.youtube.com/embed/${youtubeId}?autoplay=${autoPlayVal}&mute=1&enablejsapi=1&rel=0&modestbranding=1&playsinline=1&controls=1&iv_load_policy=3`;
     }
 
     if (gDriveId) {
@@ -78,9 +85,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     }
 
     if (rawIframeSrc) {
-      let url = rawIframeSrc.replace(/autoplay=1/gi, 'autoplay=0');
+      let url = rawIframeSrc.replace(/autoplay=1/gi, isActive ? 'autoplay=1' : 'autoplay=0');
       if (!url.includes('autoplay=')) {
-        url += (url.includes('?') ? '&' : '?') + 'autoplay=0';
+        url += (url.includes('?') ? '&' : '?') + (isActive ? 'autoplay=1' : 'autoplay=0');
       }
       if (!url.includes('playsinline=')) {
         url += '&playsinline=1';
@@ -93,7 +100,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
   // Format raw code fallback to ensure no autoplay, mobile friendliness and proper sizing
   const getSanitizedRawCode = () => {
-    let formatted = raw.replace(/autoplay=1/gi, 'autoplay=0');
+    let formatted = raw.replace(/autoplay=1/gi, isActive ? 'autoplay=1' : 'autoplay=0');
     formatted = formatted.replace(/\bautoplay\b/gi, '');
     formatted = formatted.replace(/allow=["']([^"']*?)autoplay;?([^"']*?)["']/gi, 'allow="$1$2"');
     if (formatted.includes('<iframe')) {
@@ -111,6 +118,47 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     }
     return formatted;
   };
+
+  // AUTOPLAY WHEN ACTIVE, STOP WHEN SCROLLED TO ANOTHER VIDEO
+  useEffect(() => {
+    if (isActive) {
+      // 1. HTML5 Video Autoplay
+      if (videoRef.current) {
+        videoRef.current.muted = isMuted;
+        const playPromise = videoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              setIsPlaying(true);
+            })
+            .catch(() => {
+              // Retry with muted to fulfill strict browser autoplay policy
+              if (videoRef.current) {
+                videoRef.current.muted = true;
+                setIsMuted(true);
+                videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+              }
+            });
+        }
+      }
+
+      // 2. YouTube iframe postMessage play
+      if (iframeRef.current && iframeRef.current.contentWindow) {
+        iframeRef.current.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+      }
+    } else {
+      // STOP playback when scrolled away to next video
+      if (videoRef.current) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+      }
+
+      // YouTube iframe postMessage pause
+      if (iframeRef.current && iframeRef.current.contentWindow) {
+        iframeRef.current.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+      }
+    }
+  }, [isActive]);
 
   // Video control helpers
   const resetHideTimer = () => {
@@ -167,13 +215,58 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   };
 
   const toggleFullscreen = () => {
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen?.().catch(() => {});
-      setIsFullscreen(true);
-    } else {
+    const container = containerRef.current;
+    const video = videoRef.current;
+    if (!container) return;
+
+    if (document.fullscreenElement) {
       document.exitFullscreen?.().catch(() => {});
       setIsFullscreen(false);
+    } else {
+      if (container.requestFullscreen) {
+        container.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {
+          // Fallback for iOS webkit video
+          if (video && (video as any).webkitEnterFullscreen) {
+            (video as any).webkitEnterFullscreen();
+            setIsFullscreen(true);
+          }
+        });
+      } else if ((container as any).webkitRequestFullscreen) {
+        (container as any).webkitRequestFullscreen();
+        setIsFullscreen(true);
+      } else if (video && (video as any).webkitEnterFullscreen) {
+        (video as any).webkitEnterFullscreen();
+        setIsFullscreen(true);
+      }
+    }
+  };
+
+  // Double-tap gesture detector for mobile mode fullscreen
+  const handleTouchEnd = () => {
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTapRef.current;
+
+    if (timeSinceLastTap < 320 && timeSinceLastTap > 0) {
+      // It's a double-tap! Turn Fullscreen!
+      if (singleTapTimeoutRef.current) {
+        clearTimeout(singleTapTimeoutRef.current);
+        singleTapTimeoutRef.current = null;
+      }
+      lastTapRef.current = 0;
+
+      toggleFullscreen();
+      setDoubleTapFeedback(true);
+      setTimeout(() => setDoubleTapFeedback(false), 700);
+    } else {
+      // First tap
+      lastTapRef.current = now;
+      if (singleTapTimeoutRef.current) {
+        clearTimeout(singleTapTimeoutRef.current);
+      }
+      singleTapTimeoutRef.current = setTimeout(() => {
+        resetHideTimer();
+        singleTapTimeoutRef.current = null;
+      }, 250);
     }
   };
 
@@ -192,6 +285,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+      if (singleTapTimeoutRef.current) clearTimeout(singleTapTimeoutRef.current);
     };
   }, []);
 
@@ -203,6 +297,8 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         className={`relative ${aspectRatioClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center select-none ${className}`}
         onMouseMove={resetHideTimer}
         onClick={resetHideTimer}
+        onDoubleClick={toggleFullscreen}
+        onTouchEnd={handleTouchEnd}
         onMouseLeave={() => isPlaying && setShowControls(false)}
       >
         <video
@@ -212,7 +308,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
           // @ts-expect-error webkit-playsinline for iOS Safari
           webkit-playsinline="true"
           preload="metadata"
-          autoPlay={false}
+          autoPlay={isActive}
+          muted={isMuted}
+          loop
           onClick={togglePlay}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
@@ -226,6 +324,16 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
           }}
           className="w-full h-full object-contain bg-black cursor-pointer"
         />
+
+        {/* Double-Tap Fullscreen Visual Confirmation Badge */}
+        {doubleTapFeedback && (
+          <div className="absolute inset-0 m-auto w-24 h-16 rounded-2xl bg-black/85 backdrop-blur-xs flex flex-col items-center justify-center text-emerald-400 pointer-events-none z-30 animate-scaleUp border border-emerald-500/30 shadow-xl">
+            {isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}
+            <span className="text-[9px] font-mono font-bold mt-1 text-white tracking-wider">
+              {isFullscreen ? 'EXIT FULL' : 'FULLSCREEN'}
+            </span>
+          </div>
+        )}
 
         {/* Reduced, unobtrusive center play button when paused (does NOT block the frame) */}
         {!isPlaying && (
@@ -319,13 +427,27 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
   return (
     <div
+      ref={containerRef}
+      onDoubleClick={toggleFullscreen}
+      onTouchEnd={handleTouchEnd}
       className={`relative ${aspectRatioClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center ${className}`}
     >
+      {/* Double-Tap Fullscreen Visual Confirmation Badge */}
+      {doubleTapFeedback && (
+        <div className="absolute inset-0 m-auto w-24 h-16 rounded-2xl bg-black/85 backdrop-blur-xs flex flex-col items-center justify-center text-emerald-400 pointer-events-none z-30 animate-scaleUp border border-emerald-500/30 shadow-xl">
+          {isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}
+          <span className="text-[9px] font-mono font-bold mt-1 text-white tracking-wider">
+            {isFullscreen ? 'EXIT FULL' : 'FULLSCREEN'}
+          </span>
+        </div>
+      )}
+
       {iframeSrc ? (
         <iframe
+          ref={iframeRef}
           src={iframeSrc}
           title={title || 'School Video Preview'}
-          allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
           loading="lazy"
           className="w-full h-full border-0 pointer-events-auto"
