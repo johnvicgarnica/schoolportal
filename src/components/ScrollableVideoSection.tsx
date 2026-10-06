@@ -28,54 +28,59 @@ export const formatEmbedCode = (rawCode: string): string => {
   const trimmed = (rawCode || '').trim();
   if (!trimmed) return '';
 
-  // 1. Direct YouTube watch URL - enforce autoplay=0, playsinline=1, controls=1, fs=1
+  // 1. Direct YouTube watch URL - enforce autoplay=1, mute=1, playsinline=1, enablejsapi=1
   const ytWatchMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/i);
   if (ytWatchMatch && ytWatchMatch[1]) {
-    return `<iframe src="https://www.youtube.com/embed/${ytWatchMatch[1]}?autoplay=0&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy" class="w-full h-full"></iframe>`;
+    return `<iframe src="https://www.youtube.com/embed/${ytWatchMatch[1]}?autoplay=1&mute=1&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full"></iframe>`;
   }
 
-  // 2. Direct youtu.be short URL - enforce autoplay=0, playsinline=1, controls=1, fs=1
+  // 2. Direct youtu.be short URL - enforce autoplay=1, mute=1, playsinline=1, enablejsapi=1
   const ytShortMatch = trimmed.match(/(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]+)/i);
   if (ytShortMatch && ytShortMatch[1]) {
-    return `<iframe src="https://www.youtube.com/embed/${ytShortMatch[1]}?autoplay=0&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy" class="w-full h-full"></iframe>`;
+    return `<iframe src="https://www.youtube.com/embed/${ytShortMatch[1]}?autoplay=1&mute=1&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full"></iframe>`;
   }
 
-  // 3. Direct Google Drive preview URL - remove allow="autoplay"
+  // 3. Direct Google Drive preview URL
   const gDriveMatch = trimmed.match(/(?:https?:\/\/)?drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/(?:view|preview)/i);
   if (gDriveMatch && gDriveMatch[1]) {
-    return `<iframe src="https://drive.google.com/file/d/${gDriveMatch[1]}/preview" title="SVNHS Google Drive Video" allowfullscreen loading="lazy" class="w-full h-full"></iframe>`;
+    return `<iframe src="https://drive.google.com/file/d/${gDriveMatch[1]}/preview" title="SVNHS Google Drive Video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen class="w-full h-full"></iframe>`;
   }
 
-  // 4. HTML5 direct video file (.mp4, .webm) - no autoplay, controls enabled, mobile playsinline
+  // 4. HTML5 direct video file (.mp4, .webm) - autoplay with muted, controls enabled, mobile playsinline
   if (trimmed.match(/^https?:\/\/.+\.(mp4|webm|ogg)(\?.*)?$/i)) {
-    return `<video controls playsinline webkit-playsinline="true" preload="metadata" class="w-full h-full object-contain bg-black"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
+    return `<video controls playsinline webkit-playsinline="true" autoPlay muted preload="auto" class="w-full h-full object-contain bg-black"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
   }
 
   // 5. Raw <iframe> or <video> code provided by Master Admin
   let formatted = trimmed;
 
-  // Strict anti-autoplay sanitizer: remove autoplay parameters and attributes
-  formatted = formatted.replace(/autoplay=1/gi, 'autoplay=0');
-  formatted = formatted.replace(/\bautoplay\b/gi, '');
-  formatted = formatted.replace(/allow=["']([^"']*?)autoplay;?([^"']*?)["']/gi, 'allow="$1$2"');
-
-  // Ensure allowfullscreen is present on iframes
-  if (formatted.includes('<iframe') && !formatted.includes('allowfullscreen')) {
-    formatted = formatted.replace('<iframe', '<iframe allowfullscreen loading="lazy"');
-  } else if (formatted.includes('<iframe') && !formatted.includes('loading=')) {
-    formatted = formatted.replace('<iframe', '<iframe loading="lazy"');
+  // Ensure allowfullscreen and allow="autoplay" are present on iframes without blocking autoplay
+  if (formatted.includes('<iframe')) {
+    if (!formatted.includes('allow=')) {
+      formatted = formatted.replace(
+        '<iframe',
+        '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"'
+      );
+    } else if (!formatted.includes('autoplay')) {
+      formatted = formatted.replace(/allow=["']([^"']*?)["']/i, 'allow="$1; autoplay"');
+    }
+    if (!formatted.includes('allowfullscreen')) {
+      formatted = formatted.replace('<iframe', '<iframe allowfullscreen');
+    }
+    // Remove loading="lazy" because lazy iframes disable autoplay
+    formatted = formatted.replace(/\s*loading=["']lazy["']/gi, '');
   }
 
-  // Ensure video tags have controls and preload metadata
+  // Ensure video tags have playsinline and autoplay capabilities
   if (formatted.includes('<video')) {
     if (!formatted.includes('controls')) {
       formatted = formatted.replace('<video', '<video controls');
     }
-    if (!formatted.includes('preload=')) {
-      formatted = formatted.replace('<video', '<video preload="metadata"');
-    }
     if (!formatted.includes('playsinline')) {
-      formatted = formatted.replace('<video', '<video playsinline');
+      formatted = formatted.replace('<video', '<video playsinline webkit-playsinline="true"');
+    }
+    if (!formatted.includes('autoplay')) {
+      formatted = formatted.replace('<video', '<video autoplay muted');
     }
   }
 
@@ -87,6 +92,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
   className = '',
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const slideItemRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
   const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
   const [activeIndex, setActiveIndex] = useState<number>(0);
@@ -98,7 +104,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
     setCanScrollLeft(scrollLeft > 10);
     setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 10);
 
-    // Calculate approx active index based on scroll position
+    // Calculate approximate active index based on scroll position
     if (clientWidth > 0) {
       const idx = Math.round(scrollLeft / clientWidth);
       const clampedIdx = Math.min(Math.max(idx, 0), (videos?.length || 1) - 1);
@@ -119,6 +125,39 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
     }
   }, [videos]);
 
+  // High precision IntersectionObserver to detect currently centered slide in view
+  useEffect(() => {
+    if (!videos || videos.length === 0 || !scrollContainerRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.55) {
+            const rawIdx = entry.target.getAttribute('data-index');
+            if (rawIdx !== null) {
+              const idx = parseInt(rawIdx, 10);
+              if (!isNaN(idx)) {
+                setActiveIndex(idx);
+              }
+            }
+          }
+        });
+      },
+      {
+        root: scrollContainerRef.current,
+        threshold: [0.55, 0.75, 1.0],
+      }
+    );
+
+    slideItemRefs.current.forEach((el) => {
+      if (el) observer.observe(el);
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [videos]);
+
   const scrollToNext = () => {
     if (!scrollContainerRef.current) return;
     const nextIdx = Math.min(activeIndex + 1, (videos?.length || 1) - 1);
@@ -133,8 +172,13 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
 
   const scrollToIndex = (index: number) => {
     if (!scrollContainerRef.current) return;
-    const { clientWidth } = scrollContainerRef.current;
-    scrollContainerRef.current.scrollTo({ left: index * clientWidth, behavior: 'smooth' });
+    const targetElement = slideItemRefs.current[index];
+    if (targetElement) {
+      targetElement.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    } else {
+      const { clientWidth } = scrollContainerRef.current;
+      scrollContainerRef.current.scrollTo({ left: index * clientWidth, behavior: 'smooth' });
+    }
     setActiveIndex(index);
   };
 
@@ -220,6 +264,10 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
               return (
                 <div
                   key={video.id || index}
+                  ref={(el) => {
+                    slideItemRefs.current[index] = el;
+                  }}
+                  data-index={index}
                   className="w-full shrink-0 snap-center flex flex-col justify-between bg-slate-50 border border-slate-200/90 rounded-2xl p-2 sm:p-2.5 shadow-2xs hover:shadow-xs transition-shadow h-full"
                 >
                   {/* Embedded Video Player with Fine-Tuned Play/Pause & Visible Buttons */}

@@ -145,7 +145,7 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
     if (type === 'youtube') {
       setTitle((prev) => prev || 'San Vicente National High School Campus Showcase');
       setEmbedCode(
-        `<iframe width="560" height="315" src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=0" title="San Vicente NHS Video" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
+        `<iframe width="560" height="315" src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&enablejsapi=1&playsinline=1" title="San Vicente NHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`
       );
       setDescription(
         (prev) => prev || 'Official school video presentation highlighting Senior High School programs and activities.'
@@ -153,7 +153,7 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
     } else if (type === 'drive') {
       setTitle((prev) => prev || 'DepEd Bislig City Instructional Presentation');
       setEmbedCode(
-        `<iframe src="https://drive.google.com/file/d/1a2b3c4d5e6f/preview" width="640" height="480" allowfullscreen></iframe>`
+        `<iframe src="https://drive.google.com/file/d/1a2b3c4d5e6f/preview" width="640" height="480" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`
       );
       setDescription(
         (prev) => prev || 'Instructional curriculum and departmental video orientation.'
@@ -161,7 +161,7 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
     } else {
       setTitle((prev) => prev || 'Classroom Teaching & Learning Showcase');
       setEmbedCode(
-        `<video controls preload="metadata" class="w-full h-full"><source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4"></video>`
+        `<video controls autoPlay muted playsinline webkit-playsinline="true" preload="auto" class="w-full h-full"><source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4"></video>`
       );
       setDescription((prev) => prev || 'Sample educational demonstration video.');
     }

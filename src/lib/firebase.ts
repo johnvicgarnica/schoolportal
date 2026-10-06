@@ -787,6 +787,8 @@ export const seedInitialAdminIfEmpty = async () => {
     await seedInitialDriveFoldersIfEmpty();
     // Seed default school permanent folders if not already seeded
     await seedInitialSchoolPermanentFoldersIfEmpty();
+    // Seed default embedded videos if not already seeded
+    await seedInitialEmbeddedVideosIfEmpty();
 
     // Seed master admin email into Firebase settings if not already present
     const adminEmailSnap = await getDoc(doc(db, SETTINGS_COL, 'svnhs_admin_email'));
@@ -2488,6 +2490,41 @@ export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => v
       onUpdate(cached);
     }
   );
+};
+
+export const seedInitialEmbeddedVideosIfEmpty = async (): Promise<void> => {
+  try {
+    const snap = await getDocs(collection(db, EMBEDDED_VIDEOS_COL));
+    if (snap.empty) {
+      const defaultVideos: EmbeddedVideo[] = [
+        {
+          id: 'video-svnhs-welcome-intro',
+          title: 'San Vicente National High School - Campus Overview & Orientation',
+          embedCode: '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&playsinline=1&enablejsapi=1&rel=0&controls=1" title="SVNHS Campus Overview" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen class="w-full h-full"></iframe>',
+          description: 'Official introduction, institutional values, and student orientation guide.',
+          createdAt: new Date().toISOString().substring(0, 10),
+          createdBy: 'Master Admin',
+          order: 1,
+        },
+        {
+          id: 'video-svnhs-deped-guidelines',
+          title: 'DepEd Senior High School Academic & TVL Strands Walkthrough',
+          embedCode: '<iframe src="https://www.youtube.com/embed/y6120QOlsfU?autoplay=1&mute=1&playsinline=1&enablejsapi=1&rel=0&controls=1" title="DepEd SHS Track Orientation" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen class="w-full h-full"></iframe>',
+          description: 'Academic strands, technical-vocational tracks, grading systems, and student advisories.',
+          createdAt: new Date().toISOString().substring(0, 10),
+          createdBy: 'Master Admin',
+          order: 2,
+        },
+      ];
+
+      for (const v of defaultVideos) {
+        await setDoc(doc(db, EMBEDDED_VIDEOS_COL, v.id), v);
+        saveEmbeddedVideoToLocalStorage(v);
+      }
+    }
+  } catch (err) {
+    console.warn('Could not seed initial embedded videos:', err);
+  }
 };
 
 

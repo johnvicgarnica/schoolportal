@@ -622,7 +622,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const currentCategory = CATEGORIES.find((c) => c.id === activeCategory) || CATEGORIES[0];
   const isWeeklyCategory = currentCategory.itemType === 'weekly';
 
-  // Dynamic Column Definitions based on category and configured term weeks (1 to 12 max)
+  // Dynamic Column Definitions based on category and configured term weeks
+  // For TOS and TQ: Each of the 3 terms (TERM 1, TERM 2, TERM 3) spans 3 sub-columns: ST 1, ST 2, TE 1/2/3
   const columnItems = useMemo(() => {
     if (activeCategory === 'dll') {
       return Array.from({ length: currentTermWeeks }, (_, i) => ({
@@ -631,22 +632,60 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         headerLabel: `W${i + 1}`,
         fullLabel: `Week ${i + 1}`,
         shortLabel: `W${i + 1}`,
+        termGroup: null,
         description: `Week ${i + 1} Daily Lesson Log`,
       }));
     } else if (activeCategory === 'tos') {
       return [
-        { index: 0, key: 'tos-t1', headerLabel: 'Term 1 TOS', fullLabel: 'Term 1 TOS', shortLabel: 'T1 TOS', description: 'Term 1 Table of Specifications' },
-        { index: 1, key: 'tos-t2', headerLabel: 'Term 2 TOS', fullLabel: 'Term 2 TOS', shortLabel: 'T2 TOS', description: 'Term 2 Table of Specifications' },
-        { index: 2, key: 'tos-t3', headerLabel: 'Term 3 TOS', fullLabel: 'Term 3 TOS', shortLabel: 'T3 TOS', description: 'Term 3 Table of Specifications' },
+        // TERM 1 TOS (ST 1, ST 2, TE 1)
+        { index: 0, key: 'tos-t1-st1', termGroup: 'TERM 1 TOS', termId: 'term-1', subLabel: 'ST 1', headerLabel: 'ST 1', fullLabel: 'Term 1 TOS - ST 1', shortLabel: 'T1 ST 1', description: 'Term 1 Table of Specifications - Summative Test 1' },
+        { index: 1, key: 'tos-t1-st2', termGroup: 'TERM 1 TOS', termId: 'term-1', subLabel: 'ST 2', headerLabel: 'ST 2', fullLabel: 'Term 1 TOS - ST 2', shortLabel: 'T1 ST 2', description: 'Term 1 Table of Specifications - Summative Test 2' },
+        { index: 2, key: 'tos-t1-te1', termGroup: 'TERM 1 TOS', termId: 'term-1', subLabel: 'TE 1', headerLabel: 'TE 1', fullLabel: 'Term 1 TOS - TE 1', shortLabel: 'T1 TE 1', description: 'Term 1 Table of Specifications - Term Exam 1' },
+        // TERM 2 TOS (ST 1, ST 2, TE 2)
+        { index: 3, key: 'tos-t2-st1', termGroup: 'TERM 2 TOS', termId: 'term-2', subLabel: 'ST 1', headerLabel: 'ST 1', fullLabel: 'Term 2 TOS - ST 1', shortLabel: 'T2 ST 1', description: 'Term 2 Table of Specifications - Summative Test 1' },
+        { index: 4, key: 'tos-t2-st2', termGroup: 'TERM 2 TOS', termId: 'term-2', subLabel: 'ST 2', headerLabel: 'ST 2', fullLabel: 'Term 2 TOS - ST 2', shortLabel: 'T2 ST 2', description: 'Term 2 Table of Specifications - Summative Test 2' },
+        { index: 5, key: 'tos-t2-te2', termGroup: 'TERM 2 TOS', termId: 'term-2', subLabel: 'TE 2', headerLabel: 'TE 2', fullLabel: 'Term 2 TOS - TE 2', shortLabel: 'T2 TE 2', description: 'Term 2 Table of Specifications - Term Exam 2' },
+        // TERM 3 TOS (ST 1, ST 2, TE 3)
+        { index: 6, key: 'tos-t3-st1', termGroup: 'TERM 3 TOS', termId: 'term-3', subLabel: 'ST 1', headerLabel: 'ST 1', fullLabel: 'Term 3 TOS - ST 1', shortLabel: 'T3 ST 1', description: 'Term 3 Table of Specifications - Summative Test 1' },
+        { index: 7, key: 'tos-t3-st2', termGroup: 'TERM 3 TOS', termId: 'term-3', subLabel: 'ST 2', headerLabel: 'ST 2', fullLabel: 'Term 3 TOS - ST 2', shortLabel: 'T3 ST 2', description: 'Term 3 Table of Specifications - Summative Test 2' },
+        { index: 8, key: 'tos-t3-te3', termGroup: 'TERM 3 TOS', termId: 'term-3', subLabel: 'TE 3', headerLabel: 'TE 3', fullLabel: 'Term 3 TOS - TE 3', shortLabel: 'T3 TE 3', description: 'Term 3 Table of Specifications - Term Exam 3' },
       ];
     } else {
       return [
-        { index: 0, key: 'tq-t1', headerLabel: 'Term 1 TQ', fullLabel: 'Term 1 TQ', shortLabel: 'T1 TQ', description: 'Term 1 Test Questions' },
-        { index: 1, key: 'tq-t2', headerLabel: 'Term 2 TQ', fullLabel: 'Term 2 TQ', shortLabel: 'T2 TQ', description: 'Term 2 Test Questions' },
-        { index: 2, key: 'tq-t3', headerLabel: 'Term 3 TQ', fullLabel: 'Term 3 TQ', shortLabel: 'T3 TQ', description: 'Term 3 Test Questions' },
+        // TERM 1 TQ (ST 1, ST 2, TE 1)
+        { index: 0, key: 'tq-t1-st1', termGroup: 'TERM 1 TQ', termId: 'term-1', subLabel: 'ST 1', headerLabel: 'ST 1', fullLabel: 'Term 1 TQ - ST 1', shortLabel: 'T1 ST 1', description: 'Term 1 Test Questions - Summative Test 1' },
+        { index: 1, key: 'tq-t1-st2', termGroup: 'TERM 1 TQ', termId: 'term-1', subLabel: 'ST 2', headerLabel: 'ST 2', fullLabel: 'Term 1 TQ - ST 2', shortLabel: 'T1 ST 2', description: 'Term 1 Test Questions - Summative Test 2' },
+        { index: 2, key: 'tq-t1-te1', termGroup: 'TERM 1 TQ', termId: 'term-1', subLabel: 'TE 1', headerLabel: 'TE 1', fullLabel: 'Term 1 TQ - TE 1', shortLabel: 'T1 TE 1', description: 'Term 1 Test Questions - Term Exam 1' },
+        // TERM 2 TQ (ST 1, ST 2, TE 2)
+        { index: 3, key: 'tq-t2-st1', termGroup: 'TERM 2 TQ', termId: 'term-2', subLabel: 'ST 1', headerLabel: 'ST 1', fullLabel: 'Term 2 TQ - ST 1', shortLabel: 'T2 ST 1', description: 'Term 2 Test Questions - Summative Test 1' },
+        { index: 4, key: 'tq-t2-st2', termGroup: 'TERM 2 TQ', termId: 'term-2', subLabel: 'ST 2', headerLabel: 'ST 2', fullLabel: 'Term 2 TQ - ST 2', shortLabel: 'T2 ST 2', description: 'Term 2 Test Questions - Summative Test 2' },
+        { index: 5, key: 'tq-t2-te2', termGroup: 'TERM 2 TQ', termId: 'term-2', subLabel: 'TE 2', headerLabel: 'TE 2', fullLabel: 'Term 2 TQ - TE 2', shortLabel: 'T2 TE 2', description: 'Term 2 Test Questions - Term Exam 2' },
+        // TERM 3 TQ (ST 1, ST 2, TE 3)
+        { index: 6, key: 'tq-t3-st1', termGroup: 'TERM 3 TQ', termId: 'term-3', subLabel: 'ST 1', headerLabel: 'ST 1', fullLabel: 'Term 3 TQ - ST 1', shortLabel: 'T3 ST 1', description: 'Term 3 Test Questions - Summative Test 1' },
+        { index: 7, key: 'tq-t3-st2', termGroup: 'TERM 3 TQ', termId: 'term-3', subLabel: 'ST 2', headerLabel: 'ST 2', fullLabel: 'Term 3 TQ - ST 2', shortLabel: 'T3 ST 2', description: 'Term 3 Test Questions - Summative Test 2' },
+        { index: 8, key: 'tq-t3-te3', termGroup: 'TERM 3 TQ', termId: 'term-3', subLabel: 'TE 3', headerLabel: 'TE 3', fullLabel: 'Term 3 TQ - TE 3', shortLabel: 'T3 TE 3', description: 'Term 3 Test Questions - Term Exam 3' },
       ];
     }
   }, [activeCategory, currentTermWeeks]);
+
+  // Two-tier header grouping for TOS and TQ to mirror the requested layout
+  const termGroups = useMemo(() => {
+    if (activeCategory === 'tos') {
+      return [
+        { label: 'TERM 1 TOS', span: 3, startIndex: 0 },
+        { label: 'TERM 2 TOS', span: 3, startIndex: 3 },
+        { label: 'TERM 3 TOS', span: 3, startIndex: 6 },
+      ];
+    }
+    if (activeCategory === 'tq') {
+      return [
+        { label: 'TERM 1 TQ', span: 3, startIndex: 0 },
+        { label: 'TERM 2 TQ', span: 3, startIndex: 3 },
+        { label: 'TERM 3 TQ', span: 3, startIndex: 6 },
+      ];
+    }
+    return null;
+  }, [activeCategory]);
 
   const totalItemCount = columnItems.length;
 
@@ -2670,7 +2709,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               </>
             ) : (
               <>
-                Checklist: <span className="font-bold text-purple-400">Term 1 {currentCategory.name}</span>, <span className="font-bold text-purple-400">Term 2 {currentCategory.name}</span>, <span className="font-bold text-purple-400">Term 3 {currentCategory.name}</span>
+                Checklist: <span className="font-bold text-purple-400">TERM 1 ({activeCategory.toUpperCase()}: ST 1, ST 2, TE 1)</span> • <span className="font-bold text-purple-400">TERM 2 ({activeCategory.toUpperCase()}: ST 1, ST 2, TE 2)</span> • <span className="font-bold text-purple-400">TERM 3 ({activeCategory.toUpperCase()}: ST 1, ST 2, TE 3)</span>
               </>
             )}
           </div>
@@ -2980,7 +3019,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             <div className="flex items-center space-x-4">
               <div className="text-right">
                 <div className="text-2xl font-extrabold text-blue-400 font-mono">
-                  {myStatus.itemsSubmitted} / {totalItemCount} {isWeeklyCategory ? 'Weeks' : 'Terms'}
+                  {myStatus.itemsSubmitted} / {totalItemCount} {isWeeklyCategory ? 'Weeks' : 'Deliverables'}
                 </div>
                 <div className="text-xs text-slate-400 font-mono font-bold">
                   {myStatus.percentage}% Complete
@@ -3021,108 +3060,238 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
           </div>
 
           {/* Item Checkmarks Visualizer for this Faculty Member */}
-          <div className="pt-3 border-t border-[#24334b] flex flex-wrap items-center gap-2">
-            <span className="text-xs font-mono font-bold text-slate-300 mr-2">Deliverable Statuses:</span>
-            {columnItems.map((col, idx) => {
-              const status = myStatus.itemsStatuses[idx] || (myStatus.items[idx] ? 'checked' : 'unchecked');
-              const comment = myStatus.itemsComments[idx] || '';
-              const isChecked = status === 'checked';
-              const isWithComments = status === 'with-comments';
-              const isIncomplete = status === 'incomplete';
-              const isLate = status === 'late';
+          <div className="pt-3 border-t border-[#24334b] space-y-2.5">
+            <span className="text-xs font-mono font-bold text-slate-300 block">Deliverable Statuses:</span>
+            {termGroups ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {termGroups.map((group) => {
+                  const groupCols = columnItems.slice(group.startIndex, group.startIndex + group.span);
+                  const groupCheckedCount = groupCols.filter((c) => {
+                    const st = myStatus.itemsStatuses[c.index] || (myStatus.items[c.index] ? 'checked' : 'unchecked');
+                    return st === 'checked' || st === 'with-comments' || st === 'late';
+                  }).length;
+                  return (
+                    <div
+                      key={group.label}
+                      className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-3.5 space-y-2.5 shadow-2xs"
+                    >
+                      <div className="flex items-center justify-between border-b border-[#24334b] pb-2">
+                        <span className={`text-xs font-mono font-black tracking-wide ${
+                          activeCategory === 'tos' ? 'text-purple-300' : 'text-amber-300'
+                        }`}>
+                          {group.label}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#141c2c] text-slate-300 border border-[#24334b]">
+                          {groupCheckedCount} / {groupCols.length}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {groupCols.map((col) => {
+                          const status = myStatus.itemsStatuses[col.index] || (myStatus.items[col.index] ? 'checked' : 'unchecked');
+                          const comment = myStatus.itemsComments[col.index] || '';
+                          const isChecked = status === 'checked';
+                          const isWithComments = status === 'with-comments';
+                          const isIncomplete = status === 'incomplete';
+                          const isLate = status === 'late';
+                          const displayLabel = col.headerLabel;
 
-              if (isIncomplete) {
-                return (
-                  <button
-                    key={col.key}
-                    type="button"
-                    onClick={() =>
-                      setFacultyDetailModal({
-                        colLabel: col.fullLabel,
-                        status: 'incomplete',
-                        comment: comment || 'This submission was marked incomplete (lacking requirements) by the administrator.',
-                      })
-                    }
-                    className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-rose-500 text-white border-rose-600 shadow-2xs hover:bg-rose-600 transition-all cursor-pointer"
-                    title={`${col.fullLabel}: Incomplete (Lacking Requirements) • Click to view what is lacking`}
-                  >
-                    <span>{col.headerLabel}</span>
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span className="text-[10px] bg-rose-700/60 px-1.5 py-0.5 rounded-md font-medium">Incomplete</span>
-                  </button>
-                );
-              }
+                          if (isIncomplete) {
+                            return (
+                              <button
+                                key={col.key}
+                                type="button"
+                                onClick={() =>
+                                  setFacultyDetailModal({
+                                    colLabel: col.fullLabel,
+                                    status: 'incomplete',
+                                    comment: comment || 'This submission was marked incomplete (lacking requirements) by the administrator.',
+                                  })
+                                }
+                                className="px-2 py-1.5 rounded-xl text-xs font-mono font-bold flex flex-col items-center justify-center border bg-rose-500 text-white border-rose-600 shadow-2xs hover:bg-rose-600 transition-all cursor-pointer"
+                                title={`${col.fullLabel}: Incomplete • Click to view`}
+                              >
+                                <span>{displayLabel}</span>
+                                <AlertCircle className="w-3 h-3 mt-0.5" />
+                              </button>
+                            );
+                          }
 
-              if (isWithComments) {
-                return (
-                  <button
-                    key={col.key}
-                    type="button"
-                    onClick={() =>
-                      setFacultyDetailModal({
-                        colLabel: col.fullLabel,
-                        status: 'with-comments',
-                        comment: comment || 'This submission was checked and marked with corrections by the administrator.',
-                      })
-                    }
-                    className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-amber-500 text-white border-amber-600 shadow-2xs hover:bg-amber-600 transition-all cursor-pointer"
-                    title={`${col.fullLabel}: Checked with Comments • Click to view administrator feedback`}
-                  >
-                    <span>{col.headerLabel}</span>
-                    <MessageSquare className="w-3.5 h-3.5 fill-current" />
-                    <span className="text-[10px] bg-amber-700/60 px-1.5 py-0.5 rounded-md font-medium">With Comments</span>
-                  </button>
-                );
-              }
+                          if (isWithComments) {
+                            return (
+                              <button
+                                key={col.key}
+                                type="button"
+                                onClick={() =>
+                                  setFacultyDetailModal({
+                                    colLabel: col.fullLabel,
+                                    status: 'with-comments',
+                                    comment: comment || 'This submission was checked and marked with corrections by the administrator.',
+                                  })
+                                }
+                                className="px-2 py-1.5 rounded-xl text-xs font-mono font-bold flex flex-col items-center justify-center border bg-amber-500 text-white border-amber-600 shadow-2xs hover:bg-amber-600 transition-all cursor-pointer"
+                                title={`${col.fullLabel}: With Comments • Click to view`}
+                              >
+                                <span>{displayLabel}</span>
+                                <MessageSquare className="w-3 h-3 fill-current mt-0.5" />
+                              </button>
+                            );
+                          }
 
-              if (isLate) {
-                return (
-                  <button
-                    key={col.key}
-                    type="button"
-                    onClick={() =>
-                      setFacultyDetailModal({
-                        colLabel: col.fullLabel,
-                        status: 'late',
-                        comment: comment || 'This submission was marked as submitted past deadline by the administrator.',
-                      })
-                    }
-                    className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-orange-500 text-white border-orange-600 shadow-2xs hover:bg-orange-600 transition-all cursor-pointer"
-                    title={`${col.fullLabel}: Late (Submitted Late) • Click to view remarks`}
-                  >
-                    <span>{col.headerLabel}</span>
-                    <Clock className="w-3.5 h-3.5" />
-                    <span className="text-[10px] bg-orange-700/60 px-1.5 py-0.5 rounded-md font-medium">Late</span>
-                  </button>
-                );
-              }
+                          if (isLate) {
+                            return (
+                              <button
+                                key={col.key}
+                                type="button"
+                                onClick={() =>
+                                  setFacultyDetailModal({
+                                    colLabel: col.fullLabel,
+                                    status: 'late',
+                                    comment: comment || 'This submission was marked as submitted past deadline by the administrator.',
+                                  })
+                                }
+                                className="px-2 py-1.5 rounded-xl text-xs font-mono font-bold flex flex-col items-center justify-center border bg-orange-500 text-white border-orange-600 shadow-2xs hover:bg-orange-600 transition-all cursor-pointer"
+                                title={`${col.fullLabel}: Late • Click to view`}
+                              >
+                                <span>{displayLabel}</span>
+                                <Clock className="w-3 h-3 mt-0.5" />
+                              </button>
+                            );
+                          }
 
-              if (isChecked) {
-                return (
-                  <div
-                    key={col.key}
-                    className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-emerald-500 text-white border-emerald-600 shadow-2xs"
-                    title={`${col.fullLabel}: Checked (Clean / No Comments)`}
-                  >
-                    <span>{col.headerLabel}</span>
-                    <Check className="w-3.5 h-3.5 stroke-[3]" />
-                    <span className="text-[10px] bg-emerald-700/60 px-1.5 py-0.5 rounded-md font-medium">Checked</span>
-                  </div>
-                );
-              }
+                          if (isChecked) {
+                            return (
+                              <div
+                                key={col.key}
+                                className="px-2 py-1.5 rounded-xl text-xs font-mono font-bold flex flex-col items-center justify-center border bg-emerald-500 text-white border-emerald-600 shadow-2xs"
+                                title={`${col.fullLabel}: Checked (Clean / Approved)`}
+                              >
+                                <span>{displayLabel}</span>
+                                <Check className="w-3 h-3 stroke-[3] mt-0.5" />
+                              </div>
+                            );
+                          }
 
-              return (
-                <div
-                  key={col.key}
-                  className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-[#0d1524] text-slate-300 border-[#24334b]"
-                  title={`${col.fullLabel}: Pending`}
-                >
-                  <span>{col.headerLabel}</span>
-                  <Clock className="w-3 h-3 text-slate-400" />
-                  <span className="text-[10px] text-slate-400 font-medium">Pending</span>
-                </div>
-              );
-            })}
+                          return (
+                            <div
+                              key={col.key}
+                              className="px-2 py-1.5 rounded-xl text-xs font-mono font-bold flex flex-col items-center justify-center border bg-[#0d1524] text-slate-400 border-[#24334b]"
+                              title={`${col.fullLabel}: Pending`}
+                            >
+                              <span>{displayLabel}</span>
+                              <Clock className="w-3 h-3 text-slate-500 mt-0.5" />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                {columnItems.map((col, idx) => {
+                  const status = myStatus.itemsStatuses[idx] || (myStatus.items[idx] ? 'checked' : 'unchecked');
+                  const comment = myStatus.itemsComments[idx] || '';
+                  const isChecked = status === 'checked';
+                  const isWithComments = status === 'with-comments';
+                  const isIncomplete = status === 'incomplete';
+                  const isLate = status === 'late';
+                  const displayLabel = isWeeklyCategory ? col.headerLabel : col.shortLabel;
+
+                  if (isIncomplete) {
+                    return (
+                      <button
+                        key={col.key}
+                        type="button"
+                        onClick={() =>
+                          setFacultyDetailModal({
+                            colLabel: col.fullLabel,
+                            status: 'incomplete',
+                            comment: comment || 'This submission was marked incomplete (lacking requirements) by the administrator.',
+                          })
+                        }
+                        className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-rose-500 text-white border-rose-600 shadow-2xs hover:bg-rose-600 transition-all cursor-pointer"
+                        title={`${col.fullLabel}: Incomplete (Lacking Requirements) • Click to view what is lacking`}
+                      >
+                        <span>{displayLabel}</span>
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        <span className="text-[10px] bg-rose-700/60 px-1.5 py-0.5 rounded-md font-medium">Incomplete</span>
+                      </button>
+                    );
+                  }
+
+                  if (isWithComments) {
+                    return (
+                      <button
+                        key={col.key}
+                        type="button"
+                        onClick={() =>
+                          setFacultyDetailModal({
+                            colLabel: col.fullLabel,
+                            status: 'with-comments',
+                            comment: comment || 'This submission was checked and marked with corrections by the administrator.',
+                          })
+                        }
+                        className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-amber-500 text-white border-amber-600 shadow-2xs hover:bg-amber-600 transition-all cursor-pointer"
+                        title={`${col.fullLabel}: Checked with Comments • Click to view administrator feedback`}
+                      >
+                        <span>{displayLabel}</span>
+                        <MessageSquare className="w-3.5 h-3.5 fill-current" />
+                        <span className="text-[10px] bg-amber-700/60 px-1.5 py-0.5 rounded-md font-medium">With Comments</span>
+                      </button>
+                    );
+                  }
+
+                  if (isLate) {
+                    return (
+                      <button
+                        key={col.key}
+                        type="button"
+                        onClick={() =>
+                          setFacultyDetailModal({
+                            colLabel: col.fullLabel,
+                            status: 'late',
+                            comment: comment || 'This submission was marked as submitted past deadline by the administrator.',
+                          })
+                        }
+                        className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-orange-500 text-white border-orange-600 shadow-2xs hover:bg-orange-600 transition-all cursor-pointer"
+                        title={`${col.fullLabel}: Late (Submitted Late) • Click to view remarks`}
+                      >
+                        <span>{displayLabel}</span>
+                        <Clock className="w-3.5 h-3.5" />
+                        <span className="text-[10px] bg-orange-700/60 px-1.5 py-0.5 rounded-md font-medium">Late</span>
+                      </button>
+                    );
+                  }
+
+                  if (isChecked) {
+                    return (
+                      <div
+                        key={col.key}
+                        className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-emerald-500 text-white border-emerald-600 shadow-2xs"
+                        title={`${col.fullLabel}: Checked (Clean / No Comments)`}
+                      >
+                        <span>{displayLabel}</span>
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        <span className="text-[10px] bg-emerald-700/60 px-1.5 py-0.5 rounded-md font-medium">Checked</span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={col.key}
+                      className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 border bg-[#0d1524] text-slate-300 border-[#24334b]"
+                      title={`${col.fullLabel}: Pending`}
+                    >
+                      <span>{displayLabel}</span>
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span className="text-[10px] text-slate-400 font-medium">Pending</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Prominent Admin Incomplete / Lacking Feedback Panel */}
@@ -3292,7 +3461,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   <p className="text-xs text-slate-400 font-mono">
                     {isWeeklyCategory
                       ? `Check each week (W1 – W${currentTermWeeks}) to record instructional submissions for all faculty members.`
-                      : `Check Term 1 ${currentCategory.name}, Term 2 ${currentCategory.name}, and Term 3 ${currentCategory.name} for all faculty members.`}
+                      : `Check each term deliverable: TERM 1 (ST 1, ST 2, TE 1), TERM 2 (ST 1, ST 2, TE 2), and TERM 3 (ST 1, ST 2, TE 3) for all faculty members.`}
                   </p>
                 </div>
               </div>
@@ -3475,47 +3644,120 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
           {/* Directory Table / Matrix View */}
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[700px]">
+            <table className={`w-full text-left border-collapse ${termGroups ? 'min-w-[1040px]' : 'min-w-[700px]'}`}>
               <thead>
-                <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
-                  <th className="py-3 px-4 w-60 sm:w-72">Faculty Member</th>
-                  <th className="py-3 px-3 w-36 sm:w-44">Department</th>
-                  {/* Dynamic Headers (Weeks or Term 1, Term 2, Term 3) with Quick Save Action */}
-                  {columnItems.map((col) => (
-                    <th
-                      key={col.key}
-                      className={`py-2.5 px-2 text-center border-l border-[#24334b] ${
-                        isWeeklyCategory ? 'w-12' : 'w-32'
-                      }`}
-                      title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
-                    >
-                      <div className="flex flex-col items-center justify-center">
-                        <span className={`text-[11px] font-extrabold ${isWeeklyCategory ? 'text-blue-400' : 'text-purple-400'}`}>
-                          {col.headerLabel}
-                        </span>
-                        {canEditDllTosTq && (
-                          <button
-                            type="button"
-                            onClick={() => handleSaveItemToFirebase(col.index)}
-                            disabled={isSavingIndex === col.index}
-                            className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
-                            title={`Save ${col.fullLabel} data to Firebase`}
+                {termGroups ? (
+                  <>
+                    {/* Tier 1 Header Row: Grouped by TERM 1 TOS/TQ, TERM 2 TOS/TQ, TERM 3 TOS/TQ */}
+                    <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
+                      <th rowSpan={2} className="py-3 px-4 w-52 sm:w-64 border-r border-[#24334b] align-middle text-slate-200">
+                        Faculty Member
+                      </th>
+                      <th rowSpan={2} className="py-3 px-3 w-32 sm:w-40 border-r border-[#24334b] align-middle text-slate-200">
+                        Department
+                      </th>
+                      {termGroups.map((group, gIdx) => (
+                        <th
+                          key={group.label}
+                          colSpan={group.span}
+                          className={`py-2 px-3 text-center border-l-2 border-b border-[#24334b] font-black text-xs tracking-wider ${
+                            activeCategory === 'tos'
+                              ? 'bg-[#151c30] text-purple-300 border-t-2 border-t-purple-500 border-l-purple-500/40'
+                              : 'bg-[#1c1a27] text-amber-300 border-t-2 border-t-amber-500 border-l-amber-500/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-center space-x-1.5">
+                            <span className="font-extrabold">{group.label}</span>
+                          </div>
+                        </th>
+                      ))}
+                      <th rowSpan={2} className="py-3 px-3 text-center w-24 border-l border-[#24334b] align-middle text-slate-200">
+                        Progress
+                      </th>
+                      <th rowSpan={2} className="py-3 px-3 text-center w-24 border-l border-[#24334b] align-middle text-slate-200">
+                        Quick Action
+                      </th>
+                    </tr>
+                    {/* Tier 2 Sub-column Headers: ST 1, ST 2, TE 1 | ST 1, ST 2, TE 2 | ST 1, ST 2, TE 3 */}
+                    <tr className="bg-[#090f1a] text-slate-300 text-[10px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
+                      {columnItems.map((col) => {
+                        const isTermStart = col.index % 3 === 0;
+                        return (
+                          <th
+                            key={col.key}
+                            className={`py-1.5 px-1 text-center ${
+                              isTermStart ? 'border-l-2 border-l-[#3b4f73]' : 'border-l border-l-[#24334b]'
+                            } w-12 sm:w-14`}
+                            title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
                           >
-                            {isSavingIndex === col.index ? (
-                              <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
-                            ) : (
-                              <Save className="w-3 h-3" />
-                            )}
-                          </button>
-                        )}
-                      </div>
+                            <div className="flex flex-col items-center justify-center">
+                              <span
+                                className={`text-[10.5px] font-black ${
+                                  activeCategory === 'tos' ? 'text-purple-200' : 'text-amber-200'
+                                }`}
+                              >
+                                {col.headerLabel}
+                              </span>
+                              {canEditDllTosTq && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveItemToFirebase(col.index)}
+                                  disabled={isSavingIndex === col.index}
+                                  className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
+                                  title={`Save ${col.fullLabel} data to Firebase`}
+                                >
+                                  {isSavingIndex === col.index ? (
+                                    <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
+                                  ) : (
+                                    <Save className="w-2.5 h-2.5" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </>
+                ) : (
+                  /* Standard 1-Tier Header for DLL */
+                  <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
+                    <th className="py-3 px-4 w-60 sm:w-72">Faculty Member</th>
+                    <th className="py-3 px-3 w-36 sm:w-44">Department</th>
+                    {columnItems.map((col) => (
+                      <th
+                        key={col.key}
+                        className="py-2.5 px-2 text-center border-l border-[#24334b] w-12"
+                        title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
+                      >
+                        <div className="flex flex-col items-center justify-center">
+                          <span className="text-[11px] font-extrabold text-blue-400">
+                            {col.headerLabel}
+                          </span>
+                          {canEditDllTosTq && (
+                            <button
+                              type="button"
+                              onClick={() => handleSaveItemToFirebase(col.index)}
+                              disabled={isSavingIndex === col.index}
+                              className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
+                              title={`Save ${col.fullLabel} data to Firebase`}
+                            >
+                              {isSavingIndex === col.index ? (
+                                <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
+                              ) : (
+                                <Save className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </th>
+                    ))}
+                    <th className="py-3 px-3 text-center w-28 border-l border-[#24334b]">
+                      Progress
                     </th>
-                  ))}
-                  <th className="py-3 px-3 text-center w-28 border-l border-[#24334b]">
-                    Progress
-                  </th>
-                  <th className="py-3 px-3 text-center w-28">Quick Action</th>
-                </tr>
+                    <th className="py-3 px-3 text-center w-28">Quick Action</th>
+                  </tr>
+                )}
               </thead>
               <tbody className="divide-y divide-[#24334b] text-xs font-mono">
                 {filteredFaculty.length === 0 ? (
@@ -3576,11 +3818,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                           const isWithComments = itemStatus === 'with-comments';
                           const isIncomplete = itemStatus === 'incomplete';
                           const isLate = itemStatus === 'late';
+                          const isTermStart = termGroups && col.index % 3 === 0;
 
                           return (
                             <td
                               key={col.key}
-                              className="py-2 px-1 text-center border-l border-[#24334b]"
+                              className={`py-2 px-1 text-center ${
+                                isTermStart ? 'border-l-2 border-l-[#3b4f73]' : 'border-l border-l-[#24334b]'
+                              }`}
                             >
                               <button
                                 type="button"
@@ -3588,7 +3833,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                                 disabled={!canEditDllTosTq}
                                 aria-label={`Review ${col.fullLabel} for ${faculty.name}`}
                                 className={`rounded-lg border flex items-center justify-center mx-auto transition-all ${canEditDllTosTq ? 'cursor-pointer active:scale-90' : 'cursor-default'} relative ${
-                                  isWeeklyCategory ? 'w-7 h-7' : 'w-9 h-7 px-1'
+                                  isWeeklyCategory ? 'w-7 h-7' : 'w-7 h-7 sm:w-8 sm:h-7'
                                 } ${
                                   isChecked
                                     ? 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600'

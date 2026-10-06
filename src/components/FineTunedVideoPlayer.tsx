@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
 
 interface FineTunedVideoPlayerProps {
@@ -24,7 +24,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const singleTapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [isMuted, setIsMuted] = useState<boolean>(true); // default muted ensures browser autoplay compliance
+  const [isMuted, setIsMuted] = useState<boolean>(true); // default muted ensures strict browser autoplay compliance
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [showControls, setShowControls] = useState<boolean>(true);
@@ -73,11 +73,20 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     }
   }
 
-  // Generate safe iframe URL: clean, minimal controls, mobile playsinline=1, no annotations covering frame
+  // Helper to get safe origin for postMessage
+  const getOrigin = () => {
+    if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+      return window.location.origin;
+    }
+    return '*';
+  };
+
+  // Generate safe iframe URL with verified autoplay & muted parameters
   const getIframeUrl = () => {
-    const autoPlayVal = isActive ? '1' : '0';
+    const origin = getOrigin();
     if (youtubeId) {
-      return `https://www.youtube.com/embed/${youtubeId}?autoplay=${autoPlayVal}&mute=1&enablejsapi=1&rel=0&modestbranding=1&playsinline=1&controls=1&iv_load_policy=3`;
+      // YouTube embed with enablejsapi=1, autoplay=1, mute=1 for zero-click autoplay
+      return `https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&enablejsapi=1&origin=${encodeURIComponent(origin)}&widget_referrer=${encodeURIComponent(origin)}&playsinline=1&controls=1&rel=0&modestbranding=1&iv_load_policy=3`;
     }
 
     if (gDriveId) {
@@ -85,9 +94,12 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     }
 
     if (rawIframeSrc) {
-      let url = rawIframeSrc.replace(/autoplay=1/gi, isActive ? 'autoplay=1' : 'autoplay=0');
+      let url = rawIframeSrc;
       if (!url.includes('autoplay=')) {
-        url += (url.includes('?') ? '&' : '?') + (isActive ? 'autoplay=1' : 'autoplay=0');
+        url += (url.includes('?') ? '&' : '?') + 'autoplay=1';
+      }
+      if (!url.includes('mute=')) {
+        url += '&mute=1';
       }
       if (!url.includes('playsinline=')) {
         url += '&playsinline=1';
@@ -98,33 +110,84 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     return '';
   };
 
-  // Format raw code fallback to ensure no autoplay, mobile friendliness and proper sizing
+  // Format raw code fallback while preserving autoplay capabilities
   const getSanitizedRawCode = () => {
-    let formatted = raw.replace(/autoplay=1/gi, isActive ? 'autoplay=1' : 'autoplay=0');
-    formatted = formatted.replace(/\bautoplay\b/gi, '');
-    formatted = formatted.replace(/allow=["']([^"']*?)autoplay;?([^"']*?)["']/gi, 'allow="$1$2"');
+    let formatted = raw;
     if (formatted.includes('<iframe')) {
-      if (!formatted.includes('loading=')) {
-        formatted = formatted.replace('<iframe', '<iframe loading="lazy"');
+      if (!formatted.includes('allow=')) {
+        formatted = formatted.replace(
+          '<iframe',
+          '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"'
+        );
+      } else if (!formatted.includes('autoplay')) {
+        formatted = formatted.replace(/allow=["']([^"']*?)["']/i, 'allow="$1; autoplay"');
       }
       if (!formatted.includes('allowfullscreen')) {
         formatted = formatted.replace('<iframe', '<iframe allowfullscreen');
       }
+      // Remove loading="lazy" because lazy iframes block autoplay in Chrome/Safari
+      formatted = formatted.replace(/\s*loading=["']lazy["']/gi, '');
     }
     if (formatted.includes('<video')) {
       if (!formatted.includes('playsinline')) {
         formatted = formatted.replace('<video', '<video playsinline webkit-playsinline="true"');
       }
+      if (!formatted.includes('autoplay')) {
+        formatted = formatted.replace('<video', '<video autoplay muted');
+      }
     }
     return formatted;
+  };
+
+  // Send command to YouTube iframe via postMessage safely
+  const sendYouTubeCommand = useCallback((func: 'playVideo' | 'pauseVideo') => {
+    try {
+      if (iframeRef.current && iframeRef.current.contentWindow) {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({
+            event: 'command',
+            func,
+            args: '',
+          }),
+          '*'
+        );
+      }
+    } catch (_) {}
+  }, []);
+
+  // Handler when iframe finishes loading
+  const handleIframeLoad = () => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      try {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ event: 'listening' }),
+          '*'
+        );
+      } catch (_) {}
+
+      if (isActive) {
+        // Trigger play for the active video
+        setTimeout(() => {
+          sendYouTubeCommand('playVideo');
+        }, 150);
+      } else {
+        // Ensure inactive videos stay paused
+        sendYouTubeCommand('pauseVideo');
+      }
+    }
   };
 
   // AUTOPLAY WHEN ACTIVE, STOP WHEN SCROLLED TO ANOTHER VIDEO
   useEffect(() => {
     if (isActive) {
-      // 1. HTML5 Video Autoplay
+      // 1. Direct HTML5 Video Autoplay
       if (videoRef.current) {
-        videoRef.current.muted = isMuted;
+        videoRef.current.defaultMuted = true;
+        videoRef.current.muted = true;
+        videoRef.current.playsInline = true;
+        videoRef.current.setAttribute('playsinline', '');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+
         const playPromise = videoRef.current.play();
         if (playPromise !== undefined) {
           playPromise
@@ -132,20 +195,28 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
               setIsPlaying(true);
             })
             .catch(() => {
-              // Retry with muted to fulfill strict browser autoplay policy
+              // Retry with guaranteed muted state
               if (videoRef.current) {
+                videoRef.current.defaultMuted = true;
                 videoRef.current.muted = true;
-                setIsMuted(true);
-                videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+                videoRef.current
+                  .play()
+                  .then(() => setIsPlaying(true))
+                  .catch(() => {});
               }
             });
         }
       }
 
-      // 2. YouTube iframe postMessage play
-      if (iframeRef.current && iframeRef.current.contentWindow) {
-        iframeRef.current.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-      }
+      // 2. YouTube iframe play with retry to guarantee receipt once player boots
+      sendYouTubeCommand('playVideo');
+      const t1 = setTimeout(() => sendYouTubeCommand('playVideo'), 250);
+      const t2 = setTimeout(() => sendYouTubeCommand('playVideo'), 700);
+
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
     } else {
       // STOP playback when scrolled away to next video
       if (videoRef.current) {
@@ -153,12 +224,37 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         setIsPlaying(false);
       }
 
-      // YouTube iframe postMessage pause
-      if (iframeRef.current && iframeRef.current.contentWindow) {
-        iframeRef.current.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
-      }
+      // Stop YouTube iframe playback immediately
+      sendYouTubeCommand('pauseVideo');
+      const tPause = setTimeout(() => sendYouTubeCommand('pauseVideo'), 150);
+      return () => clearTimeout(tPause);
     }
-  }, [isActive]);
+  }, [isActive, sendYouTubeCommand]);
+
+  // Window-level interaction fallback: if the browser held autoplay due to user gesture policy,
+  // the first touch, scroll, or click anywhere on the page unlocks and starts playback
+  useEffect(() => {
+    if (!isActive) return;
+
+    const handleFirstUserGesture = () => {
+      if (videoRef.current && videoRef.current.paused) {
+        videoRef.current.defaultMuted = true;
+        videoRef.current.muted = true;
+        videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      }
+      sendYouTubeCommand('playVideo');
+    };
+
+    window.addEventListener('pointerdown', handleFirstUserGesture, { once: true, passive: true });
+    window.addEventListener('touchstart', handleFirstUserGesture, { once: true, passive: true });
+    window.addEventListener('scroll', handleFirstUserGesture, { once: true, passive: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstUserGesture);
+      window.removeEventListener('touchstart', handleFirstUserGesture);
+      window.removeEventListener('scroll', handleFirstUserGesture);
+    };
+  }, [isActive, sendYouTubeCommand]);
 
   // Video control helpers
   const resetHideTimer = () => {
@@ -219,18 +315,25 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     const video = videoRef.current;
     if (!container) return;
 
-    if (document.fullscreenElement) {
-      document.exitFullscreen?.().catch(() => {});
+    const doc: any = document;
+    if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen();
+      }
       setIsFullscreen(false);
     } else {
       if (container.requestFullscreen) {
-        container.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {
-          // Fallback for iOS webkit video
-          if (video && (video as any).webkitEnterFullscreen) {
-            (video as any).webkitEnterFullscreen();
-            setIsFullscreen(true);
-          }
-        });
+        container
+          .requestFullscreen()
+          .then(() => setIsFullscreen(true))
+          .catch(() => {
+            if (video && (video as any).webkitEnterFullscreen) {
+              (video as any).webkitEnterFullscreen();
+              setIsFullscreen(true);
+            }
+          });
       } else if ((container as any).webkitRequestFullscreen) {
         (container as any).webkitRequestFullscreen();
         setIsFullscreen(true);
@@ -246,8 +349,8 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     const now = Date.now();
     const timeSinceLastTap = now - lastTapRef.current;
 
-    if (timeSinceLastTap < 320 && timeSinceLastTap > 0) {
-      // It's a double-tap! Turn Fullscreen!
+    if (timeSinceLastTap < 350 && timeSinceLastTap > 0) {
+      // Double tap confirmed! Toggle Fullscreen
       if (singleTapTimeoutRef.current) {
         clearTimeout(singleTapTimeoutRef.current);
         singleTapTimeoutRef.current = null;
@@ -279,17 +382,20 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const doc: any = document;
+      setIsFullscreen(!!(doc.fullscreenElement || doc.webkitFullscreenElement));
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
       if (singleTapTimeoutRef.current) clearTimeout(singleTapTimeoutRef.current);
     };
   }, []);
 
-  // 1. Direct HTML5 Video Player: Minimal, compact, auto-hiding controls that NEVER cover the video frame
+  // 1. Direct HTML5 Video Player: Micro-sized auto-hiding controls that never cover the video frame
   if (html5VideoSrc) {
     return (
       <div
@@ -307,13 +413,20 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
           playsInline
           // @ts-expect-error webkit-playsinline for iOS Safari
           webkit-playsinline="true"
-          preload="metadata"
+          preload="auto"
           autoPlay={isActive}
           muted={isMuted}
           loop
           onClick={togglePlay}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
+          onCanPlay={() => {
+            if (isActive && videoRef.current && videoRef.current.paused) {
+              videoRef.current.defaultMuted = true;
+              videoRef.current.muted = true;
+              videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+            }
+          }}
           onPlay={() => {
             setIsPlaying(true);
             resetHideTimer();
@@ -349,7 +462,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
           </button>
         )}
 
-        {/* Micro-sized bottom control bar when not in fullscreen to avoid covering the video frame */}
+        {/* Micro-sized bottom control bar when playing or hovering to avoid covering the video frame */}
         <div
           className={`absolute bottom-0 inset-x-0 transition-opacity duration-200 z-20 ${
             isFullscreen
@@ -422,7 +535,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     );
   }
 
-  // 2. Iframe / YouTube / Google Drive Preview: strict 16:9 ratio so controls are docked to bottom edge and never cover the frame
+  // 2. Iframe / YouTube / Google Drive Preview
   const iframeSrc = getIframeUrl();
 
   return (
@@ -442,14 +555,26 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         </div>
       )}
 
+      {/* Discreet Mobile Fullscreen Corner Toggle Button (Double-tap friendly) */}
+      <button
+        type="button"
+        onClick={toggleFullscreen}
+        aria-label="Toggle Fullscreen"
+        title="Double-tap frame or click to toggle fullscreen"
+        className="absolute top-2 right-2 bg-black/60 hover:bg-black/85 text-white/90 hover:text-white p-1 rounded-lg border border-white/20 backdrop-blur-xs z-20 transition-all cursor-pointer opacity-80 hover:opacity-100 active:scale-95 flex items-center gap-1 text-[9px] font-mono"
+      >
+        {isFullscreen ? <Minimize className="w-3 h-3 text-emerald-400" /> : <Maximize className="w-3 h-3 text-emerald-400" />}
+        <span className="hidden sm:inline text-[8px] font-bold">FULLSCREEN</span>
+      </button>
+
       {iframeSrc ? (
         <iframe
           ref={iframeRef}
           src={iframeSrc}
-          title={title || 'School Video Preview'}
+          title={title || 'School Video Presentation'}
+          onLoad={handleIframeLoad}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
-          loading="lazy"
           className="w-full h-full border-0 pointer-events-auto"
         />
       ) : (

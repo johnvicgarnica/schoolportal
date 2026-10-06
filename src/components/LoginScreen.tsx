@@ -21,6 +21,7 @@ import {
   seedInitialGalleryPhotosIfEmpty,
   subscribeEmbeddedVideos,
   getStoredEmbeddedVideos,
+  seedInitialEmbeddedVideosIfEmpty,
   subscribeAnnouncements,
   getStoredAnnouncements,
   seedInitialAnnouncementsIfEmpty,
@@ -134,6 +135,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     seedInitialAdminIfEmpty();
     seedInitialGalleryPhotosIfEmpty();
     seedInitialAnnouncementsIfEmpty();
+    seedInitialEmbeddedVideosIfEmpty();
 
     // 1. Subscribe to Gallery Photos
     const unsubGallery = subscribeGalleryPhotos((photos) => {
