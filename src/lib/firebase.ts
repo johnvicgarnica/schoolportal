@@ -2500,7 +2500,7 @@ export const seedInitialEmbeddedVideosIfEmpty = async (): Promise<void> => {
         {
           id: 'video-svnhs-welcome-intro',
           title: 'San Vicente National High School - Campus Overview & Orientation',
-          embedCode: '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&playsinline=1&enablejsapi=1&rel=0&controls=1" title="SVNHS Campus Overview" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen class="w-full h-full"></iframe>',
+          embedCode: '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&playsinline=1&enablejsapi=1&rel=0&controls=1" title="SVNHS Campus Overview" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen class="w-full h-full"></iframe>',
           description: 'Official introduction, institutional values, and student orientation guide.',
           createdAt: new Date().toISOString().substring(0, 10),
           createdBy: 'Master Admin',
@@ -2509,7 +2509,7 @@ export const seedInitialEmbeddedVideosIfEmpty = async (): Promise<void> => {
         {
           id: 'video-svnhs-deped-guidelines',
           title: 'DepEd Senior High School Academic & TVL Strands Walkthrough',
-          embedCode: '<iframe src="https://www.youtube.com/embed/y6120QOlsfU?autoplay=1&mute=1&playsinline=1&enablejsapi=1&rel=0&controls=1" title="DepEd SHS Track Orientation" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen class="w-full h-full"></iframe>',
+          embedCode: '<iframe src="https://www.youtube.com/embed/y6120QOlsfU?autoplay=1&mute=1&playsinline=1&enablejsapi=1&rel=0&controls=1" title="DepEd SHS Track Orientation" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen class="w-full h-full"></iframe>',
           description: 'Academic strands, technical-vocational tracks, grading systems, and student advisories.',
           createdAt: new Date().toISOString().substring(0, 10),
           createdBy: 'Master Admin',

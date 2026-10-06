@@ -48,6 +48,9 @@
     outline: none;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
   }
+  video {
+    object-fit: contain !important;
+  }
 }
 
 /* Custom smooth dark scrollbar */

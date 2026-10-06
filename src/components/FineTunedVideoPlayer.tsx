@@ -24,6 +24,10 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const singleTapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const isPlayingRef = useRef<boolean>(false);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
   const [isMuted, setIsMuted] = useState<boolean>(true); // default muted ensures strict browser autoplay compliance
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
@@ -114,10 +118,12 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const getSanitizedRawCode = () => {
     let formatted = raw;
     if (formatted.includes('<iframe')) {
+      // Strip web-share if present in iframe code
+      formatted = formatted.replace(/;\s*web-share/gi, '').replace(/web-share;?\s*/gi, '');
       if (!formatted.includes('allow=')) {
         formatted = formatted.replace(
           '<iframe',
-          '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"'
+          '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"'
         );
       } else if (!formatted.includes('autoplay')) {
         formatted = formatted.replace(/allow=["']([^"']*?)["']/i, 'allow="$1; autoplay"');
@@ -129,6 +135,12 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       formatted = formatted.replace(/\s*loading=["']lazy["']/gi, '');
     }
     if (formatted.includes('<video')) {
+      if (!formatted.includes('object-fit')) {
+        formatted = formatted.replace('<video', '<video style="object-fit: contain;"');
+      }
+      if (!formatted.includes('object-contain')) {
+        formatted = formatted.replace('<video', '<video class="object-contain"');
+      }
       if (!formatted.includes('playsinline')) {
         formatted = formatted.replace('<video', '<video playsinline webkit-playsinline="true"');
       }
@@ -293,25 +305,54 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     return () => observer.disconnect();
   }, [isActive, sendYouTubeCommand]);
 
-  // Video control helpers
-  const resetHideTimer = () => {
+  // Video control helpers: robust auto-hide timers
+  const scheduleHideControls = useCallback((delay = 1800) => {
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+    }
+    hideTimeoutRef.current = setTimeout(() => {
+      // Only hide if the video is actually playing
+      if (videoRef.current ? !videoRef.current.paused : (isPlayingRef.current || isActive)) {
+        setShowControls(false);
+      }
+    }, delay);
+  }, [isActive]);
+
+  const resetHideTimer = useCallback(() => {
     setShowControls(true);
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
     }
-    if (isPlaying) {
-      hideTimeoutRef.current = setTimeout(() => {
-        setShowControls(false);
-      }, 1200);
+    if (videoRef.current ? !videoRef.current.paused : (isPlayingRef.current || isActive)) {
+      scheduleHideControls(2000);
     }
-  };
+  }, [isActive, scheduleHideControls]);
+
+  // Automatically hide controls after delay when playing
+  useEffect(() => {
+    if (isPlaying) {
+      scheduleHideControls(1500);
+    } else {
+      setShowControls(true);
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+      }
+    }
+  }, [isPlaying, scheduleHideControls]);
+
+  // When active slide changes for embedded players
+  useEffect(() => {
+    if (isActive) {
+      scheduleHideControls(2000);
+    }
+  }, [isActive, scheduleHideControls]);
 
   const togglePlay = () => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
       videoRef.current.play().catch(() => {});
       setIsPlaying(true);
-      resetHideTimer();
+      scheduleHideControls(1500);
     } else {
       videoRef.current.pause();
       setIsPlaying(false);
@@ -338,6 +379,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       setCurrentTime(videoRef.current.currentTime);
+      if (videoRef.current.currentTime > 0.8 && !videoRef.current.paused && showControls && !hideTimeoutRef.current) {
+        scheduleHideControls(1500);
+      }
     }
   };
 
@@ -381,8 +425,29 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     }
   };
 
-  // Double-tap gesture detector for mobile mode fullscreen
-  const handleTouchEnd = () => {
+  const handleContainerTap = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input')) {
+      return;
+    }
+    if (showControls) {
+      if (videoRef.current ? !videoRef.current.paused : (isPlayingRef.current || isActive)) {
+        setShowControls(false);
+        if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+      }
+    } else {
+      setShowControls(true);
+      scheduleHideControls(2000);
+    }
+  }, [showControls, isActive, scheduleHideControls]);
+
+  // Double-tap gesture detector for mobile mode fullscreen & tap toggle
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input')) {
+      return;
+    }
+
     const now = Date.now();
     const timeSinceLastTap = now - lastTapRef.current;
 
@@ -398,13 +463,13 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       setDoubleTapFeedback(true);
       setTimeout(() => setDoubleTapFeedback(false), 700);
     } else {
-      // First tap
+      // First tap: toggle controls
       lastTapRef.current = now;
       if (singleTapTimeoutRef.current) {
         clearTimeout(singleTapTimeoutRef.current);
       }
       singleTapTimeoutRef.current = setTimeout(() => {
-        resetHideTimer();
+        handleContainerTap(e);
         singleTapTimeoutRef.current = null;
       }, 250);
     }
@@ -439,7 +504,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         ref={containerRef}
         className={`relative ${aspectRatioClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center select-none ${className}`}
         onMouseMove={resetHideTimer}
-        onClick={resetHideTimer}
+        onClick={handleContainerTap}
         onDoubleClick={toggleFullscreen}
         onTouchEnd={handleTouchEnd}
         onMouseLeave={() => isPlaying && setShowControls(false)}
@@ -454,24 +519,27 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
           autoPlay={isActive}
           muted={isMuted}
           loop
-          onClick={togglePlay}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onCanPlay={() => {
             if (isActive && videoRef.current && videoRef.current.paused) {
               videoRef.current.defaultMuted = true;
               videoRef.current.muted = true;
-              videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+              videoRef.current.play().then(() => {
+                setIsPlaying(true);
+                scheduleHideControls(1500);
+              }).catch(() => {});
             }
           }}
           onPlay={() => {
             setIsPlaying(true);
-            resetHideTimer();
+            scheduleHideControls(1500);
           }}
           onPause={() => {
             setIsPlaying(false);
             setShowControls(true);
           }}
+          style={{ objectFit: 'contain' }}
           className="w-full h-full object-contain object-center bg-black cursor-pointer block mx-auto my-auto"
         />
 
@@ -578,6 +646,8 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   return (
     <div
       ref={containerRef}
+      onMouseMove={resetHideTimer}
+      onClick={handleContainerTap}
       onDoubleClick={toggleFullscreen}
       onTouchEnd={handleTouchEnd}
       className={`relative ${aspectRatioClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center ${className}`}
@@ -598,7 +668,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         onClick={toggleFullscreen}
         aria-label="Toggle Fullscreen"
         title="Double-tap frame or click to toggle fullscreen"
-        className="absolute top-2 right-2 bg-black/60 hover:bg-black/85 text-white/90 hover:text-white p-1 rounded-lg border border-white/20 backdrop-blur-xs z-20 transition-all cursor-pointer opacity-80 hover:opacity-100 active:scale-95 flex items-center gap-1 text-[9px] font-mono"
+        className={`absolute top-2 right-2 bg-black/60 hover:bg-black/85 text-white/90 hover:text-white p-1 rounded-lg border border-white/20 backdrop-blur-xs z-20 transition-all duration-300 cursor-pointer active:scale-95 flex items-center gap-1 text-[9px] font-mono ${
+          showControls ? 'opacity-90 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
       >
         {isFullscreen ? <Minimize className="w-3 h-3 text-emerald-400" /> : <Maximize className="w-3 h-3 text-emerald-400" />}
         <span className="hidden sm:inline text-[8px] font-bold">FULLSCREEN</span>
@@ -612,7 +684,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
               src={iframeSrc}
               title={title || 'School Video Presentation'}
               onLoad={handleIframeLoad}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
               className="absolute inset-x-0 w-full border-0 pointer-events-auto block"
               style={{
@@ -627,7 +699,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
             src={iframeSrc}
             title={title || 'School Video Presentation'}
             onLoad={handleIframeLoad}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
             className="w-full h-full border-0 pointer-events-auto block mx-auto my-auto"
           />
@@ -635,7 +707,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       ) : (
         /* Fallback for raw embed snippet */
         <div
-          className={`w-full h-full flex items-center justify-center text-center overflow-hidden relative [&_iframe]:w-full [&_iframe]:border-0 [&_iframe]:block [&_iframe]:mx-auto [&_iframe]:my-auto [&_video]:w-full [&_video]:h-full [&_video]:object-contain [&_video]:object-center [&_video]:mx-auto [&_video]:my-auto ${
+          className={`w-full h-full flex items-center justify-center text-center overflow-hidden relative [&_iframe]:w-full [&_iframe]:border-0 [&_iframe]:block [&_iframe]:mx-auto [&_iframe]:my-auto [&_video]:[object-fit:contain] [&_video]:w-full [&_video]:h-full [&_video]:object-contain [&_video]:object-center [&_video]:mx-auto [&_video]:my-auto ${
             isGoogleDrive
               ? '[&_iframe]:h-[calc(100%+56px)] [&_iframe]:-mt-[56px] [&_iframe]:absolute [&_iframe]:inset-x-0'
               : '[&_iframe]:h-full'

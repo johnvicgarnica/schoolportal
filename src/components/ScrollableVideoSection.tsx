@@ -31,24 +31,24 @@ export const formatEmbedCode = (rawCode: string): string => {
   // 1. Direct YouTube watch URL - enforce autoplay=1, mute=1, playsinline=1, enablejsapi=1
   const ytWatchMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/i);
   if (ytWatchMatch && ytWatchMatch[1]) {
-    return `<iframe src="https://www.youtube.com/embed/${ytWatchMatch[1]}?autoplay=1&mute=1&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full"></iframe>`;
+    return `<iframe src="https://www.youtube.com/embed/${ytWatchMatch[1]}?autoplay=1&mute=1&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full"></iframe>`;
   }
 
   // 2. Direct youtu.be short URL - enforce autoplay=1, mute=1, playsinline=1, enablejsapi=1
   const ytShortMatch = trimmed.match(/(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]+)/i);
   if (ytShortMatch && ytShortMatch[1]) {
-    return `<iframe src="https://www.youtube.com/embed/${ytShortMatch[1]}?autoplay=1&mute=1&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full"></iframe>`;
+    return `<iframe src="https://www.youtube.com/embed/${ytShortMatch[1]}?autoplay=1&mute=1&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full"></iframe>`;
   }
 
   // 3. Direct Google Drive preview URL
   const gDriveMatch = trimmed.match(/(?:https?:\/\/)?drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/(?:view|preview)/i);
   if (gDriveMatch && gDriveMatch[1]) {
-    return `<iframe src="https://drive.google.com/file/d/${gDriveMatch[1]}/preview" title="SVNHS Google Drive Video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen class="w-full h-full"></iframe>`;
+    return `<iframe src="https://drive.google.com/file/d/${gDriveMatch[1]}/preview" title="SVNHS Google Drive Video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen class="w-full h-full"></iframe>`;
   }
 
   // 4. HTML5 direct video file (.mp4, .webm) - autoplay with muted, controls enabled, mobile playsinline
   if (trimmed.match(/^https?:\/\/.+\.(mp4|webm|ogg)(\?.*)?$/i)) {
-    return `<video controls playsinline webkit-playsinline="true" autoPlay muted preload="auto" class="w-full h-full object-contain object-center bg-black mx-auto"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
+    return `<video controls playsinline webkit-playsinline="true" autoPlay muted preload="auto" style="object-fit: contain;" class="w-full h-full object-contain object-center bg-black mx-auto"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
   }
 
   // 5. Raw <iframe> or <video> code provided by Master Admin
@@ -56,10 +56,12 @@ export const formatEmbedCode = (rawCode: string): string => {
 
   // Ensure allowfullscreen and allow="autoplay" are present on iframes without blocking autoplay
   if (formatted.includes('<iframe')) {
+    // Strip web-share if present in iframe code
+    formatted = formatted.replace(/;\s*web-share/gi, '').replace(/web-share;?\s*/gi, '');
     if (!formatted.includes('allow=')) {
       formatted = formatted.replace(
         '<iframe',
-        '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"'
+        '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"'
       );
     } else if (!formatted.includes('autoplay')) {
       formatted = formatted.replace(/allow=["']([^"']*?)["']/i, 'allow="$1; autoplay"');
@@ -71,8 +73,14 @@ export const formatEmbedCode = (rawCode: string): string => {
     formatted = formatted.replace(/\s*loading=["']lazy["']/gi, '');
   }
 
-  // Ensure video tags have playsinline and autoplay capabilities
+  // Ensure video tags have playsinline, object-fit contain, and autoplay capabilities
   if (formatted.includes('<video')) {
+    if (!formatted.includes('object-fit')) {
+      formatted = formatted.replace('<video', '<video style="object-fit: contain;"');
+    }
+    if (!formatted.includes('object-contain')) {
+      formatted = formatted.replace('<video', '<video class="object-contain"');
+    }
     if (!formatted.includes('controls')) {
       formatted = formatted.replace('<video', '<video controls');
     }
