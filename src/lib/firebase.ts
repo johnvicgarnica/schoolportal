@@ -2384,11 +2384,55 @@ export const reseedDefaultGalleryPhotos = async () => {
 export const EMBEDDED_VIDEOS_COL = 'embedded_videos';
 const VIDEOS_STORAGE_KEY = 'svnhs_embedded_videos_cache';
 
+// Specific IDs and markers for preloaded videos that should never be shown
+export const PRELOAD_VIDEO_IDS = new Set([
+  'video-svnhs-welcome-intro',
+  'video-svnhs-deped-guidelines',
+]);
+
+export const isPreloadVideo = (video: EmbeddedVideo | null | undefined): boolean => {
+  if (!video) return false;
+  if (video.id && PRELOAD_VIDEO_IDS.has(video.id)) return true;
+  if (video.id && video.id.startsWith('video-svnhs-')) return true;
+  if (
+    video.title?.includes('San Vicente National High School - Campus Overview') ||
+    video.title?.includes('DepEd Senior High School Academic & TVL Strands')
+  ) {
+    return true;
+  }
+  return false;
+};
+
+export const cleanPreloadVideosFromFirestore = async (): Promise<void> => {
+  try {
+    const snap = await getDocs(collection(db, EMBEDDED_VIDEOS_COL));
+    for (const d of snap.docs) {
+      const vid = d.data() as EmbeddedVideo;
+      if (isPreloadVideo(vid) || PRELOAD_VIDEO_IDS.has(d.id) || d.id.startsWith('video-svnhs-')) {
+        await deleteDoc(doc(db, EMBEDDED_VIDEOS_COL, d.id));
+      }
+    }
+  } catch (err) {
+    console.warn('Note on cleaning preload videos from Firestore:', err);
+  }
+
+  // Also clean localStorage cache
+  try {
+    const raw = localStorage.getItem(VIDEOS_STORAGE_KEY);
+    if (raw) {
+      const list = JSON.parse(raw) as EmbeddedVideo[];
+      const filtered = list.filter((v) => !isPreloadVideo(v));
+      localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(filtered));
+    }
+  } catch (_) {}
+};
+
 export const getStoredEmbeddedVideos = (): EmbeddedVideo[] => {
   try {
     const raw = localStorage.getItem(VIDEOS_STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as EmbeddedVideo[];
+    const list = JSON.parse(raw) as EmbeddedVideo[];
+    return list.filter((v) => !isPreloadVideo(v));
   } catch (err) {
     console.error('Error reading embedded videos from localStorage:', err);
     return [];
@@ -2455,6 +2499,9 @@ export const deleteEmbeddedVideoFromFirestore = async (id: string): Promise<void
 };
 
 export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => void) => {
+  // Purge any lingering legacy preloaded default videos from Firestore
+  cleanPreloadVideosFromFirestore();
+
   return onSnapshot(
     collection(db, EMBEDDED_VIDEOS_COL),
     (snapshot) => {
@@ -2466,7 +2513,10 @@ export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => v
         return;
       }
 
-      const list: EmbeddedVideo[] = snapshot.docs.map((d) => d.data() as EmbeddedVideo);
+      // Strictly only include videos uploaded by Master Admin (exclude preloads)
+      const list: EmbeddedVideo[] = snapshot.docs
+        .map((d) => d.data() as EmbeddedVideo)
+        .filter((vid) => !isPreloadVideo(vid));
 
       // Sort by order asc, then createdAt desc
       list.sort((a, b) => {
@@ -2493,38 +2543,8 @@ export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => v
 };
 
 export const seedInitialEmbeddedVideosIfEmpty = async (): Promise<void> => {
-  try {
-    const snap = await getDocs(collection(db, EMBEDDED_VIDEOS_COL));
-    if (snap.empty) {
-      const defaultVideos: EmbeddedVideo[] = [
-        {
-          id: 'video-svnhs-welcome-intro',
-          title: 'San Vicente National High School - Campus Overview & Orientation',
-          embedCode: '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&playsinline=1&enablejsapi=1&rel=0&controls=1" title="SVNHS Campus Overview" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen class="w-full h-full"></iframe>',
-          description: 'Official introduction, institutional values, and student orientation guide.',
-          createdAt: new Date().toISOString().substring(0, 10),
-          createdBy: 'Master Admin',
-          order: 1,
-        },
-        {
-          id: 'video-svnhs-deped-guidelines',
-          title: 'DepEd Senior High School Academic & TVL Strands Walkthrough',
-          embedCode: '<iframe src="https://www.youtube.com/embed/y6120QOlsfU?autoplay=1&mute=1&playsinline=1&enablejsapi=1&rel=0&controls=1" title="DepEd SHS Track Orientation" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen class="w-full h-full"></iframe>',
-          description: 'Academic strands, technical-vocational tracks, grading systems, and student advisories.',
-          createdAt: new Date().toISOString().substring(0, 10),
-          createdBy: 'Master Admin',
-          order: 2,
-        },
-      ];
-
-      for (const v of defaultVideos) {
-        await setDoc(doc(db, EMBEDDED_VIDEOS_COL, v.id), v);
-        saveEmbeddedVideoToLocalStorage(v);
-      }
-    }
-  } catch (err) {
-    console.warn('Could not seed initial embedded videos:', err);
-  }
+  // Preload videos are permanently removed; purge any legacy preloads from Firestore & cache
+  await cleanPreloadVideosFromFirestore();
 };
 
 

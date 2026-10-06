@@ -9,6 +9,73 @@ interface FineTunedVideoPlayerProps {
   isActive?: boolean;
 }
 
+interface ParsedEmbed {
+  rawIframeSrc: string;
+  html5VideoSrc: string;
+  youtubeId: string;
+  gDriveId: string;
+  isGoogleDrive: boolean;
+  isDirectVideoFile: boolean;
+  isHtml5VideoTag: boolean;
+  isIframe: boolean;
+}
+
+const parseEmbedCode = (embedCode: string): ParsedEmbed => {
+  const raw = (embedCode || '').trim();
+
+  // 1. Direct video file
+  const isDirectVideoFile = /^https?:\/\/.+\.(mp4|webm|ogg)(\?.*)?$/i.test(raw);
+
+  // 2. HTML5 <video> tag
+  const isHtml5VideoTag = /<video[\s\S]*?>/i.test(raw);
+  let html5VideoSrc = '';
+  if (isDirectVideoFile) {
+    html5VideoSrc = raw;
+  } else if (isHtml5VideoTag) {
+    const srcMatch = raw.match(/src=["'](.*?)["']/i);
+    if (srcMatch && srcMatch[1]) {
+      html5VideoSrc = srcMatch[1];
+    } else {
+      const sourceMatch = raw.match(/<source[\s\S]*?src=["'](.*?)["']/i);
+      if (sourceMatch && sourceMatch[1]) {
+        html5VideoSrc = sourceMatch[1];
+      }
+    }
+  }
+
+  // 3. Iframe tag & src extraction
+  const isIframe = /<iframe[\s\S]*?>/i.test(raw);
+  let rawIframeSrc = '';
+  if (isIframe) {
+    const srcMatch = raw.match(/src=["'](.*?)["']/i);
+    if (srcMatch && srcMatch[1]) {
+      rawIframeSrc = srcMatch[1];
+    }
+  }
+
+  // 4. YouTube watch / short / embed
+  const ytWatchMatch = raw.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/i);
+  const ytShortMatch = raw.match(/(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]+)/i);
+  const ytEmbedMatch = raw.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/i);
+  const youtubeId = ytWatchMatch?.[1] || ytShortMatch?.[1] || ytEmbedMatch?.[1] || '';
+
+  // 5. Google Drive preview
+  const gDriveMatch = raw.match(/(?:https?:\/\/)?(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=)([a-zA-Z0-9_-]+)/i);
+  const gDriveId = gDriveMatch?.[1] || '';
+  const isGoogleDrive = !!gDriveId || raw.includes('drive.google.com') || (!!rawIframeSrc && rawIframeSrc.includes('drive.google.com'));
+
+  return {
+    rawIframeSrc,
+    html5VideoSrc,
+    youtubeId,
+    gDriveId,
+    isGoogleDrive,
+    isDirectVideoFile,
+    isHtml5VideoTag,
+    isIframe,
+  };
+};
+
 export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   embedCode,
   title,
@@ -36,47 +103,13 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<boolean>(false);
 
   const raw = (embedCode || '').trim();
-
-  // Detect type of embed
-  const isDirectVideoFile = /^https?:\/\/.+\.(mp4|webm|ogg)(\?.*)?$/i.test(raw);
-  const isHtml5VideoTag = /<video[\s\S]*?>/i.test(raw);
-
-  // Extract video src if it's a <video> tag
-  let html5VideoSrc = '';
-  if (isDirectVideoFile) {
-    html5VideoSrc = raw;
-  } else if (isHtml5VideoTag) {
-    const srcMatch = raw.match(/src=["'](.*?)["']/i);
-    if (srcMatch && srcMatch[1]) {
-      html5VideoSrc = srcMatch[1];
-    } else {
-      const sourceMatch = raw.match(/<source[\s\S]*?src=["'](.*?)["']/i);
-      if (sourceMatch && sourceMatch[1]) {
-        html5VideoSrc = sourceMatch[1];
-      }
-    }
-  }
-
-  // Check if it's YouTube
-  const ytWatchMatch = raw.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/i);
-  const ytShortMatch = raw.match(/(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]+)/i);
-  const ytEmbedMatch = raw.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/i);
-  const youtubeId = ytWatchMatch?.[1] || ytShortMatch?.[1] || ytEmbedMatch?.[1];
-
-  // Check if it's Google Drive preview
-  const gDriveMatch = raw.match(/(?:https?:\/\/)?(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=)([a-zA-Z0-9_-]+)/i);
-  const gDriveId = gDriveMatch?.[1];
-  const isGoogleDrive = !!gDriveId || raw.includes('drive.google.com') || (rawIframeSrc && rawIframeSrc.includes('drive.google.com'));
-
-  // Check if it's raw iframe
-  const isIframe = /<iframe[\s\S]*?>/i.test(raw);
-  let rawIframeSrc = '';
-  if (isIframe) {
-    const srcMatch = raw.match(/src=["'](.*?)["']/i);
-    if (srcMatch && srcMatch[1]) {
-      rawIframeSrc = srcMatch[1];
-    }
-  }
+  const {
+    rawIframeSrc,
+    html5VideoSrc,
+    youtubeId,
+    gDriveId,
+    isGoogleDrive,
+  } = parseEmbedCode(raw);
 
   // Helper to get safe origin for postMessage
   const getOrigin = () => {
@@ -311,41 +344,34 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       clearTimeout(hideTimeoutRef.current);
     }
     hideTimeoutRef.current = setTimeout(() => {
-      // Only hide if the video is actually playing
-      if (videoRef.current ? !videoRef.current.paused : (isPlayingRef.current || isActive)) {
-        setShowControls(false);
-      }
+      setShowControls(false);
     }, delay);
-  }, [isActive]);
+  }, []);
 
   const resetHideTimer = useCallback(() => {
     setShowControls(true);
-    if (hideTimeoutRef.current) {
-      clearTimeout(hideTimeoutRef.current);
-    }
-    if (videoRef.current ? !videoRef.current.paused : (isPlayingRef.current || isActive)) {
-      scheduleHideControls(2000);
-    }
-  }, [isActive, scheduleHideControls]);
+    scheduleHideControls(2200);
+  }, [scheduleHideControls]);
+
+  // Initial auto-hide on mount/active
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setShowControls(false);
+    }, 2000);
+    return () => clearTimeout(t);
+  }, []);
 
   // Automatically hide controls after delay when playing
   useEffect(() => {
-    if (isPlaying) {
-      scheduleHideControls(1500);
+    if (isPlaying || isActive) {
+      scheduleHideControls(1800);
     } else {
       setShowControls(true);
       if (hideTimeoutRef.current) {
         clearTimeout(hideTimeoutRef.current);
       }
     }
-  }, [isPlaying, scheduleHideControls]);
-
-  // When active slide changes for embedded players
-  useEffect(() => {
-    if (isActive) {
-      scheduleHideControls(2000);
-    }
-  }, [isActive, scheduleHideControls]);
+  }, [isPlaying, isActive, scheduleHideControls]);
 
   const togglePlay = () => {
     if (!videoRef.current) return;
@@ -357,6 +383,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       videoRef.current.pause();
       setIsPlaying(false);
       setShowControls(true);
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+      }
     }
   };
 
@@ -425,21 +454,21 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     }
   };
 
-  const handleContainerTap = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('button') || target.closest('input')) {
-      return;
-    }
-    if (showControls) {
-      if (videoRef.current ? !videoRef.current.paused : (isPlayingRef.current || isActive)) {
-        setShowControls(false);
-        if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+  const handleContainerTap = useCallback((e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) {
+      const target = e.target as HTMLElement;
+      if (target?.closest?.('button') || target?.closest?.('input')) {
+        return;
       }
-    } else {
-      setShowControls(true);
-      scheduleHideControls(2000);
     }
-  }, [showControls, isActive, scheduleHideControls]);
+    setShowControls((prev) => {
+      const next = !prev;
+      if (next) {
+        scheduleHideControls(2200);
+      }
+      return next;
+    });
+  }, [scheduleHideControls]);
 
   // Double-tap gesture detector for mobile mode fullscreen & tap toggle
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -567,13 +596,13 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
           </button>
         )}
 
-        {/* Micro-sized bottom control bar when playing or hovering to avoid covering the video frame */}
+        {/* Micro-sized bottom control bar that smoothly auto-hides after playback */}
         <div
-          className={`absolute bottom-0 inset-x-0 transition-opacity duration-200 z-20 ${
+          className={`absolute bottom-0 inset-x-0 transition-opacity duration-300 z-20 ${
             isFullscreen
               ? 'bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 py-2.5 flex items-center gap-3 text-white'
               : 'bg-black/75 backdrop-blur-[2px] px-2 py-0.5 sm:px-2.5 sm:py-1 flex items-center gap-1.5 sm:gap-2 text-white border-t border-white/10'
-          } ${showControls || !isPlaying ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+          } ${showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         >
           {/* Mini Play / Pause */}
           <button
@@ -677,23 +706,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       </button>
 
       {iframeSrc ? (
-        isGoogleDrive ? (
-          <div className="relative w-full h-full overflow-hidden flex items-center justify-center">
-            <iframe
-              ref={iframeRef}
-              src={iframeSrc}
-              title={title || 'School Video Presentation'}
-              onLoad={handleIframeLoad}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              className="absolute inset-x-0 w-full border-0 pointer-events-auto block"
-              style={{
-                top: '-56px',
-                height: 'calc(100% + 56px)',
-              }}
-            />
-          </div>
-        ) : (
+        <div className="relative w-full h-full overflow-hidden flex items-center justify-center bg-black">
           <iframe
             ref={iframeRef}
             src={iframeSrc}
@@ -701,17 +714,13 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
             onLoad={handleIframeLoad}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
-            className="w-full h-full border-0 pointer-events-auto block mx-auto my-auto"
+            className="w-full h-full border-0 pointer-events-auto block mx-auto my-auto object-contain object-center"
           />
-        )
+        </div>
       ) : (
         /* Fallback for raw embed snippet */
         <div
-          className={`w-full h-full flex items-center justify-center text-center overflow-hidden relative [&_iframe]:w-full [&_iframe]:border-0 [&_iframe]:block [&_iframe]:mx-auto [&_iframe]:my-auto [&_video]:[object-fit:contain] [&_video]:w-full [&_video]:h-full [&_video]:object-contain [&_video]:object-center [&_video]:mx-auto [&_video]:my-auto ${
-            isGoogleDrive
-              ? '[&_iframe]:h-[calc(100%+56px)] [&_iframe]:-mt-[56px] [&_iframe]:absolute [&_iframe]:inset-x-0'
-              : '[&_iframe]:h-full'
-          }`}
+          className="w-full h-full flex items-center justify-center text-center overflow-hidden relative bg-black [&_iframe]:w-full [&_iframe]:h-full [&_iframe]:border-0 [&_iframe]:block [&_iframe]:mx-auto [&_iframe]:my-auto [&_video]:[object-fit:contain] [&_video]:w-full [&_video]:h-full [&_video]:object-contain [&_video]:object-center [&_video]:mx-auto [&_video]:my-auto"
           dangerouslySetInnerHTML={{ __html: getSanitizedRawCode() }}
         />
       )}
