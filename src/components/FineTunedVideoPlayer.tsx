@@ -60,8 +60,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const youtubeId = ytWatchMatch?.[1] || ytShortMatch?.[1] || ytEmbedMatch?.[1];
 
   // Check if it's Google Drive preview
-  const gDriveMatch = raw.match(/(?:https?:\/\/)?drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/(?:view|preview)/i);
+  const gDriveMatch = raw.match(/(?:https?:\/\/)?(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=)([a-zA-Z0-9_-]+)/i);
   const gDriveId = gDriveMatch?.[1];
+  const isGoogleDrive = !!gDriveId || raw.includes('drive.google.com') || (rawIframeSrc && rawIframeSrc.includes('drive.google.com'));
 
   // Check if it's raw iframe
   const isIframe = /<iframe[\s\S]*?>/i.test(raw);
@@ -83,10 +84,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
   // Generate safe iframe URL with verified autoplay & muted parameters
   const getIframeUrl = () => {
-    const origin = getOrigin();
     if (youtubeId) {
-      // YouTube embed with enablejsapi=1, autoplay=1, mute=1 for zero-click autoplay
-      return `https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&enablejsapi=1&origin=${encodeURIComponent(origin)}&widget_referrer=${encodeURIComponent(origin)}&playsinline=1&controls=1&rel=0&modestbranding=1&iv_load_policy=3`;
+      // YouTube embed with enablejsapi=1, autoplay=1, mute=1, playsinline=1 for guaranteed mobile zero-click autoplay
+      return `https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&playsinline=1&enablejsapi=1&controls=1&rel=0&modestbranding=1&iv_load_policy=3`;
     }
 
     if (gDriveId) {
@@ -140,14 +140,14 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   };
 
   // Send command to YouTube iframe via postMessage safely
-  const sendYouTubeCommand = useCallback((func: 'playVideo' | 'pauseVideo') => {
+  const sendYouTubeCommand = useCallback((func: string, args: any = '') => {
     try {
       if (iframeRef.current && iframeRef.current.contentWindow) {
         iframeRef.current.contentWindow.postMessage(
           JSON.stringify({
             event: 'command',
             func,
-            args: '',
+            args,
           }),
           '*'
         );
@@ -166,10 +166,11 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       } catch (_) {}
 
       if (isActive) {
-        // Trigger play for the active video
-        setTimeout(() => {
-          sendYouTubeCommand('playVideo');
-        }, 150);
+        // Enforce mute first then trigger play with progressive retries for mobile
+        sendYouTubeCommand('mute');
+        setTimeout(() => sendYouTubeCommand('playVideo'), 100);
+        setTimeout(() => sendYouTubeCommand('playVideo'), 350);
+        setTimeout(() => sendYouTubeCommand('playVideo'), 800);
       } else {
         // Ensure inactive videos stay paused
         sendYouTubeCommand('pauseVideo');
@@ -187,6 +188,8 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         videoRef.current.playsInline = true;
         videoRef.current.setAttribute('playsinline', '');
         videoRef.current.setAttribute('webkit-playsinline', 'true');
+        videoRef.current.setAttribute('muted', '');
+        videoRef.current.setAttribute('autoplay', '');
 
         const playPromise = videoRef.current.play();
         if (playPromise !== undefined) {
@@ -209,13 +212,19 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       }
 
       // 2. YouTube iframe play with retry to guarantee receipt once player boots
+      sendYouTubeCommand('mute');
       sendYouTubeCommand('playVideo');
-      const t1 = setTimeout(() => sendYouTubeCommand('playVideo'), 250);
+      const t1 = setTimeout(() => {
+        sendYouTubeCommand('mute');
+        sendYouTubeCommand('playVideo');
+      }, 250);
       const t2 = setTimeout(() => sendYouTubeCommand('playVideo'), 700);
+      const t3 = setTimeout(() => sendYouTubeCommand('playVideo'), 1200);
 
       return () => {
         clearTimeout(t1);
         clearTimeout(t2);
+        clearTimeout(t3);
       };
     } else {
       // STOP playback when scrolled away to next video
@@ -242,6 +251,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         videoRef.current.muted = true;
         videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
       }
+      sendYouTubeCommand('mute');
       sendYouTubeCommand('playVideo');
     };
 
@@ -254,6 +264,33 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       window.removeEventListener('touchstart', handleFirstUserGesture);
       window.removeEventListener('scroll', handleFirstUserGesture);
     };
+  }, [isActive, sendYouTubeCommand]);
+
+  // Intersection Observer for mobile: start autoplay as soon as the video player scrolls into viewport
+  useEffect(() => {
+    if (!isActive) return;
+    const el = containerRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            if (videoRef.current && videoRef.current.paused) {
+              videoRef.current.defaultMuted = true;
+              videoRef.current.muted = true;
+              videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+            }
+            sendYouTubeCommand('mute');
+            sendYouTubeCommand('playVideo');
+          }
+        });
+      },
+      { threshold: 0.2 }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [isActive, sendYouTubeCommand]);
 
   // Video control helpers
@@ -435,7 +472,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
             setIsPlaying(false);
             setShowControls(true);
           }}
-          className="w-full h-full object-contain bg-black cursor-pointer"
+          className="w-full h-full object-contain object-center bg-black cursor-pointer block mx-auto my-auto"
         />
 
         {/* Double-Tap Fullscreen Visual Confirmation Badge */}
@@ -568,19 +605,41 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       </button>
 
       {iframeSrc ? (
-        <iframe
-          ref={iframeRef}
-          src={iframeSrc}
-          title={title || 'School Video Presentation'}
-          onLoad={handleIframeLoad}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          allowFullScreen
-          className="w-full h-full border-0 pointer-events-auto"
-        />
+        isGoogleDrive ? (
+          <div className="relative w-full h-full overflow-hidden flex items-center justify-center">
+            <iframe
+              ref={iframeRef}
+              src={iframeSrc}
+              title={title || 'School Video Presentation'}
+              onLoad={handleIframeLoad}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              className="absolute inset-x-0 w-full border-0 pointer-events-auto block"
+              style={{
+                top: '-56px',
+                height: 'calc(100% + 56px)',
+              }}
+            />
+          </div>
+        ) : (
+          <iframe
+            ref={iframeRef}
+            src={iframeSrc}
+            title={title || 'School Video Presentation'}
+            onLoad={handleIframeLoad}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            className="w-full h-full border-0 pointer-events-auto block mx-auto my-auto"
+          />
+        )
       ) : (
         /* Fallback for raw embed snippet */
         <div
-          className="w-full h-full flex items-center justify-center [&_iframe]:w-full [&_iframe]:h-full [&_iframe]:border-0 [&_video]:w-full [&_video]:h-full [&_video]:object-contain"
+          className={`w-full h-full flex items-center justify-center text-center overflow-hidden relative [&_iframe]:w-full [&_iframe]:border-0 [&_iframe]:block [&_iframe]:mx-auto [&_iframe]:my-auto [&_video]:w-full [&_video]:h-full [&_video]:object-contain [&_video]:object-center [&_video]:mx-auto [&_video]:my-auto ${
+            isGoogleDrive
+              ? '[&_iframe]:h-[calc(100%+56px)] [&_iframe]:-mt-[56px] [&_iframe]:absolute [&_iframe]:inset-x-0'
+              : '[&_iframe]:h-full'
+          }`}
           dangerouslySetInnerHTML={{ __html: getSanitizedRawCode() }}
         />
       )}

@@ -48,7 +48,7 @@ export const formatEmbedCode = (rawCode: string): string => {
 
   // 4. HTML5 direct video file (.mp4, .webm) - autoplay with muted, controls enabled, mobile playsinline
   if (trimmed.match(/^https?:\/\/.+\.(mp4|webm|ogg)(\?.*)?$/i)) {
-    return `<video controls playsinline webkit-playsinline="true" autoPlay muted preload="auto" class="w-full h-full object-contain bg-black"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
+    return `<video controls playsinline webkit-playsinline="true" autoPlay muted preload="auto" class="w-full h-full object-contain object-center bg-black mx-auto"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
   }
 
   // 5. Raw <iframe> or <video> code provided by Master Admin
@@ -187,7 +187,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
   return (
     <section
       aria-label="Campus Video Broadcasts"
-      className={`w-full bg-white border border-slate-200/90 rounded-3xl p-3 sm:p-4 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800 flex flex-col justify-between h-[480px] overflow-hidden ${className}`}
+      className={`w-full bg-white border border-slate-200/90 rounded-3xl p-3 sm:p-4 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800 flex flex-col justify-start h-auto overflow-hidden ${className}`}
     >
       {/* Section Header */}
       <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-2 shrink-0">
@@ -253,12 +253,14 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
 
       {/* Main Content Area */}
       {hasVideos ? (
-        <div className="flex-1 flex flex-col justify-between overflow-hidden pt-1">
+        <div className="w-full flex flex-col items-center justify-center overflow-hidden pt-1.5">
           {/* Scrollable Container with Horizontal Snap & Touch Scroll */}
           <div
             ref={scrollContainerRef}
-            className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 pt-0.5 scroll-smooth focus:outline-hidden custom-scrollbar flex-1 items-stretch touch-pan-x"
-            style={{ scrollbarWidth: 'thin' }}
+            className={`flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 pt-0.5 scroll-smooth focus:outline-hidden no-scrollbar [&::-webkit-scrollbar]:hidden w-full items-center ${
+              videos.length <= 1 ? 'justify-center' : 'justify-start'
+            } touch-pan-x`}
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
             {videos.map((video, index) => {
               return (
@@ -268,14 +270,14 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
                     slideItemRefs.current[index] = el;
                   }}
                   data-index={index}
-                  className="w-full shrink-0 snap-center flex flex-col justify-between bg-slate-50 border border-slate-200/90 rounded-2xl p-2 sm:p-2.5 shadow-2xs hover:shadow-xs transition-shadow h-full"
+                  className="w-full shrink-0 snap-center flex flex-col items-center justify-center bg-slate-50 border border-slate-200/90 rounded-2xl p-1.5 sm:p-2 shadow-2xs hover:shadow-xs transition-shadow mx-auto"
                 >
                   {/* Embedded Video Player with Fine-Tuned Play/Pause & Visible Buttons */}
-                  <div className="w-full flex-1 flex flex-col justify-center min-h-0">
+                  <div className="w-full rounded-xl overflow-hidden bg-black flex items-center justify-center mx-auto">
                     <FineTunedVideoPlayer
                       embedCode={video.embedCode}
                       title={video.title}
-                      aspectRatioClass="w-full aspect-video max-h-[305px] md:max-h-[320px] mx-auto"
+                      aspectRatioClass="w-full aspect-video mx-auto"
                       isActive={index === activeIndex}
                     />
                   </div>

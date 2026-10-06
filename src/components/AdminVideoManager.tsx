@@ -230,7 +230,7 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
                 className="bg-[#141c2c] border border-[#24334b] rounded-2xl overflow-hidden shadow-lg flex flex-col justify-between transition-all hover:border-purple-500/50"
               >
                 {/* Embed Video Interactive Player Box */}
-                <div className="relative w-full aspect-video bg-black overflow-hidden border-b border-[#24334b]">
+                <div className="relative w-full aspect-video bg-black overflow-hidden border-b border-[#24334b] flex items-center justify-center">
                   <FineTunedVideoPlayer
                     embedCode={video.embedCode}
                     title={video.title}
