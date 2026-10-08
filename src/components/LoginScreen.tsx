@@ -51,6 +51,8 @@ import {
   Quote,
   Info,
   Loader2,
+  WifiOff,
+  RefreshCw,
 } from 'lucide-react';
 import svnhsLogo from '../assets/images/svnhs_school_logo_1784856263175.jpg';
 import principalPortrait from '../assets/images/svnhs_principal_portrait_1785327799633.png';
@@ -69,6 +71,66 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Online / Offline Detection & Auto-Reload on Network Recovery
+  const [isOnline, setIsOnline] = useState<boolean>(() => {
+    return typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
+      ? navigator.onLine
+      : true;
+  });
+  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+
+  useEffect(() => {
+    let pollTimer: NodeJS.Timeout | null = null;
+    let isReloading = false;
+
+    const triggerAutoReload = () => {
+      if (isReloading) return;
+      isReloading = true;
+      setIsOnline(true);
+      setIsReconnecting(true);
+      setTimeout(() => {
+        window.location.reload();
+      }, 400);
+    };
+
+    const handleOnline = () => {
+      triggerAutoReload();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      setIsReconnecting(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Synchronize current navigator.onLine state on mount
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setIsOnline(false);
+    }
+
+    // Active polling fallback when offline to instantly catch internet restoration
+    if (!isOnline) {
+      pollTimer = setInterval(async () => {
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          try {
+            await fetch('/?probe=' + Date.now(), { method: 'HEAD', cache: 'no-store' });
+            triggerAutoReload();
+          } catch {
+            setIsOnline(false);
+          }
+        }
+      }, 2500);
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, [isOnline]);
 
   // Live Firestore State
   const [facultyList, setFacultyList] = useState<FacultyDoc[]>([]);
@@ -478,6 +540,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isOnline) {
+      setErrorMsg('No Internet Connection Detected: Sign in is disabled until your network reconnects. The page will automatically reload once internet is detected.');
+      return;
+    }
     setErrorMsg(null);
     setSuccessMsg(null);
 
@@ -882,6 +948,30 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
       )}
 
+      {/* Offline Status Sticky Banner */}
+      {!isOnline && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="fixed top-0 inset-x-0 z-50 bg-rose-600/95 backdrop-blur-xs text-white px-4 py-2.5 text-xs font-mono font-bold flex items-center justify-center space-x-2.5 shadow-xl animate-fadeIn text-center border-b border-rose-400/40 select-none"
+        >
+          <WifiOff className="w-4 h-4 animate-pulse shrink-0 text-white" />
+          <span>No Internet Connection Detected — Sign In Buttons are Unclickable. Page will auto-reload once internet is detected.</span>
+        </div>
+      )}
+
+      {/* Auto-Reload Reconnection Notification */}
+      {isReconnecting && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-0 inset-x-0 z-50 bg-emerald-600/95 backdrop-blur-xs text-white px-4 py-2.5 text-xs font-mono font-bold flex items-center justify-center space-x-2.5 shadow-xl animate-fadeIn text-center border-b border-emerald-400/40 select-none"
+        >
+          <RefreshCw className="w-4 h-4 animate-spin shrink-0 text-white" />
+          <span>Internet Connection Detected! Reloading page now...</span>
+        </div>
+      )}
+
       {/* Background Image Layer with Controlled Opacity */}
       <div 
         className="fixed inset-0 pointer-events-none bg-cover bg-center bg-no-repeat bg-fixed z-0 opacity-15 mix-blend-luminosity"
@@ -1202,9 +1292,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               <span>Official DepEd Portal</span>
               <button
                 type="button"
-                disabled={isLoading}
-                onClick={() => handleOpenForgotPassword(email)}
-                className="text-emerald-700 hover:text-emerald-900 font-bold underline cursor-pointer disabled:opacity-50"
+                disabled={isLoading || !isOnline}
+                onClick={() => (!isOnline ? null : handleOpenForgotPassword(email))}
+                className={`font-bold underline transition-colors ${
+                  !isOnline ? 'text-slate-400 cursor-not-allowed opacity-60' : 'text-emerald-700 hover:text-emerald-900 cursor-pointer'
+                }`}
               >
                 Reset Password
               </button>
@@ -1229,17 +1321,58 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             </span>
           </div>
 
+          {/* OFFLINE STATUS NOTICE BANNER INSIDE FORM */}
+          {!isOnline && (
+            <div
+              role="alert"
+              className="bg-rose-50 border border-rose-300 text-rose-900 p-3 rounded-xl flex items-start space-x-2.5 text-xs font-mono animate-fadeIn select-none shadow-xs"
+            >
+              <WifiOff className="w-4 h-4 text-rose-600 shrink-0 mt-0.5 animate-pulse" />
+              <div className="flex-1 space-y-0.5 text-left">
+                <div className="font-bold flex items-center justify-between">
+                  <span>No Internet Detected</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-rose-200/80 text-rose-900 font-bold rounded">Offline</span>
+                </div>
+                <p className="text-[11px] text-rose-700 font-sans leading-relaxed">
+                  Sign in buttons are unclickable until internet connection is restored. The page will automatically reload once internet is detected.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* RECONNECTING STATUS BANNER INSIDE FORM */}
+          {isReconnecting && (
+            <div
+              role="status"
+              className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-3 rounded-xl flex items-center space-x-2.5 text-xs font-mono animate-fadeIn select-none shadow-xs"
+            >
+              <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin shrink-0" />
+              <div className="font-bold">
+                Internet detected! Reloading page now...
+              </div>
+            </div>
+          )}
+
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isLoading}
-            className={`w-full py-3.5 font-mono font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 disabled:opacity-85 mt-2 cursor-pointer border ${
-              loginMode === 'admin'
-                ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500 shadow-amber-900/40'
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-emerald-900/40'
+            disabled={isLoading || !isOnline}
+            className={`w-full py-3.5 font-mono font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 mt-2 border select-none ${
+              !isOnline
+                ? 'bg-slate-200 text-slate-500 border-slate-300 cursor-not-allowed opacity-60 shadow-none pointer-events-none'
+                : isLoading
+                ? 'opacity-85 cursor-wait'
+                : loginMode === 'admin'
+                ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500 shadow-amber-900/40 cursor-pointer active:scale-[0.99]'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-emerald-900/40 cursor-pointer active:scale-[0.99]'
             }`}
           >
-            {isLoading ? (
+            {!isOnline ? (
+              <div className="flex items-center space-x-2 text-rose-700">
+                <WifiOff className="w-4 h-4 shrink-0" />
+                <span>No Internet Detected — Sign In Disabled</span>
+              </div>
+            ) : isLoading ? (
               <div className="flex items-center space-x-2.5">
                 <Loader2 className="w-4 h-4 animate-spin text-white shrink-0" />
                 <span>
@@ -1261,11 +1394,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           <div className="pt-2 border-t border-slate-200 text-center">
             <button
               type="button"
+              disabled={isLoading || !isOnline}
               onClick={() => {
+                if (!isOnline) return;
                 setErrorMsg(null);
                 setIsRegisterOpen(true);
               }}
-              className="w-full py-2.5 bg-amber-50 hover:bg-amber-100/80 text-amber-900 font-mono text-xs font-bold rounded-xl border border-amber-300 transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-2xs"
+              className={`w-full py-2.5 font-mono text-xs font-bold rounded-xl border transition-all flex items-center justify-center space-x-2 shadow-2xs ${
+                !isOnline
+                  ? 'bg-slate-100 text-slate-400 border-slate-300 cursor-not-allowed opacity-60 pointer-events-none'
+                  : 'bg-amber-50 hover:bg-amber-100/80 text-amber-900 border-amber-300 cursor-pointer'
+              }`}
             >
               <UserPlus className="w-4 h-4 text-amber-700" />
               <span>Create / Request Faculty Account</span>
@@ -1280,11 +1419,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           <div className="pt-2 border-t border-slate-200 text-center">
             <button
               type="button"
+              disabled={isLoading || !isOnline}
               onClick={() => {
+                if (!isOnline) return;
                 setErrorMsg(null);
                 setIsAdminRegisterOpen(true);
               }}
-              className="w-full py-2.5 bg-amber-50 hover:bg-amber-100/80 text-amber-900 font-mono text-xs font-bold rounded-xl border border-amber-300 transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-2xs"
+              className={`w-full py-2.5 font-mono text-xs font-bold rounded-xl border transition-all flex items-center justify-center space-x-2 shadow-2xs ${
+                !isOnline
+                  ? 'bg-slate-100 text-slate-400 border-slate-300 cursor-not-allowed opacity-60 pointer-events-none'
+                  : 'bg-amber-50 hover:bg-amber-100/80 text-amber-900 border-amber-300 cursor-pointer'
+              }`}
             >
               <ShieldCheck className="w-4 h-4 text-amber-700" />
               <span>Apply as Admin / Request Administrator Access</span>
@@ -1528,10 +1673,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5"
+                    disabled={!isOnline}
+                    className={`px-5 py-2 font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-1.5 ${
+                      !isOnline
+                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60 pointer-events-none'
+                        : 'bg-amber-600 hover:bg-amber-500 text-white cursor-pointer'
+                    }`}
                   >
-                    <Send className="w-3.5 h-3.5 text-white" />
-                    <span>Submit Account Request</span>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{!isOnline ? 'Offline' : 'Submit Account Request'}</span>
                   </button>
                 </div>
               </form>
@@ -1676,10 +1826,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5"
+                    disabled={!isOnline}
+                    className={`px-5 py-2 font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-1.5 ${
+                      !isOnline
+                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60 pointer-events-none'
+                        : 'bg-amber-600 hover:bg-amber-500 text-white cursor-pointer'
+                    }`}
                   >
-                    <Send className="w-3.5 h-3.5 text-white" />
-                    <span>Submit Admin Application</span>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{!isOnline ? 'Offline' : 'Submit Admin Application'}</span>
                   </button>
                 </div>
               </form>
@@ -1934,14 +2089,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     </button>
                     <button
                       type="submit"
-                      className={`px-5 py-2 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5 ${
-                        forgotPortalMode === 'Admin'
-                          ? 'bg-amber-600 hover:bg-amber-500'
-                          : 'bg-emerald-700 hover:bg-emerald-800'
+                      disabled={!isOnline}
+                      className={`px-5 py-2 font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-1.5 ${
+                        !isOnline
+                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60 pointer-events-none'
+                          : forgotPortalMode === 'Admin'
+                          ? 'bg-amber-600 hover:bg-amber-500 text-white cursor-pointer'
+                          : 'bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer'
                       }`}
                     >
                       <Key className="w-3.5 h-3.5 text-white" />
-                      <span>Verify Key & Proceed</span>
+                      <span>{!isOnline ? 'Offline' : 'Verify Key & Proceed'}</span>
                       <ArrowRight className="w-3.5 h-3.5 text-white" />
                     </button>
                   </div>
@@ -2055,14 +2213,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     </button>
                     <button
                       type="submit"
-                      className={`px-5 py-2 text-white font-extrabold text-xs rounded-xl shadow-xs cursor-pointer transition-all flex items-center space-x-1.5 ${
-                        forgotPortalMode === 'Admin'
-                          ? 'bg-amber-600 hover:bg-amber-500'
-                          : 'bg-emerald-700 hover:bg-emerald-800'
+                      disabled={!isOnline}
+                      className={`px-5 py-2 font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-1.5 ${
+                        !isOnline
+                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-60 pointer-events-none'
+                          : forgotPortalMode === 'Admin'
+                          ? 'bg-amber-600 hover:bg-amber-500 text-white cursor-pointer'
+                          : 'bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer'
                       }`}
                     >
                       <Send className="w-3.5 h-3.5 text-white" />
-                      <span>Submit {forgotPortalMode} Request</span>
+                      <span>{!isOnline ? 'Offline' : `Submit ${forgotPortalMode} Request`}</span>
                     </button>
                   </div>
                 </form>

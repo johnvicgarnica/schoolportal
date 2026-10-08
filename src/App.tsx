@@ -590,6 +590,28 @@ export function App() {
     return () => unsub();
   }, [currentUser]);
 
+  // Global auto-reload when internet connection is detected
+  useEffect(() => {
+    let wasOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    const handleOffline = () => {
+      wasOffline = true;
+    };
+
+    const handleOnline = () => {
+      // When internet is detected, auto reload the page
+      window.location.reload();
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
+
   const handleLogin = (user: UserProfile) => {
     setCurrentUser(user);
     const isCoord =
