@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 import {
   RepositoryItem,
   RepositoryCollection,
@@ -383,9 +384,15 @@ export function App() {
     setActiveTab('files');
   };
 
+  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
+
   const handleLogout = () => {
-    localStorage.removeItem('svnhs_user_session');
-    setCurrentUser(null);
+    setIsLoggingOut(true);
+    setTimeout(() => {
+      localStorage.removeItem('svnhs_user_session');
+      setCurrentUser(null);
+      setIsLoggingOut(false);
+    }, 850);
   };
 
   // Announcement Handlers
@@ -613,6 +620,55 @@ export function App() {
       />
       {/* Moderate Dark Backdrop Tint to preserve comfortable contrast & zero eye fatigue */}
       <div className="fixed inset-0 pointer-events-none bg-[#0b111e]/90 backdrop-blur-[1px] z-0" />
+
+      {/* WHOLE-SCREEN TRANSLUCENT LOADING SPINNER OVERLAY FOR LOGOUT */}
+      {isLoggingOut && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label="Signing out of San Vicente National High School Portal"
+          className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-[2px] flex flex-col items-center justify-center p-4 text-center animate-fadeIn select-none"
+        >
+          {/* Centered Floating Card */}
+          <div className="relative bg-[#111927]/90 border border-[#24334b] rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl backdrop-blur-md flex flex-col items-center justify-center space-y-4 animate-scaleUp text-slate-100">
+            {/* Dual-ring glowing spinner */}
+            <div className="relative w-20 h-20 flex items-center justify-center">
+              {/* Subtle outer halo pulse */}
+              <div className="w-20 h-20 rounded-full animate-ping opacity-25 bg-rose-500" />
+
+              {/* Outer smooth spinning ring */}
+              <div className="absolute inset-0 w-20 h-20 rounded-full border-4 border-t-transparent border-rose-500 animate-spin" />
+
+              {/* Inner counter-rotating ring */}
+              <div
+                className="absolute w-14 h-14 rounded-full border-2 border-b-transparent border-rose-400/70 animate-spin"
+                style={{ animationDirection: 'reverse', animationDuration: '1.2s' }}
+              />
+
+              {/* Center glowing icon */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-rose-400" />
+              </div>
+            </div>
+
+            {/* Status Text & Guidance */}
+            <div className="space-y-1.5 max-w-xs">
+              <h3 className="text-base sm:text-lg font-black text-white tracking-tight">
+                Signing Out...
+              </h3>
+              <p className="text-xs text-slate-300 font-mono leading-relaxed">
+                Ending session and returning to portal login...
+              </p>
+            </div>
+
+            {/* DepEd Official Logout Badge */}
+            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full text-[11px] font-mono font-bold border bg-rose-500/15 text-rose-300 border-rose-500/30">
+              <span className="w-2 h-2 rounded-full animate-pulse bg-rose-400" />
+              <span>DepEd Portal Session Logout</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="relative z-10 flex flex-col min-h-screen">
         <Header

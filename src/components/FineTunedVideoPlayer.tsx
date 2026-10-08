@@ -88,6 +88,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTapRef = useRef<number>(0);
+  const lastTouchTimeRef = useRef<number>(0);
   const singleTapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -98,7 +99,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(true); // default muted ensures strict browser autoplay compliance
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
-  const [showControls, setShowControls] = useState<boolean>(true);
+  const [showControls, setShowControls] = useState<boolean>(false); // Start hidden for clean playback view
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<boolean>(false);
 
@@ -342,13 +343,19 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const scheduleHideControls = useCallback((delay = 1800) => {
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
     }
     hideTimeoutRef.current = setTimeout(() => {
       setShowControls(false);
+      hideTimeoutRef.current = null;
     }, delay);
   }, []);
 
   const resetHideTimer = useCallback(() => {
+    // On touch devices, ignore synthetic mousemove right after a touch
+    if (Date.now() - lastTouchTimeRef.current < 800) {
+      return;
+    }
     setShowControls(true);
     scheduleHideControls(2200);
   }, [scheduleHideControls]);
@@ -357,21 +364,22 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   useEffect(() => {
     const t = setTimeout(() => {
       setShowControls(false);
-    }, 2000);
+    }, 1800);
     return () => clearTimeout(t);
   }, []);
 
   // Automatically hide controls after delay when playing
   useEffect(() => {
-    if (isPlaying || isActive) {
+    if (isPlaying) {
       scheduleHideControls(1800);
     } else {
       setShowControls(true);
       if (hideTimeoutRef.current) {
         clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
       }
     }
-  }, [isPlaying, isActive, scheduleHideControls]);
+  }, [isPlaying, scheduleHideControls]);
 
   const togglePlay = () => {
     if (!videoRef.current) return;
@@ -385,6 +393,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       setShowControls(true);
       if (hideTimeoutRef.current) {
         clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
       }
     }
   };
@@ -408,8 +417,9 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       setCurrentTime(videoRef.current.currentTime);
-      if (videoRef.current.currentTime > 0.8 && !videoRef.current.paused && showControls && !hideTimeoutRef.current) {
-        scheduleHideControls(1500);
+      // Guarantee controls auto-hide if playing and showing (e.g., in portrait mobile view)
+      if (!videoRef.current.paused && showControls && !hideTimeoutRef.current) {
+        scheduleHideControls(1800);
       }
     }
   };
@@ -456,6 +466,10 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
   const handleContainerTap = useCallback((e?: React.MouseEvent | React.TouchEvent) => {
     if (e) {
+      // Ignore synthetic click event emitted on mobile right after touch
+      if (e.type === 'click' && Date.now() - lastTouchTimeRef.current < 500) {
+        return;
+      }
       const target = e.target as HTMLElement;
       if (target?.closest?.('button') || target?.closest?.('input')) {
         return;
@@ -472,6 +486,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
   // Double-tap gesture detector for mobile mode fullscreen & tap toggle
   const handleTouchEnd = (e: React.TouchEvent) => {
+    lastTouchTimeRef.current = Date.now();
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('input')) {
       return;
@@ -561,6 +576,10 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
             }
           }}
           onPlay={() => {
+            setIsPlaying(true);
+            scheduleHideControls(1500);
+          }}
+          onPlaying={() => {
             setIsPlaying(true);
             scheduleHideControls(1500);
           }}
