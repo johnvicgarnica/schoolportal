@@ -19,11 +19,13 @@ import { Announcement } from '../types';
 interface ScrollableAnnouncementSectionProps {
   announcements: Announcement[];
   className?: string;
+  targetHeight?: number | null;
 }
 
 export const ScrollableAnnouncementSection: React.FC<ScrollableAnnouncementSectionProps> = ({
   announcements,
   className = '',
+  targetHeight,
 }) => {
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
 
@@ -69,25 +71,28 @@ export const ScrollableAnnouncementSection: React.FC<ScrollableAnnouncementSecti
   return (
     <section
       aria-label="School Announcements & Bulletins"
-      className={`w-full bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-7 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800 flex flex-col justify-between h-[480px] space-y-4 ${className}`}
+      style={targetHeight ? { height: `${targetHeight}px` } : undefined}
+      className={`w-full bg-white border border-slate-200/90 rounded-3xl p-3 sm:p-4 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800 flex flex-col justify-between overflow-hidden ${
+        targetHeight ? '' : 'h-[604px]'
+      } ${className}`}
     >
       {/* Section Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3.5 shrink-0">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 flex items-center justify-center shrink-0 shadow-2xs">
-            <Megaphone className="w-5 h-5 text-amber-700" />
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-2 shrink-0">
+        <div className="flex items-center space-x-2 sm:space-x-2.5">
+          <div className="w-8 h-8 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 flex items-center justify-center shrink-0 shadow-2xs">
+            <Megaphone className="w-4 h-4 text-amber-700" />
           </div>
           <div>
-            <div className="flex items-center space-x-2">
-              <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+            <div className="flex items-center space-x-1.5 sm:space-x-2">
+              <h2 className="text-xs sm:text-sm md:text-base font-black text-slate-900 tracking-tight leading-tight">
                 School Bulletins
               </h2>
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider">
-                <ShieldCheck className="w-3 h-3 text-amber-600" />
+              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded text-[9px] font-mono font-bold uppercase tracking-wider">
+                <ShieldCheck className="w-2.5 h-2.5 text-amber-600" />
                 DepEd Official
               </span>
             </div>
-            <p className="text-xs text-slate-500 font-sans">
+            <p className="text-[10px] sm:text-[11px] text-slate-500 font-sans leading-none truncate max-w-[200px] sm:max-w-none">
               Official faculty advisories & campus notices
             </p>
           </div>
@@ -95,7 +100,7 @@ export const ScrollableAnnouncementSection: React.FC<ScrollableAnnouncementSecti
 
         {/* Counter Badge */}
         <div className="flex items-center space-x-2 shrink-0">
-          <span className="text-[11px] font-mono font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+          <span className="text-[10px] sm:text-[11px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 sm:py-1 rounded-md border border-slate-200">
             {publishedAnnouncements.length} {publishedAnnouncements.length === 1 ? 'Notice' : 'Notices'}
           </span>
         </div>

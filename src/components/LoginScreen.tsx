@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { UserProfile, GalleryPhoto, EmbeddedVideo, Announcement } from '../types';
 import {
   FacultyDoc,
@@ -21,10 +21,8 @@ import {
   seedInitialGalleryPhotosIfEmpty,
   subscribeEmbeddedVideos,
   getStoredEmbeddedVideos,
-  seedInitialEmbeddedVideosIfEmpty,
   subscribeAnnouncements,
   getStoredAnnouncements,
-  seedInitialAnnouncementsIfEmpty,
 } from '../lib/firebase';
 import { AutoSwipingGallery } from './AutoSwipingGallery';
 import { ScrollableVideoSection } from './ScrollableVideoSection';
@@ -79,6 +77,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       : true;
   });
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+
+  // Dynamic height synchronization between ScrollableVideoSection and ScrollableAnnouncementSection
+  const [videoSectionHeight, setVideoSectionHeight] = useState<number | null>(null);
+
+  const handleVideoSectionHeightChange = useCallback((height: number) => {
+    setVideoSectionHeight((prev) => {
+      if (prev !== null && Math.abs(prev - height) < 2) return prev;
+      return height;
+    });
+  }, []);
 
   useEffect(() => {
     let pollTimer: NodeJS.Timeout | null = null;
@@ -194,11 +202,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   });
 
   useEffect(() => {
-    // Seed initial admin account, default gallery photos, and default announcements into Firestore if needed
+    // Seed initial admin account and default collections into Firestore if needed
     seedInitialAdminIfEmpty();
     seedInitialGalleryPhotosIfEmpty();
-    seedInitialAnnouncementsIfEmpty();
-    seedInitialEmbeddedVideosIfEmpty();
 
     // 1. Subscribe to Gallery Photos
     const unsubGallery = subscribeGalleryPhotos((photos) => {
@@ -1087,7 +1093,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           </div>
 
           {/* NEW SECTION BELOW THE SELECTED COMPONENT: Scrollable Embedded Videos */}
-          <ScrollableVideoSection videos={embeddedVideos} className="shrink-0" />
+          <ScrollableVideoSection
+            videos={embeddedVideos}
+            onHeightChange={handleVideoSectionHeightChange}
+            className="shrink-0"
+          />
         </div>
 
         {/* RIGHT COLUMN: Main Login Portal Card + Announcements Below */}
@@ -1465,7 +1475,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
 
         {/* Scrollable Announcement Viewer below the Login Portal Card (Same Size as Scrollable Video Section) */}
-        <ScrollableAnnouncementSection announcements={announcements} className="shrink-0" />
+        <ScrollableAnnouncementSection
+          announcements={announcements}
+          targetHeight={videoSectionHeight}
+          className="shrink-0"
+        />
       </div>
 
     </div>

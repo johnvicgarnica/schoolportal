@@ -40,12 +40,10 @@ import {
   saveAnnouncementToFirestore,
   deleteAnnouncementFromFirestore,
   getStoredAnnouncements,
-  seedInitialAnnouncementsIfEmpty,
   subscribeDriveFolders,
   saveDriveFolderToFirestore,
   deleteDriveFolderFromFirestore,
   getStoredDriveFolders,
-  seedInitialDriveFoldersIfEmpty,
   subscribeFacultyFolders,
   saveFacultyFolderToFirestore,
   deleteFacultyFolderFromFirestore,
@@ -168,7 +166,6 @@ export function App() {
 
   // Subscribe to Announcements in Firebase
   useEffect(() => {
-    seedInitialAnnouncementsIfEmpty();
     const unsub = subscribeAnnouncements((list) => {
       setAnnouncements(list || []);
     });
@@ -177,7 +174,6 @@ export function App() {
 
   // Subscribe to Google Drive Folders in Firebase
   useEffect(() => {
-    seedInitialDriveFoldersIfEmpty();
     seedInitialAdminIfEmpty();
     const unsub = subscribeDriveFolders((list) => {
       setDriveFolders(list || []);

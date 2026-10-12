@@ -1,5 +1,6 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
+import { parseAndOptimizeEmbed } from '../lib/videoEmbedUtils';
 
 interface FineTunedVideoPlayerProps {
   embedCode: string;
@@ -9,78 +10,11 @@ interface FineTunedVideoPlayerProps {
   isActive?: boolean;
 }
 
-interface ParsedEmbed {
-  rawIframeSrc: string;
-  html5VideoSrc: string;
-  youtubeId: string;
-  gDriveId: string;
-  isGoogleDrive: boolean;
-  isDirectVideoFile: boolean;
-  isHtml5VideoTag: boolean;
-  isIframe: boolean;
-}
-
-const parseEmbedCode = (embedCode: string): ParsedEmbed => {
-  const raw = (embedCode || '').trim();
-
-  // 1. Direct video file
-  const isDirectVideoFile = /^https?:\/\/.+\.(mp4|webm|ogg)(\?.*)?$/i.test(raw);
-
-  // 2. HTML5 <video> tag
-  const isHtml5VideoTag = /<video[\s\S]*?>/i.test(raw);
-  let html5VideoSrc = '';
-  if (isDirectVideoFile) {
-    html5VideoSrc = raw;
-  } else if (isHtml5VideoTag) {
-    const srcMatch = raw.match(/src=["'](.*?)["']/i);
-    if (srcMatch && srcMatch[1]) {
-      html5VideoSrc = srcMatch[1];
-    } else {
-      const sourceMatch = raw.match(/<source[\s\S]*?src=["'](.*?)["']/i);
-      if (sourceMatch && sourceMatch[1]) {
-        html5VideoSrc = sourceMatch[1];
-      }
-    }
-  }
-
-  // 3. Iframe tag & src extraction
-  const isIframe = /<iframe[\s\S]*?>/i.test(raw);
-  let rawIframeSrc = '';
-  if (isIframe) {
-    const srcMatch = raw.match(/src=["'](.*?)["']/i);
-    if (srcMatch && srcMatch[1]) {
-      rawIframeSrc = srcMatch[1];
-    }
-  }
-
-  // 4. YouTube watch / short / embed
-  const ytWatchMatch = raw.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/i);
-  const ytShortMatch = raw.match(/(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]+)/i);
-  const ytEmbedMatch = raw.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/i);
-  const youtubeId = ytWatchMatch?.[1] || ytShortMatch?.[1] || ytEmbedMatch?.[1] || '';
-
-  // 5. Google Drive preview
-  const gDriveMatch = raw.match(/(?:https?:\/\/)?(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=)([a-zA-Z0-9_-]+)/i);
-  const gDriveId = gDriveMatch?.[1] || '';
-  const isGoogleDrive = !!gDriveId || raw.includes('drive.google.com') || (!!rawIframeSrc && rawIframeSrc.includes('drive.google.com'));
-
-  return {
-    rawIframeSrc,
-    html5VideoSrc,
-    youtubeId,
-    gDriveId,
-    isGoogleDrive,
-    isDirectVideoFile,
-    isHtml5VideoTag,
-    isIframe,
-  };
-};
-
 export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   embedCode,
   title,
   className = '',
-  aspectRatioClass = 'w-full aspect-video max-h-[310px] mx-auto',
+  aspectRatioClass,
   isActive = true,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -104,13 +38,97 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<boolean>(false);
 
   const raw = (embedCode || '').trim();
+  const parsed = useMemo(() => parseAndOptimizeEmbed(raw), [raw]);
   const {
-    rawIframeSrc,
+    iframeSrc: parsedIframeSrc,
     html5VideoSrc,
     youtubeId,
     gDriveId,
-    isGoogleDrive,
-  } = parseEmbedCode(raw);
+    provider,
+    isPortrait,
+    isSquare,
+    isLandscape,
+    aspectRatioValue,
+    aspectRatioNum,
+    recommendedWidth,
+    recommendedHeight,
+    isFacebookReel,
+  } = parsed;
+
+  const isFacebook = provider === 'facebook';
+  const isGoogleDrive = provider === 'gdrive';
+  const facebookWidth = recommendedWidth;
+  const facebookHeight = recommendedHeight;
+  const rawIframeSrc = parsedIframeSrc || '';
+
+  // Container dimensions observed via ResizeObserver for responsive ratio containment
+  const [containerDimensions, setContainerDimensions] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setContainerDimensions((prev) => {
+            if (Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) {
+              return prev;
+            }
+            return { width, height };
+          });
+        }
+      }
+    });
+
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Compute responsive containment style that preserves original video proportions without cropping or stretching
+  const fittedStyle = useMemo<React.CSSProperties>(() => {
+    const ratio = aspectRatioNum || (isPortrait ? 267 / 476 : 16 / 9);
+    const aspectStr = aspectRatioValue || (isPortrait ? '267 / 476' : '16 / 9');
+
+    if (!containerDimensions.width || !containerDimensions.height) {
+      return {
+        aspectRatio: aspectStr,
+        width: isPortrait ? 'auto' : '100%',
+        height: isPortrait ? '100%' : 'auto',
+        maxWidth: '100%',
+        maxHeight: '100%',
+      };
+    }
+
+    const { width: cW, height: cH } = containerDimensions;
+    const containerRatio = cW / cH;
+
+    if (containerRatio > ratio) {
+      // Container is wider than video ratio -> fit by container height, center horizontally
+      const w = Math.min(Math.round(cH * ratio), cW);
+      return {
+        width: `${w}px`,
+        height: `${cH}px`,
+        aspectRatio: aspectStr,
+        maxWidth: '100%',
+        maxHeight: '100%',
+      };
+    } else {
+      // Container is taller than video ratio -> fit by container width, center vertically
+      const h = Math.min(Math.round(cW / ratio), cH);
+      return {
+        width: `${cW}px`,
+        height: `${h}px`,
+        aspectRatio: aspectStr,
+        maxWidth: '100%',
+        maxHeight: '100%',
+      };
+    }
+  }, [containerDimensions, aspectRatioNum, aspectRatioValue, isPortrait]);
 
   // Helper to get safe origin for postMessage
   const getOrigin = () => {
@@ -129,6 +147,34 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
     if (gDriveId) {
       return `https://drive.google.com/file/d/${gDriveId}/preview`;
+    }
+
+    if (isFacebook && rawIframeSrc) {
+      // Preserve clean Facebook video.php plugin URL without conflicting YouTube parameters
+      let url = rawIframeSrc.replace(/&amp;/g, '&');
+      url = url.replace(/https?:\/\/(?:web|m|touch)\.facebook\.com/gi, 'https://www.facebook.com');
+      url = url.replace(/href=https%3A%2F%2F(?:web|m|touch)\.facebook\.com/gi, 'href=https%3A%2F%2Fwww.facebook.com');
+
+      if (!url.includes('plugins/video.php')) {
+        const isReel = isFacebookReel || isPortrait;
+        const width = facebookWidth || (isReel ? 267 : 560);
+        const height = facebookHeight || (isReel ? 476 : 315);
+        url = `https://www.facebook.com/plugins/video.php?height=${height}&href=${encodeURIComponent(url)}&show_text=false&width=${width}&t=0`;
+      } else {
+        if (!url.includes('width=')) {
+          url += `&width=${facebookWidth || (isPortrait ? 267 : 560)}`;
+        }
+        if (!url.includes('height=')) {
+          url += `&height=${facebookHeight || (isPortrait ? 476 : 315)}`;
+        }
+        if (!url.includes('show_text=')) {
+          url += '&show_text=false';
+        }
+        if (!url.includes('t=')) {
+          url += '&t=0';
+        }
+      }
+      return url;
     }
 
     if (rawIframeSrc) {
@@ -152,12 +198,10 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   const getSanitizedRawCode = () => {
     let formatted = raw;
     if (formatted.includes('<iframe')) {
-      // Strip web-share if present in iframe code
-      formatted = formatted.replace(/;\s*web-share/gi, '').replace(/web-share;?\s*/gi, '');
       if (!formatted.includes('allow=')) {
         formatted = formatted.replace(
           '<iframe',
-          '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"'
+          '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"'
         );
       } else if (!formatted.includes('autoplay')) {
         formatted = formatted.replace(/allow=["']([^"']*?)["']/i, 'allow="$1; autoplay"');
@@ -211,13 +255,13 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         );
       } catch (_) {}
 
-      if (isActive) {
-        // Enforce mute first then trigger play with progressive retries for mobile
+      if (isActive && youtubeId) {
+        // Enforce mute first then trigger play with progressive retries for YouTube
         sendYouTubeCommand('mute');
         setTimeout(() => sendYouTubeCommand('playVideo'), 100);
         setTimeout(() => sendYouTubeCommand('playVideo'), 350);
         setTimeout(() => sendYouTubeCommand('playVideo'), 800);
-      } else {
+      } else if (!isActive && youtubeId) {
         // Ensure inactive videos stay paused
         sendYouTubeCommand('pauseVideo');
       }
@@ -542,11 +586,15 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   }, []);
 
   // 1. Direct HTML5 Video Player: Micro-sized auto-hiding controls that never cover the video frame
+  const resolvedContainerClass = aspectRatioClass
+    ? aspectRatioClass
+    : 'w-full h-[380px] xs:h-[420px] sm:h-[480px] max-h-[75vh] mx-auto';
+
   if (html5VideoSrc) {
     return (
       <div
         ref={containerRef}
-        className={`relative ${aspectRatioClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center select-none ${className}`}
+        className={`relative ${resolvedContainerClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center select-none ${className}`}
         onMouseMove={resetHideTimer}
         onClick={handleContainerTap}
         onDoubleClick={toggleFullscreen}
@@ -688,8 +736,8 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     );
   }
 
-  // 2. Iframe / YouTube / Google Drive Preview
-  const iframeSrc = getIframeUrl();
+  // 2. Iframe / YouTube / Google Drive / Facebook Preview
+  const iframeSrc = parsedIframeSrc || getIframeUrl();
 
   return (
     <div
@@ -698,7 +746,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       onClick={handleContainerTap}
       onDoubleClick={toggleFullscreen}
       onTouchEnd={handleTouchEnd}
-      className={`relative ${aspectRatioClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center ${className}`}
+      className={`relative ${resolvedContainerClass} rounded-xl overflow-hidden bg-black border border-slate-300/80 shadow-inner group flex items-center justify-center ${className}`}
     >
       {/* Double-Tap Fullscreen Visual Confirmation Badge */}
       {doubleTapFeedback && (
@@ -726,22 +774,40 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
 
       {iframeSrc ? (
         <div className="relative w-full h-full overflow-hidden flex items-center justify-center bg-black">
-          <iframe
-            ref={iframeRef}
-            src={iframeSrc}
-            title={title || 'School Video Presentation'}
-            onLoad={handleIframeLoad}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            className="w-full h-full border-0 pointer-events-auto block mx-auto my-auto object-contain object-center"
-          />
+          <div
+            style={fittedStyle}
+            className="relative flex items-center justify-center mx-auto my-auto"
+          >
+            <iframe
+              ref={iframeRef}
+              src={iframeSrc}
+              title={title || 'School Video Presentation'}
+              onLoad={handleIframeLoad}
+              width={recommendedWidth || (isPortrait ? 267 : 560)}
+              height={recommendedHeight || (isPortrait ? 476 : 315)}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              scrolling="no"
+              loading="eager"
+              style={{
+                border: 'none',
+                overflow: 'hidden',
+                width: '100%',
+                height: '100%',
+              }}
+              className="w-full h-full border-0 block mx-auto my-auto"
+            />
+          </div>
         </div>
       ) : (
         /* Fallback for raw embed snippet */
-        <div
-          className="w-full h-full flex items-center justify-center text-center overflow-hidden relative bg-black [&_iframe]:w-full [&_iframe]:h-full [&_iframe]:border-0 [&_iframe]:block [&_iframe]:mx-auto [&_iframe]:my-auto [&_video]:[object-fit:contain] [&_video]:w-full [&_video]:h-full [&_video]:object-contain [&_video]:object-center [&_video]:mx-auto [&_video]:my-auto"
-          dangerouslySetInnerHTML={{ __html: getSanitizedRawCode() }}
-        />
+        <div className="relative w-full h-full overflow-hidden flex items-center justify-center bg-black">
+          <div
+            style={fittedStyle}
+            className="relative flex items-center justify-center mx-auto my-auto [&_iframe]:w-full [&_iframe]:h-full [&_iframe]:border-0 [&_iframe]:block [&_video]:w-full [&_video]:h-full [&_video]:object-contain [&_video]:object-center"
+            dangerouslySetInnerHTML={{ __html: getSanitizedRawCode() }}
+          />
+        </div>
       )}
     </div>
   );

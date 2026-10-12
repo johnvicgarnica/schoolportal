@@ -19,7 +19,14 @@ export { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mock
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const db = firebaseConfig.firestoreDatabaseId
-  ? initializeFirestore(app, { ignoreUndefinedProperties: true }, firebaseConfig.firestoreDatabaseId)
+  ? initializeFirestore(
+      app,
+      {
+        ignoreUndefinedProperties: true,
+        experimentalAutoDetectLongPolling: true,
+      },
+      firebaseConfig.firestoreDatabaseId
+    )
   : getFirestore(app);
 
 // Types
@@ -590,7 +597,13 @@ export const subscribeAnnouncements = (onUpdate: (announcements: Announcement[])
   );
 };
 
+let isSeedingAnnouncements = false;
 export const seedInitialAnnouncementsIfEmpty = async () => {
+  if (isSeedingAnnouncements) return;
+  if (typeof window !== 'undefined' && localStorage.getItem('svnhs_announcements_seeded') === 'true') {
+    return;
+  }
+  isSeedingAnnouncements = true;
   try {
     const seedSnap = await getDoc(doc(db, SETTINGS_COL, 'announcements_seeded'));
     if (!seedSnap.exists()) {
@@ -635,8 +648,18 @@ export const seedInitialAnnouncementsIfEmpty = async () => {
         updatedAt: new Date().toISOString(),
       });
     }
-  } catch (err) {
-    console.error('Error seeding initial announcements to Firestore:', err);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('svnhs_announcements_seeded', 'true');
+    }
+  } catch (err: any) {
+    const isOffline = err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('backend');
+    if (isOffline) {
+      console.warn('Firestore is connecting in offline mode, deferred announcement seeding.');
+    } else {
+      console.error('Error seeding initial announcements to Firestore:', err);
+    }
+  } finally {
+    isSeedingAnnouncements = false;
   }
 };
 
@@ -758,7 +781,13 @@ export const subscribeDriveFolders = (onUpdate: (folders: DriveFolder[]) => void
   );
 };
 
+let isSeedingDriveFolders = false;
 export const seedInitialDriveFoldersIfEmpty = async () => {
+  if (isSeedingDriveFolders) return;
+  if (typeof window !== 'undefined' && localStorage.getItem('svnhs_drive_folders_seeded') === 'true') {
+    return;
+  }
+  isSeedingDriveFolders = true;
   try {
     const seedSnap = await getDoc(doc(db, SETTINGS_COL, 'drive_folders_seeded'));
     if (!seedSnap.exists()) {
@@ -773,13 +802,29 @@ export const seedInitialDriveFoldersIfEmpty = async () => {
         updatedAt: new Date().toISOString(),
       });
     }
-  } catch (err) {
-    console.error('Error seeding initial drive folders to Firestore:', err);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('svnhs_drive_folders_seeded', 'true');
+    }
+  } catch (err: any) {
+    const isOffline = err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('backend');
+    if (isOffline) {
+      console.warn('Firestore is connecting in offline mode, deferred drive folder seeding.');
+    } else {
+      console.error('Error seeding initial drive folders to Firestore:', err);
+    }
+  } finally {
+    isSeedingDriveFolders = false;
   }
 };
 
 // INITIALIZATION & SEEDING
+let isSeedingAdmin = false;
 export const seedInitialAdminIfEmpty = async () => {
+  if (isSeedingAdmin) return;
+  if (typeof window !== 'undefined' && localStorage.getItem('svnhs_admin_seeded') === 'true') {
+    return;
+  }
+  isSeedingAdmin = true;
   try {
     // Seed default announcements if not already seeded
     await seedInitialAnnouncementsIfEmpty();
@@ -882,8 +927,19 @@ export const seedInitialAdminIfEmpty = async () => {
         updatedAt: new Date().toISOString(),
       });
     }
-  } catch (err) {
-    console.error('Error seeding initial admin to Firestore:', err);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('svnhs_admin_seeded', 'true');
+    }
+  } catch (err: any) {
+    const isOffline = err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('backend');
+    if (isOffline) {
+      console.warn('Firestore is connecting in offline mode, deferred admin seeding.');
+    } else {
+      console.error('Error seeding initial admin to Firestore:', err);
+    }
+  } finally {
+    isSeedingAdmin = false;
   }
 };
 
@@ -1995,14 +2051,30 @@ export const subscribeSchoolPermanentFolders = (onUpdate: (folders: SchoolPerman
   );
 };
 
+let isSeedingSchoolPermanentFolders = false;
 export const seedInitialSchoolPermanentFoldersIfEmpty = async () => {
+  if (isSeedingSchoolPermanentFolders) return;
+  if (typeof window !== 'undefined' && localStorage.getItem('svnhs_school_permanent_folders_seeded') === 'true') {
+    return;
+  }
+  isSeedingSchoolPermanentFolders = true;
   try {
     const snap = await getDoc(doc(db, SETTINGS_COL, SCHOOL_PERMANENT_FOLDERS_DOC_ID));
     if (!snap.exists()) {
       await saveSchoolPermanentFoldersToFirestore(INITIAL_SCHOOL_PERMANENT_FOLDERS);
     }
-  } catch (err) {
-    console.error('Error seeding initial school permanent folders:', err);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('svnhs_school_permanent_folders_seeded', 'true');
+    }
+  } catch (err: any) {
+    const isOffline = err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('backend');
+    if (isOffline) {
+      console.warn('Firestore is connecting in offline mode, deferred school permanent folders seeding.');
+    } else {
+      console.error('Error seeding initial school permanent folders:', err);
+    }
+  } finally {
+    isSeedingSchoolPermanentFolders = false;
   }
 };
 
@@ -2468,7 +2540,11 @@ export const saveEmbeddedVideoToFirestore = async (video: EmbeddedVideo): Promis
   const cleanVideo: EmbeddedVideo = {
     id: video.id || `video-${Date.now()}`,
     title: video.title?.trim() || 'SVNHS Video Presentation',
-    embedCode: video.embedCode?.trim() || '',
+    embedCode: (video.embedCode || '')
+      .trim()
+      .replace(/&amp;/g, '&')
+      .replace(/https?:\/\/(?:web|m|touch)\.facebook\.com/gi, 'https://www.facebook.com')
+      .replace(/href=https%3A%2F%2F(?:web|m|touch)\.facebook\.com/gi, 'href=https%3A%2F%2Fwww.facebook.com'),
     description: video.description?.trim() || '',
     createdAt: video.createdAt || new Date().toISOString().substring(0, 10),
     createdBy: video.createdBy || 'Master Admin',

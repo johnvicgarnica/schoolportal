@@ -13,97 +13,57 @@ import {
 } from 'lucide-react';
 import { EmbeddedVideo } from '../types';
 import { FineTunedVideoPlayer } from './FineTunedVideoPlayer';
+import { parseAndOptimizeEmbed } from '../lib/videoEmbedUtils';
 
 interface ScrollableVideoSectionProps {
   videos: EmbeddedVideo[];
   className?: string;
+  onHeightChange?: (height: number) => void;
 }
 
 /**
- * Normalizes embed code:
- * - If admin pasted a direct YouTube or Vimeo or Google Drive URL, convert to responsive iframe
- * - If admin pasted <iframe> or <video>, ensure allowfullscreen and remove restrictive hardcoded inline styles
+ * Validates, normalizes, and optimizes any video embed code or URL
+ * ensuring responsive aspect ratios and eliminating conflicts.
  */
 export const formatEmbedCode = (rawCode: string): string => {
   const trimmed = (rawCode || '').trim();
   if (!trimmed) return '';
-
-  // 1. Direct YouTube watch URL - enforce autoplay=1, mute=1, playsinline=1, enablejsapi=1
-  const ytWatchMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/i);
-  if (ytWatchMatch && ytWatchMatch[1]) {
-    return `<iframe src="https://www.youtube.com/embed/${ytWatchMatch[1]}?autoplay=1&mute=1&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full"></iframe>`;
-  }
-
-  // 2. Direct youtu.be short URL - enforce autoplay=1, mute=1, playsinline=1, enablejsapi=1
-  const ytShortMatch = trimmed.match(/(?:https?:\/\/)?youtu\.be\/([a-zA-Z0-9_-]+)/i);
-  if (ytShortMatch && ytShortMatch[1]) {
-    return `<iframe src="https://www.youtube.com/embed/${ytShortMatch[1]}?autoplay=1&mute=1&enablejsapi=1&rel=0&playsinline=1&controls=1&fs=1" title="SVNHS Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen class="w-full h-full"></iframe>`;
-  }
-
-  // 3. Direct Google Drive preview URL
-  const gDriveMatch = trimmed.match(/(?:https?:\/\/)?drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/(?:view|preview)/i);
-  if (gDriveMatch && gDriveMatch[1]) {
-    return `<iframe src="https://drive.google.com/file/d/${gDriveMatch[1]}/preview" title="SVNHS Google Drive Video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen class="w-full h-full"></iframe>`;
-  }
-
-  // 4. HTML5 direct video file (.mp4, .webm) - autoplay with muted, controls enabled, mobile playsinline
-  if (trimmed.match(/^https?:\/\/.+\.(mp4|webm|ogg)(\?.*)?$/i)) {
-    return `<video controls playsinline webkit-playsinline="true" autoPlay muted preload="auto" style="object-fit: contain;" class="w-full h-full object-contain object-center bg-black mx-auto"><source src="${trimmed}" type="video/mp4">Your browser does not support the video tag.</video>`;
-  }
-
-  // 5. Raw <iframe> or <video> code provided by Master Admin
-  let formatted = trimmed;
-
-  // Ensure allowfullscreen and allow="autoplay" are present on iframes without blocking autoplay
-  if (formatted.includes('<iframe')) {
-    // Strip web-share if present in iframe code
-    formatted = formatted.replace(/;\s*web-share/gi, '').replace(/web-share;?\s*/gi, '');
-    if (!formatted.includes('allow=')) {
-      formatted = formatted.replace(
-        '<iframe',
-        '<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"'
-      );
-    } else if (!formatted.includes('autoplay')) {
-      formatted = formatted.replace(/allow=["']([^"']*?)["']/i, 'allow="$1; autoplay"');
-    }
-    if (!formatted.includes('allowfullscreen')) {
-      formatted = formatted.replace('<iframe', '<iframe allowfullscreen');
-    }
-    // Remove loading="lazy" because lazy iframes disable autoplay
-    formatted = formatted.replace(/\s*loading=["']lazy["']/gi, '');
-  }
-
-  // Ensure video tags have playsinline, object-fit contain, and autoplay capabilities
-  if (formatted.includes('<video')) {
-    if (!formatted.includes('object-fit')) {
-      formatted = formatted.replace('<video', '<video style="object-fit: contain;"');
-    }
-    if (!formatted.includes('object-contain')) {
-      formatted = formatted.replace('<video', '<video class="object-contain"');
-    }
-    if (!formatted.includes('controls')) {
-      formatted = formatted.replace('<video', '<video controls');
-    }
-    if (!formatted.includes('playsinline')) {
-      formatted = formatted.replace('<video', '<video playsinline webkit-playsinline="true"');
-    }
-    if (!formatted.includes('autoplay')) {
-      formatted = formatted.replace('<video', '<video autoplay muted');
-    }
-  }
-
-  return formatted;
+  const result = parseAndOptimizeEmbed(trimmed);
+  return result.optimizedCode;
 };
 
 export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
   videos,
   className = '',
+  onHeightChange,
 }) => {
+  const sectionRef = useRef<HTMLElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const slideItemRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
   const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
   const [activeIndex, setActiveIndex] = useState<number>(0);
+
+  // Synchronize rendered section height with sibling components
+  useEffect(() => {
+    if (!sectionRef.current) return;
+    const measure = () => {
+      if (sectionRef.current) {
+        const h = sectionRef.current.offsetHeight;
+        if (h > 0) {
+          onHeightChange?.(h);
+        }
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(sectionRef.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [videos, onHeightChange]);
 
   // Check scroll boundary to enable/disable buttons
   const checkScroll = () => {
@@ -194,6 +154,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
 
   return (
     <section
+      ref={sectionRef}
       aria-label="Campus Video Broadcasts"
       className={`w-full bg-white border border-slate-200/90 rounded-3xl p-3 sm:p-4 backdrop-blur-md shadow-sm animate-fadeIn text-slate-800 flex flex-col justify-start h-auto overflow-hidden ${className}`}
     >
@@ -285,7 +246,6 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
                     <FineTunedVideoPlayer
                       embedCode={video.embedCode}
                       title={video.title}
-                      aspectRatioClass="w-full aspect-video mx-auto"
                       isActive={index === activeIndex}
                     />
                   </div>

@@ -82,7 +82,7 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
       const videoData: EmbeddedVideo = {
         id: editingVideo?.id || `video-${Date.now()}`,
         title: title.trim(),
-        embedCode: embedCode.trim(),
+        embedCode: formatEmbedCode(embedCode.trim()),
         description: description.trim(),
         createdAt: editingVideo?.createdAt || new Date().toISOString().substring(0, 10),
         createdBy: currentUser.name || 'Master Admin',
@@ -141,7 +141,7 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
   };
 
   // Helper sample templates for Master Admin
-  const insertTemplate = (type: 'youtube' | 'drive' | 'html5') => {
+  const insertTemplate = (type: 'youtube' | 'facebook' | 'drive' | 'html5') => {
     if (type === 'youtube') {
       setTitle((prev) => prev || 'San Vicente National High School Campus Showcase');
       setEmbedCode(
@@ -150,10 +150,18 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
       setDescription(
         (prev) => prev || 'Official school video presentation highlighting Senior High School programs and activities.'
       );
+    } else if (type === 'facebook') {
+      setTitle((prev) => prev || 'San Vicente NHS Official Facebook Broadcast');
+      setEmbedCode(
+        `<iframe src="https://www.facebook.com/plugins/video.php?height=476&href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1546626737483460%2F&show_text=false&width=267&t=0" width="267" height="476" style="border:none;overflow:hidden" scrolling="no" frameborder="0" allowfullscreen="true" allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share" allowFullScreen="true"></iframe>`
+      );
+      setDescription(
+        (prev) => prev || 'Official school video presentation broadcasted from Facebook.'
+      );
     } else if (type === 'drive') {
       setTitle((prev) => prev || 'DepEd Bislig City Instructional Presentation');
       setEmbedCode(
-        `<iframe src="https://drive.google.com/file/d/1a2b3c4d5e6f/preview" width="640" height="480" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`
+        `<iframe src="https://drive.google.com/file/d/1a2b3c4d5e6f/preview" width="640" height="480" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen="true" allowFullScreen></iframe>`
       );
       setDescription(
         (prev) => prev || 'Instructional curriculum and departmental video orientation.'
@@ -230,10 +238,11 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
                 className="bg-[#141c2c] border border-[#24334b] rounded-2xl overflow-hidden shadow-lg flex flex-col justify-between transition-all hover:border-purple-500/50"
               >
                 {/* Embed Video Interactive Player Box */}
-                <div className="relative w-full aspect-video bg-black overflow-hidden border-b border-[#24334b] flex items-center justify-center">
+                <div className="relative w-full h-[220px] sm:h-[260px] bg-black overflow-hidden border-b border-[#24334b] flex items-center justify-center">
                   <FineTunedVideoPlayer
                     embedCode={video.embedCode}
                     title={video.title}
+                    aspectRatioClass="w-full h-[220px] sm:h-[260px] mx-auto"
                   />
                   <div className="absolute top-2 left-2 bg-slate-900/80 backdrop-blur-xs text-purple-300 border border-purple-400/40 text-[10px] font-mono font-bold px-2 py-0.5 rounded pointer-events-none z-10">
                     #{video.order ?? index + 1}
@@ -383,6 +392,13 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
                   className="px-2.5 py-1 bg-[#1b263b] hover:bg-purple-900/60 text-slate-200 hover:text-purple-200 text-xs font-mono rounded-lg border border-[#2b3c58] transition-all cursor-pointer"
                 >
                   YouTube Iframe
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertTemplate('facebook')}
+                  className="px-2.5 py-1 bg-[#1b263b] hover:bg-purple-900/60 text-slate-200 hover:text-purple-200 text-xs font-mono rounded-lg border border-[#2b3c58] transition-all cursor-pointer"
+                >
+                  Facebook Video / Reel
                 </button>
                 <button
                   type="button"
