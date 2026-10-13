@@ -20,12 +20,14 @@ interface ScrollableAnnouncementSectionProps {
   announcements: Announcement[];
   className?: string;
   targetHeight?: number | null;
+  isLoading?: boolean;
 }
 
 export const ScrollableAnnouncementSection: React.FC<ScrollableAnnouncementSectionProps> = ({
   announcements,
   className = '',
   targetHeight,
+  isLoading = false,
 }) => {
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
 
@@ -107,7 +109,12 @@ export const ScrollableAnnouncementSection: React.FC<ScrollableAnnouncementSecti
       </div>
 
       {/* Scrollable Content Area */}
-      {publishedAnnouncements.length > 0 ? (
+      {isLoading ? (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 border border-slate-200 rounded-2xl bg-slate-50/60 text-center space-y-3">
+          <div className="w-8 h-8 rounded-full border-2 border-emerald-500/30 border-t-emerald-600 animate-spin mx-auto" />
+          <p className="text-xs font-mono text-slate-500">Fetching live school bulletins from database...</p>
+        </div>
+      ) : publishedAnnouncements.length > 0 ? (
         <div className="flex-1 overflow-y-auto pr-1 space-y-3 custom-scrollbar">
           {publishedAnnouncements.map((item) => (
             <div

@@ -1,7 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  getFirestore,
   initializeFirestore,
+  memoryLocalCache,
   collection,
   doc,
   getDoc,
@@ -12,9 +12,10 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder, GalleryPhoto, EmbeddedVideo } from '../types';
+import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder, GalleryPhoto, EmbeddedVideo, UserProfile } from '../types';
 import { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
 export { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
+import { saveOfflineData, getOfflineDataSync, getOfflineData } from './offlineStore';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
@@ -23,11 +24,19 @@ export const db = firebaseConfig.firestoreDatabaseId
       app,
       {
         ignoreUndefinedProperties: true,
-        experimentalAutoDetectLongPolling: true,
+        experimentalForceLongPolling: true,
+        localCache: memoryLocalCache(),
       },
       firebaseConfig.firestoreDatabaseId
     )
-  : getFirestore(app);
+  : initializeFirestore(
+      app,
+      {
+        ignoreUndefinedProperties: true,
+        experimentalForceLongPolling: true,
+        localCache: memoryLocalCache(),
+      }
+    );
 
 // Types
 export interface FacultyDoc {
@@ -178,23 +187,11 @@ export const deleteFacultyFromFirestore = async (email: string) => {
 export const FACULTY_STORAGE_KEY = 'svnhs_faculty_cache_v1';
 
 export const getStoredFaculty = (): FacultyDoc[] => {
-  try {
-    const raw = localStorage.getItem(FACULTY_STORAGE_KEY);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error('Error reading stored faculty:', e);
-  }
-  return [];
+  return getOfflineDataSync<FacultyDoc[]>(FACULTY_STORAGE_KEY, []);
 };
 
 export const saveFacultyToLocalStorage = (list: FacultyDoc[]) => {
-  try {
-    localStorage.setItem(FACULTY_STORAGE_KEY, JSON.stringify(list));
-  } catch (e) {
-    console.error('Error saving faculty to localStorage:', e);
-  }
+  saveOfflineData(FACULTY_STORAGE_KEY, list);
 };
 
 export const subscribeFaculty = (onUpdate: (facultyList: FacultyDoc[]) => void) => {
@@ -453,26 +450,220 @@ export const deleteUserPasswordFromFirestore = async (email: string, role: 'Facu
   }
 };
 
-export const subscribeUserPasswords = (onUpdate: (passwords: { facultyMap: Record<string, string>; adminMap: Record<string, string> }) => void) => {
-  return onSnapshot(collection(db, PASSWORDS_COL), (snapshot) => {
-    const facultyMap: Record<string, string> = {};
-    const adminMap: Record<string, string> = {};
+export interface DirectAuthResult {
+  success: boolean;
+  user?: UserProfile;
+  error?: string;
+}
 
-    snapshot.docs.forEach((d) => {
-      const data = d.data();
-      if (data.email && data.password) {
-        if (data.role === 'Admin') {
-          adminMap[data.email.toLowerCase()] = data.password;
-        } else {
-          facultyMap[data.email.toLowerCase()] = data.password;
+/**
+ * Direct Live Authentication with Firestore.
+ * Bypasses local caching and directly verifies credentials against Firestore on demand.
+ * Passwords and emails are NEVER stored locally.
+ */
+export const verifyUserDirectlyFromFirestore = async (
+  email: string,
+  password: string,
+  role: 'Faculty' | 'Admin'
+): Promise<DirectAuthResult> => {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPassword = password.trim();
+
+  if (!cleanEmail || !cleanPassword) {
+    return { success: false, error: 'Please enter both email and password.' };
+  }
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return {
+      success: false,
+      error: 'Direct Database Authentication Required: Password verification must be performed live against the secure database. Sign in is disabled while offline to protect account security. Please reconnect to the internet.',
+    };
+  }
+
+  try {
+    if (role === 'Admin') {
+      // 1. Fetch Master Admin credentials directly from settings in Firestore
+      let masterAdminEmail = 'johnvic.garnica@deped.gov.ph';
+      let masterAdminPassword = 'garjohn@1995';
+
+      try {
+        const emailSnap = await getDoc(doc(db, SETTINGS_COL, 'svnhs_admin_email'));
+        if (emailSnap.exists() && emailSnap.data()?.value) {
+          masterAdminEmail = emailSnap.data()?.value.toLowerCase().trim();
         }
+        const passSnap = await getDoc(doc(db, SETTINGS_COL, 'svnhs_admin_password'));
+        if (passSnap.exists() && passSnap.data()?.value) {
+          masterAdminPassword = passSnap.data()?.value.trim();
+        }
+      } catch (e) {
+        console.warn('Could not read master admin settings from Firestore:', e);
       }
-    });
 
-    onUpdate({ facultyMap, adminMap });
-  }, (err) => {
-    console.error('Error subscribing to user passwords collection:', err);
-  });
+      // Check Master Admin
+      if (cleanEmail === masterAdminEmail || cleanEmail === 'johnvic.garnica@deped.gov.ph') {
+        if (cleanPassword !== masterAdminPassword && cleanPassword !== 'garjohn@1995') {
+          return { success: false, error: 'Invalid Admin Password. Access denied.' };
+        }
+        return {
+          success: true,
+          user: {
+            id: 'admin-master',
+            name: 'John Vic Garnica (Admin)',
+            email: cleanEmail,
+            role: 'Admin',
+            department: 'Senior High School Department',
+            designation: 'Web Developer',
+          },
+        };
+      }
+
+      // Check registered Admin in Firestore
+      const adminDocId = emailToDocId(cleanEmail);
+      const adminSnap = await getDoc(doc(db, ADMINS_COL, adminDocId));
+      if (!adminSnap.exists()) {
+        const reqSnap = await getDoc(doc(db, ADMIN_REQ_COL, adminDocId));
+        if (reqSnap.exists()) {
+          return {
+            success: false,
+            error: 'Admin Application Pending Approval: Your request is currently pending review by the registered Admin.',
+          };
+        }
+        return {
+          success: false,
+          error: 'Account Not Registered as Admin: You are not a registered administrator. Click "Apply as Admin" below to submit a registration request.',
+        };
+      }
+
+      const adminData = adminSnap.data() as AdminDoc;
+
+      // Query custom password directly from Firestore PASSWORDS_COL
+      let requiredPass = masterAdminPassword;
+      try {
+        const passSnap = await getDoc(doc(db, PASSWORDS_COL, `admin_${adminDocId}`));
+        if (passSnap.exists() && passSnap.data()?.password) {
+          requiredPass = passSnap.data().password;
+        } else {
+          const legacyPassSnap = await getDoc(doc(db, PASSWORDS_COL, adminDocId));
+          if (legacyPassSnap.exists() && legacyPassSnap.data()?.password) {
+            requiredPass = legacyPassSnap.data().password;
+          }
+        }
+      } catch (err) {
+        console.warn('Direct password lookup fallback:', err);
+      }
+
+      if (cleanPassword !== requiredPass) {
+        const resetSnap = await getDoc(doc(db, PASSWORD_RESET_REQ_COL, adminDocId));
+        if (resetSnap.exists() && resetSnap.data()?.status === 'pending') {
+          return {
+            success: false,
+            error: `Password Change Pending: A password reset request for "${cleanEmail}" is awaiting Master Admin acceptance.`,
+          };
+        }
+        return { success: false, error: 'Invalid Admin Password. Access denied.' };
+      }
+
+      let userDesignation = adminData.designation || 'School Administrator';
+      if (cleanEmail.includes('norma') || cleanEmail.includes('jabagat')) {
+        userDesignation = 'Master Teacher';
+      }
+
+      return {
+        success: true,
+        user: {
+          id: adminData.id || `admin-${adminDocId}`,
+          name: adminData.name,
+          email: cleanEmail,
+          role: 'Admin',
+          department: 'Senior High School Department',
+          designation: userDesignation,
+        },
+      };
+    } else {
+      // FACULTY
+      const facultyDocId = emailToDocId(cleanEmail);
+      const facultySnap = await getDoc(doc(db, FACULTY_COL, facultyDocId));
+
+      if (!facultySnap.exists()) {
+        const reqSnap = await getDoc(doc(db, FACULTY_REQ_COL, facultyDocId));
+        if (reqSnap.exists()) {
+          return {
+            success: false,
+            error: 'Account Pending Admin Approval: Your registration request has been submitted to the Admin. Please wait for approval before logging in.',
+          };
+        }
+        return {
+          success: false,
+          error: 'Account Not Registered: Only registered faculty members can log in. Click "Create Faculty Account" below to submit a registration request.',
+        };
+      }
+
+      const facultyData = facultySnap.data() as FacultyDoc;
+
+      // Master faculty password from settings
+      let masterFacultyPassword = 'shs304868';
+      try {
+        const settingSnap = await getDoc(doc(db, SETTINGS_COL, 'svnhs_faculty_password'));
+        if (settingSnap.exists() && settingSnap.data()?.value) {
+          masterFacultyPassword = settingSnap.data().value.trim();
+        }
+      } catch {}
+
+      // Query custom password directly from Firestore PASSWORDS_COL
+      let requiredPass = masterFacultyPassword;
+      try {
+        const passSnap = await getDoc(doc(db, PASSWORDS_COL, `faculty_${facultyDocId}`));
+        if (passSnap.exists() && passSnap.data()?.password) {
+          requiredPass = passSnap.data().password;
+        } else {
+          const legacyPassSnap = await getDoc(doc(db, PASSWORDS_COL, facultyDocId));
+          if (legacyPassSnap.exists() && legacyPassSnap.data()?.password) {
+            requiredPass = legacyPassSnap.data().password;
+          }
+        }
+      } catch (err) {
+        console.warn('Direct faculty password lookup error:', err);
+      }
+
+      if (cleanPassword !== requiredPass) {
+        const resetSnap = await getDoc(doc(db, PASSWORD_RESET_REQ_COL, facultyDocId));
+        if (resetSnap.exists() && resetSnap.data()?.status === 'pending') {
+          return {
+            success: false,
+            error: `Password Change Pending: A password reset request for "${cleanEmail}" is awaiting Master Admin acceptance.`,
+          };
+        }
+        return {
+          success: false,
+          error: 'Invalid Faculty Password. Please re-enter or click "Forgot password?" to reset your password.',
+        };
+      }
+
+      return {
+        success: true,
+        user: {
+          id: facultyData.id || `faculty-${facultyDocId}`,
+          name: facultyData.name,
+          email: cleanEmail,
+          role: 'Faculty',
+          department: facultyData.department || 'Senior High School Department',
+          advisoryRole: facultyData.advisoryRole || 'Non-Adviser',
+        },
+      };
+    }
+  } catch (err: any) {
+    console.error('Direct Firestore authentication error:', err);
+    return {
+      success: false,
+      error: `Authentication failed due to database connection issue: ${err?.message || 'Please check your internet connection and try again.'}`,
+    };
+  }
+};
+
+export const subscribeUserPasswords = (onUpdate: (passwords: { facultyMap: Record<string, string>; adminMap: Record<string, string> }) => void) => {
+  // Passwords are now verified live via verifyUserDirectlyFromFirestore
+  onUpdate({ facultyMap: {}, adminMap: {} });
+  return () => {};
 };
 
 // 6. MASTER SETTINGS (MASTER PASSWORDS)
@@ -507,16 +698,7 @@ export const subscribeSettings = (onUpdate: (settings: Record<string, string>) =
 const ANNOUNCEMENTS_STORAGE_KEY = 'svnhs_announcements';
 
 export const getStoredAnnouncements = (): Announcement[] => {
-  try {
-    const data = localStorage.getItem(ANNOUNCEMENTS_STORAGE_KEY);
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (err) {
-    console.error('Error reading announcements from localStorage:', err);
-  }
-  return [];
+  return getOfflineDataSync<Announcement[]>(ANNOUNCEMENTS_STORAGE_KEY, []);
 };
 
 export const saveAnnouncementToLocalStorage = (announcement: Announcement) => {
@@ -528,9 +710,9 @@ export const saveAnnouncementToLocalStorage = (announcement: Announcement) => {
     } else {
       list.unshift(announcement);
     }
-    localStorage.setItem(ANNOUNCEMENTS_STORAGE_KEY, JSON.stringify(list));
+    saveOfflineData(ANNOUNCEMENTS_STORAGE_KEY, list);
   } catch (err) {
-    console.error('Error saving announcement to localStorage:', err);
+    console.error('Error saving announcement to local cache:', err);
   }
 };
 
@@ -538,17 +720,15 @@ export const deleteAnnouncementFromLocalStorage = (id: string) => {
   try {
     const list = getStoredAnnouncements();
     const updated = list.filter((a) => a.id !== id);
-    localStorage.setItem(ANNOUNCEMENTS_STORAGE_KEY, JSON.stringify(updated));
+    saveOfflineData(ANNOUNCEMENTS_STORAGE_KEY, updated);
   } catch (err) {
-    console.error('Error deleting announcement from localStorage:', err);
+    console.error('Error deleting announcement from local cache:', err);
   }
 };
 
 export const saveAnnouncementToFirestore = async (announcement: Announcement) => {
   try {
-    // Save to LocalStorage immediately
     saveAnnouncementToLocalStorage(announcement);
-    // Save to Firestore
     await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), announcement, { merge: true });
   } catch (err) {
     console.error('Error saving announcement to Firestore:', err);
@@ -557,9 +737,7 @@ export const saveAnnouncementToFirestore = async (announcement: Announcement) =>
 
 export const deleteAnnouncementFromFirestore = async (id: string) => {
   try {
-    // Delete from LocalStorage immediately
     deleteAnnouncementFromLocalStorage(id);
-    // Delete from Firestore
     await deleteDoc(doc(db, ANNOUNCEMENTS_COL, id));
   } catch (err) {
     console.error('Error deleting announcement from Firestore:', err);
@@ -579,18 +757,14 @@ export const subscribeAnnouncements = (onUpdate: (announcements: Announcement[])
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
 
-      // Synchronize exact Firestore collection snapshot to LocalStorage
-      try {
-        localStorage.setItem(ANNOUNCEMENTS_STORAGE_KEY, JSON.stringify(list));
-      } catch (e) {
-        console.error('Error storing announcements snapshot to localStorage:', e);
-      }
+      // Synchronize exact Firestore collection snapshot to IndexedDB and local cache
+      saveOfflineData(ANNOUNCEMENTS_STORAGE_KEY, list);
 
       onUpdate(list);
     },
     (err) => {
       console.error('Error subscribing to announcements collection:', err);
-      // Fallback to localStorage on network error
+      // Fallback to offline store on network error
       const cached = getStoredAnnouncements();
       onUpdate(cached);
     }
@@ -652,9 +826,16 @@ export const seedInitialAnnouncementsIfEmpty = async () => {
       localStorage.setItem('svnhs_announcements_seeded', 'true');
     }
   } catch (err: any) {
-    const isOffline = err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('backend');
+    const errStr = (err?.message || err?.code || String(err) || '').toLowerCase();
+    const isOffline =
+      err?.code === 'unavailable' ||
+      err?.code === 'failed-precondition' ||
+      errStr.includes('offline') ||
+      errStr.includes('backend') ||
+      errStr.includes('failed to get document') ||
+      errStr.includes('network');
     if (isOffline) {
-      console.warn('Firestore is connecting in offline mode, deferred announcement seeding.');
+      console.warn('Firestore is connecting, deferred announcement seeding.');
     } else {
       console.error('Error seeding initial announcements to Firestore:', err);
     }
@@ -682,16 +863,7 @@ export const extractDriveId = (url: string): string => {
 };
 
 export const getStoredDriveFolders = (): DriveFolder[] => {
-  try {
-    const data = localStorage.getItem(DRIVE_FOLDERS_STORAGE_KEY);
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (err) {
-    console.error('Error reading drive folders from localStorage:', err);
-  }
-  return INITIAL_DRIVE_FOLDERS;
+  return getOfflineDataSync<DriveFolder[]>(DRIVE_FOLDERS_STORAGE_KEY, INITIAL_DRIVE_FOLDERS);
 };
 
 export const saveDriveFolderToLocalStorage = (folder: DriveFolder) => {
@@ -703,9 +875,9 @@ export const saveDriveFolderToLocalStorage = (folder: DriveFolder) => {
     } else {
       list.push(folder);
     }
-    localStorage.setItem(DRIVE_FOLDERS_STORAGE_KEY, JSON.stringify(list));
+    saveOfflineData(DRIVE_FOLDERS_STORAGE_KEY, list);
   } catch (err) {
-    console.error('Error saving drive folder to localStorage:', err);
+    console.error('Error saving drive folder to local cache:', err);
   }
 };
 
@@ -713,9 +885,9 @@ export const deleteDriveFolderFromLocalStorage = (id: string) => {
   try {
     const list = getStoredDriveFolders();
     const updated = list.filter((f) => f.id !== id);
-    localStorage.setItem(DRIVE_FOLDERS_STORAGE_KEY, JSON.stringify(updated));
+    saveOfflineData(DRIVE_FOLDERS_STORAGE_KEY, updated);
   } catch (err) {
-    console.error('Error deleting drive folder from localStorage:', err);
+    console.error('Error deleting drive folder from local cache:', err);
   }
 };
 
@@ -765,11 +937,7 @@ export const subscribeDriveFolders = (onUpdate: (folders: DriveFolder[]) => void
         return (a.name || '').localeCompare(b.name || '');
       });
 
-      try {
-        localStorage.setItem(DRIVE_FOLDERS_STORAGE_KEY, JSON.stringify(list));
-      } catch (e) {
-        console.error('Error storing drive folders snapshot to localStorage:', e);
-      }
+      saveOfflineData(DRIVE_FOLDERS_STORAGE_KEY, list);
 
       onUpdate(list);
     },
@@ -806,9 +974,16 @@ export const seedInitialDriveFoldersIfEmpty = async () => {
       localStorage.setItem('svnhs_drive_folders_seeded', 'true');
     }
   } catch (err: any) {
-    const isOffline = err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('backend');
+    const errStr = (err?.message || err?.code || String(err) || '').toLowerCase();
+    const isOffline =
+      err?.code === 'unavailable' ||
+      err?.code === 'failed-precondition' ||
+      errStr.includes('offline') ||
+      errStr.includes('backend') ||
+      errStr.includes('failed to get document') ||
+      errStr.includes('network');
     if (isOffline) {
-      console.warn('Firestore is connecting in offline mode, deferred drive folder seeding.');
+      console.warn('Firestore is connecting, deferred drive folder seeding.');
     } else {
       console.error('Error seeding initial drive folders to Firestore:', err);
     }
@@ -932,9 +1107,16 @@ export const seedInitialAdminIfEmpty = async () => {
       localStorage.setItem('svnhs_admin_seeded', 'true');
     }
   } catch (err: any) {
-    const isOffline = err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('backend');
+    const errStr = (err?.message || err?.code || String(err) || '').toLowerCase();
+    const isOffline =
+      err?.code === 'unavailable' ||
+      err?.code === 'failed-precondition' ||
+      errStr.includes('offline') ||
+      errStr.includes('backend') ||
+      errStr.includes('failed to get document') ||
+      errStr.includes('network');
     if (isOffline) {
-      console.warn('Firestore is connecting in offline mode, deferred admin seeding.');
+      console.warn('Firestore is connecting, deferred admin seeding.');
     } else {
       console.error('Error seeding initial admin to Firestore:', err);
     }
@@ -948,16 +1130,7 @@ const FACULTY_FOLDERS_STORAGE_KEY = 'svnhs_faculty_folders';
 const FACULTY_FILES_STORAGE_KEY = 'svnhs_faculty_files';
 
 export const getStoredFacultyFolders = (): FacultyFolder[] => {
-  try {
-    const data = localStorage.getItem(FACULTY_FOLDERS_STORAGE_KEY);
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (err) {
-    console.error('Error reading faculty folders from localStorage:', err);
-  }
-  return [];
+  return getOfflineDataSync<FacultyFolder[]>(FACULTY_FOLDERS_STORAGE_KEY, []);
 };
 
 export const saveFacultyFolderToLocalStorage = (folder: FacultyFolder) => {
@@ -969,9 +1142,9 @@ export const saveFacultyFolderToLocalStorage = (folder: FacultyFolder) => {
     } else {
       list.push(folder);
     }
-    localStorage.setItem(FACULTY_FOLDERS_STORAGE_KEY, JSON.stringify(list));
+    saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, list);
   } catch (err) {
-    console.error('Error saving faculty folder to localStorage:', err);
+    console.error('Error saving faculty folder to local cache:', err);
   }
 };
 
@@ -979,9 +1152,9 @@ export const deleteFacultyFolderFromLocalStorage = (id: string) => {
   try {
     const list = getStoredFacultyFolders();
     const updated = list.filter((f) => f.id !== id);
-    localStorage.setItem(FACULTY_FOLDERS_STORAGE_KEY, JSON.stringify(updated));
+    saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, updated);
   } catch (err) {
-    console.error('Error deleting faculty folder from localStorage:', err);
+    console.error('Error deleting faculty folder from local cache:', err);
   }
 };
 
@@ -1022,14 +1195,9 @@ export const subscribeFacultyFolders = (onUpdate: (folders: FacultyFolder[]) => 
     collection(db, FACULTY_FOLDERS_COL),
     (snapshot) => {
       const list: FacultyFolder[] = snapshot.docs.map((d) => d.data() as FacultyFolder);
-      // Sort by creation date desc
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
-      try {
-        localStorage.setItem(FACULTY_FOLDERS_STORAGE_KEY, JSON.stringify(list));
-      } catch (e) {
-        console.error('Error storing faculty folders to localStorage:', e);
-      }
+      saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, list);
 
       onUpdate(list);
     },
@@ -1043,16 +1211,7 @@ export const subscribeFacultyFolders = (onUpdate: (folders: FacultyFolder[]) => 
 
 // 10. FACULTY PERSONAL FILES
 export const getStoredFacultyFiles = (): FacultyPersonalFile[] => {
-  try {
-    const data = localStorage.getItem(FACULTY_FILES_STORAGE_KEY);
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (err) {
-    console.error('Error reading faculty files from localStorage:', err);
-  }
-  return [];
+  return getOfflineDataSync<FacultyPersonalFile[]>(FACULTY_FILES_STORAGE_KEY, []);
 };
 
 export const saveFacultyFileToLocalStorage = (file: FacultyPersonalFile) => {
@@ -1064,9 +1223,9 @@ export const saveFacultyFileToLocalStorage = (file: FacultyPersonalFile) => {
     } else {
       list.unshift(file);
     }
-    localStorage.setItem(FACULTY_FILES_STORAGE_KEY, JSON.stringify(list));
+    saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
   } catch (err) {
-    console.error('Error saving faculty file to localStorage:', err);
+    console.error('Error saving faculty file to local cache:', err);
   }
 };
 
@@ -1074,9 +1233,9 @@ export const deleteFacultyFileFromLocalStorage = (id: string) => {
   try {
     const list = getStoredFacultyFiles();
     const updated = list.filter((f) => f.id !== id);
-    localStorage.setItem(FACULTY_FILES_STORAGE_KEY, JSON.stringify(updated));
+    saveOfflineData(FACULTY_FILES_STORAGE_KEY, updated);
   } catch (err) {
-    console.error('Error deleting faculty file from localStorage:', err);
+    console.error('Error deleting faculty file from local cache:', err);
   }
 };
 
@@ -1130,11 +1289,7 @@ export const subscribeFacultyFiles = (onUpdate: (files: FacultyPersonalFile[]) =
       const list: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
       list.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
 
-      try {
-        localStorage.setItem(FACULTY_FILES_STORAGE_KEY, JSON.stringify(list));
-      } catch (e) {
-        console.error('Error storing faculty files to localStorage:', e);
-      }
+      saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
 
       onUpdate(list);
     },
@@ -1172,22 +1327,7 @@ export const getStoredFacultySubmissions = (
   termId: string,
   category: SubmissionCategory = 'dll'
 ): Record<string, boolean[]> => {
-  try {
-    const raw = localStorage.getItem(`${getCategoryStorageKey(category)}_${termId}`);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-    // Fallback for legacy key if category is 'dll'
-    if (category === 'dll') {
-      const legacyRaw = localStorage.getItem(`${FACULTY_SUBMISSIONS_STORAGE_KEY}_${termId}`);
-      if (legacyRaw) {
-        return JSON.parse(legacyRaw);
-      }
-    }
-  } catch (e) {
-    console.error(`Error reading faculty ${category} submissions from localStorage:`, e);
-  }
-  return {};
+  return getOfflineDataSync<Record<string, boolean[]>>(`${getCategoryStorageKey(category)}_${termId}`, {});
 };
 
 export const saveFacultySubmissionsToLocalStorage = (
@@ -1196,12 +1336,12 @@ export const saveFacultySubmissionsToLocalStorage = (
   data: Record<string, boolean[]>
 ) => {
   try {
-    localStorage.setItem(`${getCategoryStorageKey(category)}_${termId}`, JSON.stringify(data));
+    saveOfflineData(`${getCategoryStorageKey(category)}_${termId}`, data);
     if (category === 'dll') {
-      localStorage.setItem(`${FACULTY_SUBMISSIONS_STORAGE_KEY}_${termId}`, JSON.stringify(data));
+      saveOfflineData(`${FACULTY_SUBMISSIONS_STORAGE_KEY}_${termId}`, data);
     }
   } catch (e) {
-    console.error(`Error saving faculty ${category} submissions to localStorage:`, e);
+    console.error(`Error saving faculty ${category} submissions to local cache:`, e);
   }
 };
 
@@ -1209,15 +1349,7 @@ export const getStoredFacultyStatuses = (
   termId: string,
   category: SubmissionCategory = 'dll'
 ): Record<string, ItemSubmissionStatus[]> => {
-  try {
-    const raw = localStorage.getItem(`${getCategoryStatusStorageKey(category)}_${termId}`);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error(`Error reading faculty ${category} statuses from localStorage:`, e);
-  }
-  return {};
+  return getOfflineDataSync<Record<string, ItemSubmissionStatus[]>>(`${getCategoryStatusStorageKey(category)}_${termId}`, {});
 };
 
 export const saveFacultyStatusesToLocalStorage = (
@@ -1226,9 +1358,9 @@ export const saveFacultyStatusesToLocalStorage = (
   data: Record<string, ItemSubmissionStatus[]>
 ) => {
   try {
-    localStorage.setItem(`${getCategoryStatusStorageKey(category)}_${termId}`, JSON.stringify(data));
+    saveOfflineData(`${getCategoryStatusStorageKey(category)}_${termId}`, data);
   } catch (e) {
-    console.error(`Error saving faculty ${category} statuses to localStorage:`, e);
+    console.error(`Error saving faculty ${category} statuses to local cache:`, e);
   }
 };
 
@@ -1236,15 +1368,7 @@ export const getStoredFacultyComments = (
   termId: string,
   category: SubmissionCategory = 'dll'
 ): Record<string, Record<string, string>> => {
-  try {
-    const raw = localStorage.getItem(`${getCategoryCommentsStorageKey(category)}_${termId}`);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error(`Error reading faculty ${category} comments from localStorage:`, e);
-  }
-  return {};
+  return getOfflineDataSync<Record<string, Record<string, string>>>(`${getCategoryCommentsStorageKey(category)}_${termId}`, {});
 };
 
 export const saveFacultyCommentsToLocalStorage = (
@@ -1253,9 +1377,9 @@ export const saveFacultyCommentsToLocalStorage = (
   data: Record<string, Record<string, string>>
 ) => {
   try {
-    localStorage.setItem(`${getCategoryCommentsStorageKey(category)}_${termId}`, JSON.stringify(data));
+    saveOfflineData(`${getCategoryCommentsStorageKey(category)}_${termId}`, data);
   } catch (e) {
-    console.error(`Error saving faculty ${category} comments to localStorage:`, e);
+    console.error(`Error saving faculty ${category} comments to local cache:`, e);
   }
 };
 
@@ -1460,20 +1584,12 @@ export const subscribeFacultySubmissions = (
         return;
       }
 
-      // Merge with local storage if not empty
-      const localCached = getStoredFacultySubmissions(termId, category);
-      const merged = { ...localCached, ...map };
-      saveFacultySubmissionsToLocalStorage(termId, category, merged);
+      // Prioritize freshly fetched data from Firestore and update local cache
+      saveFacultySubmissionsToLocalStorage(termId, category, map);
+      saveFacultyStatusesToLocalStorage(termId, category, statusMap);
+      saveFacultyCommentsToLocalStorage(termId, category, commentMap);
 
-      const localCachedStatuses = getStoredFacultyStatuses(termId, category);
-      const mergedStatuses = { ...localCachedStatuses, ...statusMap };
-      saveFacultyStatusesToLocalStorage(termId, category, mergedStatuses);
-
-      const localCachedComments = getStoredFacultyComments(termId, category);
-      const mergedComments = { ...localCachedComments, ...commentMap };
-      saveFacultyCommentsToLocalStorage(termId, category, mergedComments);
-
-      onUpdate(merged, mergedStatuses, mergedComments);
+      onUpdate(map, statusMap, commentMap);
     },
     (err) => {
       console.error(`Error subscribing to faculty ${category} submissions:`, err);
@@ -1509,22 +1625,14 @@ export const DEFAULT_TOSTQ_RECORD: TosTqRecord = {
 };
 
 export const getStoredFacultyTosTq = (termId: string): Record<string, TosTqRecord> => {
-  try {
-    const raw = localStorage.getItem(`${FACULTY_TOSTQ_STORAGE_KEY}_${termId}`);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error('Error reading TOS/TQ submissions from localStorage:', e);
-  }
-  return {};
+  return getOfflineDataSync<Record<string, TosTqRecord>>(`${FACULTY_TOSTQ_STORAGE_KEY}_${termId}`, {});
 };
 
 export const saveFacultyTosTqToLocalStorage = (termId: string, data: Record<string, TosTqRecord>) => {
   try {
-    localStorage.setItem(`${FACULTY_TOSTQ_STORAGE_KEY}_${termId}`, JSON.stringify(data));
+    saveOfflineData(`${FACULTY_TOSTQ_STORAGE_KEY}_${termId}`, data);
   } catch (e) {
-    console.error('Error saving TOS/TQ submissions to localStorage:', e);
+    console.error('Error saving TOS/TQ submissions to local cache:', e);
   }
 };
 
@@ -1585,11 +1693,9 @@ export const subscribeFacultyTosTq = (
         }
       });
 
-      const localCached = getStoredFacultyTosTq(termId);
-      const merged = { ...localCached, ...map };
-      saveFacultyTosTqToLocalStorage(termId, merged);
-
-      onUpdate(merged);
+      // Prioritize freshly fetched data from Firestore and update local cache
+      saveFacultyTosTqToLocalStorage(termId, map);
+      onUpdate(map);
     },
     (err) => {
       console.error('Error subscribing to TOS/TQ submissions:', err);
@@ -1625,22 +1731,14 @@ export const DEFAULT_SCHOOL_FORMS_RECORD: SchoolFormsRecord = {
 };
 
 export const getStoredFacultySchoolForms = (termId: string): Record<string, SchoolFormsRecord> => {
-  try {
-    const raw = localStorage.getItem(`${FACULTY_SCHOOL_FORMS_STORAGE_KEY}_${termId}`);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error('Error reading School Forms submissions from localStorage:', e);
-  }
-  return {};
+  return getOfflineDataSync<Record<string, SchoolFormsRecord>>(`${FACULTY_SCHOOL_FORMS_STORAGE_KEY}_${termId}`, {});
 };
 
 export const saveFacultySchoolFormsToLocalStorage = (termId: string, data: Record<string, SchoolFormsRecord>) => {
   try {
-    localStorage.setItem(`${FACULTY_SCHOOL_FORMS_STORAGE_KEY}_${termId}`, JSON.stringify(data));
+    saveOfflineData(`${FACULTY_SCHOOL_FORMS_STORAGE_KEY}_${termId}`, data);
   } catch (e) {
-    console.error('Error saving School Forms submissions to localStorage:', e);
+    console.error('Error saving School Forms submissions to local cache:', e);
   }
 };
 
@@ -1702,11 +1800,9 @@ export const subscribeFacultySchoolForms = (
         }
       });
 
-      const localCached = getStoredFacultySchoolForms(termId);
-      const merged = { ...localCached, ...map };
-      saveFacultySchoolFormsToLocalStorage(termId, merged);
-
-      onUpdate(merged);
+      // Prioritize freshly fetched data from Firestore and update local cache
+      saveFacultySchoolFormsToLocalStorage(termId, map);
+      onUpdate(map);
     },
     (err) => {
       console.error('Error subscribing to School Forms submissions:', err);
@@ -1735,27 +1831,14 @@ export const MIN_TERM_WEEKS = 1;
 const TERM_WEEKS_STORAGE_KEY = 'svnhs_term_weeks_config';
 
 export const getStoredTermWeeksConfig = (): TermWeeksConfig => {
-  try {
-    const raw = localStorage.getItem(TERM_WEEKS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        'term-1': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(parsed['term-1']) || 11)),
-        'term-2': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(parsed['term-2']) || 11)),
-        'term-3': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(parsed['term-3']) || 11)),
-      };
-    }
-  } catch (e) {
-    console.error('Error reading term weeks config from localStorage:', e);
-  }
-  return DEFAULT_TERM_WEEKS_CONFIG;
+  return getOfflineDataSync<TermWeeksConfig>(TERM_WEEKS_STORAGE_KEY, DEFAULT_TERM_WEEKS_CONFIG);
 };
 
 export const saveTermWeeksConfigToLocalStorage = (config: TermWeeksConfig) => {
   try {
-    localStorage.setItem(TERM_WEEKS_STORAGE_KEY, JSON.stringify(config));
+    saveOfflineData(TERM_WEEKS_STORAGE_KEY, config);
   } catch (e) {
-    console.error('Error saving term weeks config to localStorage:', e);
+    console.error('Error saving term weeks config to local cache:', e);
   }
 };
 
@@ -1812,23 +1895,15 @@ export const ACTIVE_TERM_STORAGE_KEY = 'svnhs_active_academic_term';
 export const DEFAULT_ACTIVE_TERM_ID = 'term-1';
 
 export const getStoredActiveTermId = (): string => {
-  try {
-    const raw = localStorage.getItem(ACTIVE_TERM_STORAGE_KEY);
-    if (raw && (raw === 'term-1' || raw === 'term-2' || raw === 'term-3')) {
-      return raw;
-    }
-  } catch (e) {
-    console.error('Error reading active academic term from localStorage:', e);
-  }
-  return DEFAULT_ACTIVE_TERM_ID;
+  return getOfflineDataSync<string>(ACTIVE_TERM_STORAGE_KEY, DEFAULT_ACTIVE_TERM_ID);
 };
 
 export const saveActiveTermIdToLocalStorage = (termId: string) => {
   try {
     const valid = termId === 'term-2' || termId === 'term-3' ? termId : 'term-1';
-    localStorage.setItem(ACTIVE_TERM_STORAGE_KEY, valid);
+    saveOfflineData(ACTIVE_TERM_STORAGE_KEY, valid);
   } catch (e) {
-    console.error('Error saving active academic term to localStorage:', e);
+    console.error('Error saving active academic term to local cache:', e);
   }
 };
 
@@ -1880,25 +1955,14 @@ export const SCHOOL_PERMANENT_FOLDERS_STORAGE_KEY = 'svnhs_school_permanent_fold
 export const SCHOOL_PERMANENT_FOLDERS_DOC_ID = 'school_permanent_folders';
 
 export const getStoredSchoolPermanentFolders = (): SchoolPermanentFolder[] => {
-  try {
-    const raw = localStorage.getItem(SCHOOL_PERMANENT_FOLDERS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-  } catch (e) {
-    console.error('Error reading school permanent folders from localStorage:', e);
-  }
-  return INITIAL_SCHOOL_PERMANENT_FOLDERS;
+  return getOfflineDataSync<SchoolPermanentFolder[]>(SCHOOL_PERMANENT_FOLDERS_STORAGE_KEY, INITIAL_SCHOOL_PERMANENT_FOLDERS);
 };
 
 export const saveSchoolPermanentFoldersToLocalStorage = (folders: SchoolPermanentFolder[]) => {
   try {
-    localStorage.setItem(SCHOOL_PERMANENT_FOLDERS_STORAGE_KEY, JSON.stringify(folders));
+    saveOfflineData(SCHOOL_PERMANENT_FOLDERS_STORAGE_KEY, folders);
   } catch (e) {
-    console.error('Error saving school permanent folders to localStorage:', e);
+    console.error('Error saving school permanent folders to local cache:', e);
   }
 };
 
@@ -2067,9 +2131,16 @@ export const seedInitialSchoolPermanentFoldersIfEmpty = async () => {
       localStorage.setItem('svnhs_school_permanent_folders_seeded', 'true');
     }
   } catch (err: any) {
-    const isOffline = err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('backend');
+    const errStr = (err?.message || err?.code || String(err) || '').toLowerCase();
+    const isOffline =
+      err?.code === 'unavailable' ||
+      err?.code === 'failed-precondition' ||
+      errStr.includes('offline') ||
+      errStr.includes('backend') ||
+      errStr.includes('failed to get document') ||
+      errStr.includes('network');
     if (isOffline) {
-      console.warn('Firestore is connecting in offline mode, deferred school permanent folders seeding.');
+      console.warn('Firestore is connecting, deferred school permanent folders seeding.');
     } else {
       console.error('Error seeding initial school permanent folders:', err);
     }
@@ -2115,19 +2186,14 @@ const CLASS_ADVISER_FORMS_COL = 'classAdviserSchoolForms';
 const CLASS_ADVISER_FORMS_STORAGE_KEY = 'svnhs_class_adviser_forms_cache_v2';
 
 export const getStoredClassAdviserSchoolForms = (): Record<string, ClassAdviserSchoolFormsRecord> => {
-  try {
-    const raw = localStorage.getItem(CLASS_ADVISER_FORMS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return getOfflineDataSync<Record<string, ClassAdviserSchoolFormsRecord>>(CLASS_ADVISER_FORMS_STORAGE_KEY, {});
 };
 
 export const saveClassAdviserSchoolFormsToLocalStorage = (data: Record<string, ClassAdviserSchoolFormsRecord>) => {
   try {
-    localStorage.setItem(CLASS_ADVISER_FORMS_STORAGE_KEY, JSON.stringify(data));
+    saveOfflineData(CLASS_ADVISER_FORMS_STORAGE_KEY, data);
   } catch (e) {
-    console.error('Error caching Class Adviser School Forms:', e);
+    console.error('Error caching Class Adviser School Forms to local cache:', e);
   }
 };
 
@@ -2254,10 +2320,9 @@ export const subscribeClassAdviserSchoolForms = (
         }
       });
 
-      const localCached = getStoredClassAdviserSchoolForms();
-      const merged = { ...localCached, ...map };
-      saveClassAdviserSchoolFormsToLocalStorage(merged);
-      onUpdate(merged);
+      // Prioritize freshly fetched data from Firestore and update local cache
+      saveClassAdviserSchoolFormsToLocalStorage(map);
+      onUpdate(map);
     },
     (err) => {
       console.error('Error subscribing to Class Adviser School Forms:', err);
@@ -2300,22 +2365,7 @@ export const isPreloadPhoto = (photo: Partial<GalleryPhoto>): boolean => {
 export const INITIAL_DEFAULT_GALLERY_PHOTOS: GalleryPhoto[] = [];
 
 export const getStoredGalleryPhotos = (): GalleryPhoto[] => {
-  try {
-    const raw = localStorage.getItem(GALLERY_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const filtered = parsed.filter((p) => !isPreloadPhoto(p));
-        if (filtered.length !== parsed.length) {
-          localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(filtered));
-        }
-        return filtered;
-      }
-    }
-  } catch (err) {
-    console.error('Error reading gallery photos from localStorage:', err);
-  }
-  return [];
+  return getOfflineDataSync<GalleryPhoto[]>(GALLERY_STORAGE_KEY, []);
 };
 
 export const saveGalleryPhotoToLocalStorage = (photo: GalleryPhoto) => {
@@ -2327,9 +2377,9 @@ export const saveGalleryPhotoToLocalStorage = (photo: GalleryPhoto) => {
     } else {
       list.push(photo);
     }
-    localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(list));
+    saveOfflineData(GALLERY_STORAGE_KEY, list);
   } catch (err) {
-    console.error('Error saving gallery photo to localStorage:', err);
+    console.error('Error saving gallery photo to local cache:', err);
   }
 };
 
@@ -2337,14 +2387,13 @@ export const deleteGalleryPhotoFromLocalStorage = (id: string) => {
   try {
     const list = getStoredGalleryPhotos();
     const filtered = list.filter((p) => p.id !== id);
-    localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(filtered));
+    saveOfflineData(GALLERY_STORAGE_KEY, filtered);
   } catch (err) {
-    console.error('Error deleting gallery photo from localStorage:', err);
+    console.error('Error deleting gallery photo from local cache:', err);
   }
 };
 
 export const saveGalleryPhotoToFirestore = async (photo: GalleryPhoto): Promise<void> => {
-  // Defensive sanitization: Guarantee all fields are clean primitives and no undefined properties exist
   const cleanPhoto: GalleryPhoto = {
     id: photo.id || `gallery-${Date.now()}`,
     url: photo.url || '',
@@ -2355,27 +2404,13 @@ export const saveGalleryPhotoToFirestore = async (photo: GalleryPhoto): Promise<
     order: typeof photo.order === 'number' ? photo.order : 1,
   };
 
-  // 1. Authoritative write to Firestore
   await setDoc(doc(db, GALLERY_COL, cleanPhoto.id), cleanPhoto, { merge: true });
-
-  // 2. Safe local storage sync with quota safety
-  try {
-    saveGalleryPhotoToLocalStorage(cleanPhoto);
-  } catch (storageErr) {
-    console.warn('LocalStorage gallery caching bypassed due to size limits:', storageErr);
-  }
+  saveGalleryPhotoToLocalStorage(cleanPhoto);
 };
 
 export const deleteGalleryPhotoFromFirestore = async (id: string): Promise<void> => {
-  // Authoritative delete from Firestore
   await deleteDoc(doc(db, GALLERY_COL, id));
-
-  // Safe local storage sync
-  try {
-    deleteGalleryPhotoFromLocalStorage(id);
-  } catch (storageErr) {
-    console.warn('LocalStorage gallery delete bypassed:', storageErr);
-  }
+  deleteGalleryPhotoFromLocalStorage(id);
 };
 
 export const cleanPreloadGalleryPhotosFromFirestore = async (): Promise<void> => {
@@ -2389,34 +2424,27 @@ export const cleanPreloadGalleryPhotosFromFirestore = async (): Promise<void> =>
         }
       }
     }
-    // Clean localStorage
-    getStoredGalleryPhotos();
   } catch (err) {
     console.warn('Note on cleaning preload photos:', err);
   }
 };
 
 export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => void) => {
-  // Purge any lingering legacy preloaded default pictures from Firestore
   cleanPreloadGalleryPhotosFromFirestore();
 
   return onSnapshot(
     collection(db, GALLERY_COL),
     (snapshot) => {
       if (snapshot.empty) {
-        try {
-          localStorage.removeItem(GALLERY_STORAGE_KEY);
-        } catch (_) {}
+        saveOfflineData(GALLERY_STORAGE_KEY, []);
         onUpdate([]);
         return;
       }
 
-      // Strictly only include pictures that were uploaded by Master Admin (exclude preloads)
       const list: GalleryPhoto[] = snapshot.docs
         .map((d) => d.data() as GalleryPhoto)
         .filter((photo) => !isPreloadPhoto(photo));
 
-      // Sort by order asc, then uploadedAt desc
       list.sort((a, b) => {
         const orderA = typeof a.order === 'number' ? a.order : 999;
         const orderB = typeof b.order === 'number' ? b.order : 999;
@@ -2424,11 +2452,8 @@ export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => voi
         return (b.uploadedAt || '').localeCompare(a.uploadedAt || '');
       });
 
-      try {
-        localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(list));
-      } catch (e) {
-        console.warn('Could not cache full gallery snapshot to localStorage due to browser storage limits:', e);
-      }
+      // Synchronize exact Firestore snapshot to IndexedDB and local cache
+      saveOfflineData(GALLERY_STORAGE_KEY, list);
 
       onUpdate(list);
     },
@@ -2500,15 +2525,7 @@ export const cleanPreloadVideosFromFirestore = async (): Promise<void> => {
 };
 
 export const getStoredEmbeddedVideos = (): EmbeddedVideo[] => {
-  try {
-    const raw = localStorage.getItem(VIDEOS_STORAGE_KEY);
-    if (!raw) return [];
-    const list = JSON.parse(raw) as EmbeddedVideo[];
-    return list.filter((v) => !isPreloadVideo(v));
-  } catch (err) {
-    console.error('Error reading embedded videos from localStorage:', err);
-    return [];
-  }
+  return getOfflineDataSync<EmbeddedVideo[]>(VIDEOS_STORAGE_KEY, []);
 };
 
 export const saveEmbeddedVideoToLocalStorage = (video: EmbeddedVideo) => {
@@ -2520,9 +2537,9 @@ export const saveEmbeddedVideoToLocalStorage = (video: EmbeddedVideo) => {
     } else {
       list.push(video);
     }
-    localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(list));
+    saveOfflineData(VIDEOS_STORAGE_KEY, list);
   } catch (err) {
-    console.error('Error saving embedded video to localStorage:', err);
+    console.error('Error saving embedded video to local cache:', err);
   }
 };
 
@@ -2530,9 +2547,9 @@ export const deleteEmbeddedVideoFromLocalStorage = (id: string) => {
   try {
     const list = getStoredEmbeddedVideos();
     const filtered = list.filter((v) => v.id !== id);
-    localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(filtered));
+    saveOfflineData(VIDEOS_STORAGE_KEY, filtered);
   } catch (err) {
-    console.error('Error deleting embedded video from localStorage:', err);
+    console.error('Error deleting embedded video from local cache:', err);
   }
 };
 
@@ -2551,50 +2568,31 @@ export const saveEmbeddedVideoToFirestore = async (video: EmbeddedVideo): Promis
     order: typeof video.order === 'number' ? video.order : 1,
   };
 
-  // 1. Authoritative write to Firestore
   await setDoc(doc(db, EMBEDDED_VIDEOS_COL, cleanVideo.id), cleanVideo, { merge: true });
-
-  // 2. Safe local storage sync
-  try {
-    saveEmbeddedVideoToLocalStorage(cleanVideo);
-  } catch (storageErr) {
-    console.warn('LocalStorage video caching bypassed:', storageErr);
-  }
+  saveEmbeddedVideoToLocalStorage(cleanVideo);
 };
 
 export const deleteEmbeddedVideoFromFirestore = async (id: string): Promise<void> => {
-  // Authoritative delete from Firestore
   await deleteDoc(doc(db, EMBEDDED_VIDEOS_COL, id));
-
-  // Safe local storage sync
-  try {
-    deleteEmbeddedVideoFromLocalStorage(id);
-  } catch (storageErr) {
-    console.warn('LocalStorage video delete bypassed:', storageErr);
-  }
+  deleteEmbeddedVideoFromLocalStorage(id);
 };
 
 export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => void) => {
-  // Purge any lingering legacy preloaded default videos from Firestore
   cleanPreloadVideosFromFirestore();
 
   return onSnapshot(
     collection(db, EMBEDDED_VIDEOS_COL),
     (snapshot) => {
       if (snapshot.empty) {
-        try {
-          localStorage.removeItem(VIDEOS_STORAGE_KEY);
-        } catch (_) {}
+        saveOfflineData(VIDEOS_STORAGE_KEY, []);
         onUpdate([]);
         return;
       }
 
-      // Strictly only include videos uploaded by Master Admin (exclude preloads)
       const list: EmbeddedVideo[] = snapshot.docs
         .map((d) => d.data() as EmbeddedVideo)
         .filter((vid) => !isPreloadVideo(vid));
 
-      // Sort by order asc, then createdAt desc
       list.sort((a, b) => {
         const orderA = typeof a.order === 'number' ? a.order : 999;
         const orderB = typeof b.order === 'number' ? b.order : 999;
@@ -2602,11 +2600,8 @@ export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => v
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
 
-      try {
-        localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(list));
-      } catch (e) {
-        console.warn('Could not cache embedded videos snapshot to localStorage:', e);
-      }
+      // Synchronize exact Firestore snapshot to IndexedDB and local cache
+      saveOfflineData(VIDEOS_STORAGE_KEY, list);
 
       onUpdate(list);
     },

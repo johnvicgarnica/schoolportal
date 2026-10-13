@@ -19,6 +19,7 @@ interface ScrollableVideoSectionProps {
   videos: EmbeddedVideo[];
   className?: string;
   onHeightChange?: (height: number) => void;
+  isLoading?: boolean;
 }
 
 /**
@@ -36,6 +37,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
   videos,
   className = '',
   onHeightChange,
+  isLoading = false,
 }) => {
   const sectionRef = useRef<HTMLElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -221,7 +223,12 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
       </div>
 
       {/* Main Content Area */}
-      {hasVideos ? (
+      {isLoading ? (
+        <div className="py-8 px-4 border border-slate-200 rounded-2xl bg-slate-50/60 text-center space-y-3">
+          <div className="w-8 h-8 rounded-full border-2 border-emerald-500/30 border-t-emerald-600 animate-spin mx-auto" />
+          <p className="text-xs font-mono text-slate-500">Fetching live campus video broadcasts from database...</p>
+        </div>
+      ) : hasVideos ? (
         <div className="w-full flex flex-col items-center justify-center overflow-hidden pt-1.5">
           {/* Scrollable Container with Horizontal Snap & Touch Scroll */}
           <div

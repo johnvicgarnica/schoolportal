@@ -23,6 +23,7 @@ import {
   getStoredEmbeddedVideos,
   subscribeAnnouncements,
   getStoredAnnouncements,
+  verifyUserDirectlyFromFirestore,
 } from '../lib/firebase';
 import { AutoSwipingGallery } from './AutoSwipingGallery';
 import { ScrollableVideoSection } from './ScrollableVideoSection';
@@ -190,16 +191,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>(() => {
     return getStoredGalleryPhotos();
   });
+  const [isLoadingGallery, setIsLoadingGallery] = useState<boolean>(true);
 
   // Load embedded videos provided by Master Admin
   const [embeddedVideos, setEmbeddedVideos] = useState<EmbeddedVideo[]>(() => {
     return getStoredEmbeddedVideos();
   });
+  const [isLoadingVideos, setIsLoadingVideos] = useState<boolean>(true);
 
   // Load announcements
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
     return getStoredAnnouncements();
   });
+  const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState<boolean>(true);
 
   useEffect(() => {
     // Seed initial admin account and default collections into Firestore if needed
@@ -209,16 +213,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     // 1. Subscribe to Gallery Photos
     const unsubGallery = subscribeGalleryPhotos((photos) => {
       setGalleryPhotos(photos || []);
+      setIsLoadingGallery(false);
     });
 
     // 1b. Subscribe to Embedded Videos (Master Admin provided)
     const unsubVideos = subscribeEmbeddedVideos((videos) => {
       setEmbeddedVideos(videos || []);
+      setIsLoadingVideos(false);
     });
 
     // 1c. Subscribe to Announcements
     const unsubAnnouncements = subscribeAnnouncements((list) => {
       setAnnouncements(list || []);
+      setIsLoadingAnnouncements(false);
     });
 
     // 2. Subscribe to Faculty Directory
@@ -620,125 +627,37 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       }
     }
 
-    let role: 'Faculty' | 'Student' | 'Admin' = 'Faculty';
-    let name = 'Faculty Member';
-    let userDepartment = 'Senior High School Department';
-    let userDesignation: string | undefined = undefined;
-    let userAdvisoryRole: 'Class Adviser' | 'Non-Adviser' | undefined = undefined;
-
-    if (loginMode === 'admin') {
-      const cleanMasterEmail = masterAdminEmail.toLowerCase();
-      // Check for Master Admin
-      if (cleanEmail === cleanMasterEmail) {
-        if (cleanPassword !== masterAdminPassword) {
-          setErrorMsg('Invalid Admin Password. Access denied.');
-          return;
-        }
-        role = 'Admin';
-        name = 'John Vic Garnica (Admin)';
-        userDesignation = 'Web Developer';
-      } else {
-        // Check registered Admin Directory
-        const registeredAdmin = adminList.find(
-          (a) => a.email.toLowerCase() === cleanEmail
-        );
-
-        if (!registeredAdmin) {
-          // Check if pending in admin requests
-          const isPending = adminRequests.some((r) => r.email.toLowerCase() === cleanEmail);
-
-          if (isPending) {
-            setErrorMsg('Admin Application Pending Approval: Your request is currently pending review by the registered Admin.');
-          } else {
-            setErrorMsg('Account Not Registered as Admin: You are not a registered administrator. Click "Apply as Admin" below to submit a registration request.');
-          }
-          return;
-        }
-
-        // Validate Password
-        const requiredPass = adminPasswords[cleanEmail] || masterAdminPassword;
-
-        if (cleanPassword !== requiredPass) {
-          const pendingReset = passwordResetRequests.find(
-            (r) => r.email.toLowerCase() === cleanEmail && r.status === 'pending'
-          );
-          if (pendingReset) {
-            setErrorMsg(`Password Change Pending: A password reset request for "${cleanEmail}" is awaiting Master Admin acceptance. Once Master Admin accepts, your new password will be activated.`);
-            return;
-          }
-          setErrorMsg('Invalid Admin Password. Access denied.');
-          return;
-        }
-
-        role = 'Admin';
-        name = registeredAdmin.name;
-        if (cleanEmail.includes('norma') || cleanEmail.includes('jabagat')) {
-          userDesignation = registeredAdmin.designation || 'Master Teacher';
-        } else if (cleanEmail.includes('coordinator') || registeredAdmin.designation === 'Coordinator') {
-          userDesignation = 'Coordinator';
-        } else {
-          userDesignation = registeredAdmin.designation || 'School Administrator';
-        }
-      }
-    } else {
-      // 1. STRICT FACULTY CHECK: Read faculty directory from Firebase state
-      const registeredFaculty = facultyList.find(
-        (f) => f.email.toLowerCase() === cleanEmail
-      );
-
-      // Check if account is not registered in the faculty list
-      if (!registeredFaculty) {
-        // Check if there is a pending registration request
-        const isPending = facultyRequests.some((r) => r.email.toLowerCase() === cleanEmail);
-
-        if (isPending) {
-          setErrorMsg('Account Pending Admin Approval: Your registration request has been submitted to the Admin. Please wait for approval before logging in.');
-        } else {
-          setErrorMsg('Account Not Registered: Only registered faculty members can log in. Click "Create Faculty Account" below to submit a registration request.');
-        }
-        return;
-      }
-
-      // 2. Validate Password against Custom Passwords or Master Password
-      const requiredPassword = facultyPasswords[cleanEmail] || masterFacultyPassword;
-
-      if (cleanPassword !== requiredPassword) {
-        const pendingReset = passwordResetRequests.find(
-          (r) => r.email.toLowerCase() === cleanEmail && r.status === 'pending'
-        );
-        if (pendingReset) {
-          setErrorMsg(`Password Change Pending: A password reset request for "${cleanEmail}" is awaiting Master Admin acceptance. Once Master Admin accepts, your new password will be activated.`);
-          return;
-        }
-        setErrorMsg('Invalid Faculty Password. Please re-enter or click "Forgot password?" to reset your password.');
-        return;
-      }
-
-      name = registeredFaculty.name;
-      userDepartment = registeredFaculty.department || 'Senior High School Department';
-      userAdvisoryRole = registeredFaculty.advisoryRole || 'Non-Adviser';
-    }
-
     setIsLoading(true);
 
-    setTimeout(() => {
-      const user: UserProfile = {
-        id: `usr-${Date.now()}`,
-        name: name,
-        email: cleanEmail,
-        role: role,
-        department: userDepartment,
-        designation: userDesignation,
-        advisoryRole: userAdvisoryRole,
-      };
+    verifyUserDirectlyFromFirestore(
+      cleanEmail,
+      cleanPassword,
+      loginMode === 'admin' ? 'Admin' : 'Faculty'
+    )
+      .then((res) => {
+        setIsLoading(false);
+        if (!res.success || !res.user) {
+          setErrorMsg(res.error || 'Authentication failed. Please check your credentials.');
+          return;
+        }
 
-      if (rememberMe) {
-        localStorage.setItem('svnhs_user_session', JSON.stringify(user));
-      }
+        // Immediately clear password input state to protect sensitive credentials
+        setPassword('');
 
-      setIsLoading(false);
-      onLogin(user);
-    }, 850);
+        // Never store email or password locally
+        try {
+          localStorage.removeItem('svnhs_user_session');
+          localStorage.removeItem('svnhs_cached_password');
+          localStorage.removeItem('svnhs_cached_email');
+        } catch (_) {}
+
+        onLogin(res.user);
+      })
+      .catch((err) => {
+        setIsLoading(false);
+        setErrorMsg('Database error during sign in. Please verify your connection.');
+        console.error('Sign-in error:', err);
+      });
   };
 
   // Submit Self Registration Request
@@ -991,9 +910,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       <div className="absolute bottom-10 right-10 w-[450px] h-[450px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
 
       {/* TOP SECTION: Auto-Swiping Gallery of Pictures (Only pictures uploaded by Master Admin) */}
-      {galleryPhotos && galleryPhotos.length > 0 && (
+      {(isLoadingGallery || (galleryPhotos && galleryPhotos.length > 0)) && (
         <div className="w-full max-w-6xl relative z-10 mb-6 sm:mb-8 animate-fadeIn">
-          <AutoSwipingGallery photos={galleryPhotos} />
+          <AutoSwipingGallery photos={galleryPhotos} isLoading={isLoadingGallery} />
         </div>
       )}
 
@@ -1095,6 +1014,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           {/* NEW SECTION BELOW THE SELECTED COMPONENT: Scrollable Embedded Videos */}
           <ScrollableVideoSection
             videos={embeddedVideos}
+            isLoading={isLoadingVideos}
             onHeightChange={handleVideoSectionHeightChange}
             className="shrink-0"
           />
@@ -1477,6 +1397,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         {/* Scrollable Announcement Viewer below the Login Portal Card (Same Size as Scrollable Video Section) */}
         <ScrollableAnnouncementSection
           announcements={announcements}
+          isLoading={isLoadingAnnouncements}
           targetHeight={videoSectionHeight}
           className="shrink-0"
         />

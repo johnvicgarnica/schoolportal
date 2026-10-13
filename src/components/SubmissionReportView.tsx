@@ -464,11 +464,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     setSubmissions(cachedSub || {});
     setItemStatuses(cachedStat || {});
     setItemComments(cachedComm || {});
+    setIsLoading(true);
 
     const unsub = subscribeFacultySubmissions(effectiveTermId, cat, (subs, stats, comms) => {
       setSubmissions(subs || {});
       if (stats) setItemStatuses(stats);
       if (comms) setItemComments(comms);
+      setIsLoading(false);
     });
 
     return () => unsub();
@@ -3760,7 +3762,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 )}
               </thead>
               <tbody className="divide-y divide-[#24334b] text-xs font-mono">
-                {filteredFaculty.length === 0 ? (
+                {isLoading ? (
+                  <tr>
+                    <td colSpan={4 + totalItemCount} className="py-16 text-center text-slate-300 bg-[#141c2c]">
+                      <div className="w-9 h-9 rounded-full border-2 border-emerald-500/30 border-t-emerald-400 animate-spin mx-auto mb-3" />
+                      <div className="font-bold text-sm text-slate-200">Retrieving live submission records...</div>
+                      <div className="text-xs text-slate-400 mt-1">
+                        Fetching latest status and comments from database...
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredFaculty.length === 0 ? (
                   <tr>
                     <td colSpan={4 + totalItemCount} className="py-12 text-center text-slate-400 bg-[#141c2c]">
                       <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />

@@ -63,70 +63,33 @@ import {
 } from './lib/firebase';
 
 export function App() {
-  // Authentication State
+  // Authentication State - emails and passwords are never saved locally
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('svnhs_user_session');
-    if (saved) {
-      try {
+    try {
+      localStorage.removeItem('svnhs_user_session');
+      const saved = sessionStorage.getItem('svnhs_active_session');
+      if (saved) {
         const user = JSON.parse(saved);
-        if (user && user.email) {
-          const emailLower = (user.email || '').toLowerCase().trim();
-          const nameLower = (user.name || '').toLowerCase().trim();
-          if (
-            emailLower === 'coordinator@deped.gov.ph' ||
-            emailLower === 'marivic.villaluz@deped.gov.ph' ||
-            nameLower.includes('shs department coordinator') ||
-            (nameLower.includes('marivic') && nameLower.includes('villaluz'))
-          ) {
-            localStorage.removeItem('svnhs_user_session');
-            return null;
-          }
+        if (user && user.role) {
+          return user;
         }
-        if (user && user.role === 'Faculty' && user.email) {
-          if (user.email.includes('@deped.gov.ph')) {
-            user.name = user.email.split('@deped.gov.ph')[0];
-          } else if (user.email.includes('@')) {
-            user.name = user.email.split('@')[0];
-          }
-          if (!user.advisoryRole) {
-            const stored = getStoredFaculty();
-            const cleanEmail = (user.email || '').toLowerCase().trim();
-            const matched = stored.find((f) => (f.email || '').toLowerCase().trim() === cleanEmail);
-            if (matched && matched.advisoryRole) {
-              user.advisoryRole = matched.advisoryRole;
-            }
-          }
-        }
-        if (user && user.role === 'Admin') {
-          const emailLower = (user.email || '').toLowerCase();
-          if (emailLower.includes('johnvic') || emailLower === 'garjohn@deped.gov.ph' || emailLower === 'johnvicgarnica1@gmail.com') {
-            user.designation = 'Web Developer';
-          } else if (emailLower.includes('norma') || emailLower.includes('jabagat')) {
-            user.designation = 'Master Teacher';
-          } else if (emailLower.includes('coordinator')) {
-            user.designation = user.designation || 'Coordinator';
-          }
-        }
-        return user;
-      } catch {
-        return null;
       }
-    }
+    } catch (_) {}
     return null;
   });
 
   const [activeTab, setActiveTab] = useState<'files' | 'my-workspace' | 'announcements' | 'admin' | 'submission-report' | 'copilot'>(() => {
-    const saved = localStorage.getItem('svnhs_user_session');
-    if (saved) {
-      try {
+    try {
+      const saved = sessionStorage.getItem('svnhs_active_session');
+      if (saved) {
         const u = JSON.parse(saved);
         if (u && (u.designation === 'Coordinator' || u.designation?.toLowerCase().includes('coordinator'))) {
           return 'announcements';
         }
         if (u && u.role === 'Faculty') return 'my-workspace';
         if (u && u.role === 'Admin') return 'admin';
-      } catch {}
-    }
+      }
+    } catch (_) {}
     return 'announcements';
   });
   const [isAdminDemoMode, setIsAdminDemoMode] = useState<boolean>(false);
@@ -385,7 +348,10 @@ export function App() {
   const handleLogout = () => {
     setIsLoggingOut(true);
     setTimeout(() => {
-      localStorage.removeItem('svnhs_user_session');
+      try {
+        localStorage.removeItem('svnhs_user_session');
+        sessionStorage.removeItem('svnhs_active_session');
+      } catch (_) {}
       setCurrentUser(null);
       setIsLoggingOut(false);
     }, 850);
@@ -579,7 +545,9 @@ export function App() {
             advisoryRole: matched.advisoryRole,
           };
           setCurrentUser(updated);
-          localStorage.setItem('svnhs_user_session', JSON.stringify(updated));
+          try {
+            sessionStorage.setItem('svnhs_active_session', JSON.stringify(updated));
+          } catch (_) {}
         }
       }
     });
@@ -595,7 +563,7 @@ export function App() {
     };
 
     const handleOnline = () => {
-      // When internet is detected, auto reload the page
+      // When internet is detected, auto reload the page to sync fresh data
       window.location.reload();
     };
 
@@ -610,6 +578,9 @@ export function App() {
 
   const handleLogin = (user: UserProfile) => {
     setCurrentUser(user);
+    try {
+      sessionStorage.setItem('svnhs_active_session', JSON.stringify(user));
+    } catch (_) {}
     const isCoord =
       user.designation === 'Coordinator' ||
       (user.designation?.toLowerCase().includes('coordinator') ?? false) ||

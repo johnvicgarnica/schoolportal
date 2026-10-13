@@ -15,12 +15,14 @@ interface AutoSwipingGalleryProps {
   photos: GalleryPhoto[];
   autoPlayInterval?: number; // ms, default 4500
   className?: string;
+  isLoading?: boolean;
 }
 
 export const AutoSwipingGallery: React.FC<AutoSwipingGalleryProps> = ({
   photos,
   autoPlayInterval = 4500,
   className = '',
+  isLoading = false,
 }) => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isPaused, setIsPaused] = useState<boolean>(false);
@@ -96,6 +98,17 @@ export const AutoSwipingGallery: React.FC<AutoSwipingGalleryProps> = ({
     touchStartXRef.current = null;
     touchEndXRef.current = null;
   };
+
+  if (isLoading) {
+    return (
+      <div className={`w-full bg-slate-900/60 border border-slate-700/60 rounded-3xl p-6 text-center text-slate-400 ${className}`}>
+        <div className="flex flex-col items-center justify-center space-y-2 py-4">
+          <div className="w-8 h-8 rounded-full border-2 border-emerald-500/30 border-t-emerald-400 animate-spin" />
+          <p className="font-mono text-xs text-slate-300">Fetching live campus photo gallery from database...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (validPhotos.length === 0) {
     return (
