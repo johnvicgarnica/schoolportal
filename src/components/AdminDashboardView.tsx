@@ -17,6 +17,7 @@ import { GoogleDriveWebview } from './GoogleDriveWebview';
 import { SubmissionReportView } from './SubmissionReportView';
 import { AdminGalleryManager } from './AdminGalleryManager';
 import { AdminVideoManager } from './AdminVideoManager';
+import { AdminOnlineUsersMonitor } from './AdminOnlineUsersMonitor';
 import {
   saveFacultyToFirestore,
   updateFacultyAdvisoryRoleInFirestore,
@@ -24,6 +25,7 @@ import {
   deleteFacultyFromFirestore,
   subscribeFaculty,
   FacultyDoc,
+  getStoredFaculty,
   saveAdminsToFirestore,
   deleteAdminFromFirestore,
   subscribeAdmins,
@@ -54,6 +56,14 @@ import {
   seedInitialGalleryPhotosIfEmpty,
   subscribeEmbeddedVideos,
   getStoredEmbeddedVideos,
+  UserPresence,
+  subscribeUserPresence,
+  isPresenceOnline,
+  setUserOffline,
+  getStoredAdmins,
+  getStoredFacultyRequests,
+  getStoredAdminRequests,
+  getStoredPasswordResetRequests,
 } from '../lib/firebase';
 import {
   Megaphone,
@@ -97,6 +107,8 @@ import {
   FileCheck2,
   Images,
   Video,
+  Activity,
+  Radio,
 } from 'lucide-react';
 
 interface AdminDashboardViewProps {
@@ -158,10 +170,24 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
-  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', 'submission-report', 'gallery', or 'videos')
+  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', 'submission-report', 'gallery', 'videos', or 'online-users')
   // Default to 'announcements' so passwords page is not exposed by default
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery' | 'videos'>('announcements');
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery' | 'videos' | 'online-users'>('announcements');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
+
+  // Real-time user presence & online logged-in users tracking (Master Admin)
+  const [presences, setPresences] = useState<UserPresence[]>([]);
+
+  useEffect(() => {
+    const unsubPresence = subscribeUserPresence((list) => {
+      setPresences(list || []);
+    });
+    return () => unsubPresence();
+  }, []);
+
+  const onlineUsersCount = useMemo(() => {
+    return presences.filter((p) => isPresenceOnline(p)).length;
+  }, [presences]);
 
   // Login Page Gallery Photos State (Master Admin)
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>(() => {
@@ -570,10 +596,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   // Restrict Accounts & Passwords tab strictly to Master Admin, and restrict Faculty Folders from Coordinator
   // Ensure non-coordinator admin does not have submission-report subtab in Admin Dashboard (redundant since there is outer Submission Report)
   useEffect(() => {
-    if (!isMasterAdmin && (adminSubTab === 'passwords' || adminSubTab === 'gallery' || adminSubTab === 'videos')) {
+    if (!isMasterAdmin && (adminSubTab === 'passwords' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'online-users')) {
       setAdminSubTab('announcements');
     }
-    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders' || adminSubTab === 'gallery' || adminSubTab === 'videos')) {
+    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'online-users')) {
       setAdminSubTab('announcements');
     }
     if (!isCoordinator && adminSubTab === 'submission-report') {
@@ -592,7 +618,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [customFacultyPasswords, setCustomFacultyPasswords] = useState<Record<string, string>>({});
 
   // Faculty Directory List
-  const [facultyList, setFacultyList] = useState<FacultyDoc[]>([]);
+  const [facultyList, setFacultyList] = useState<FacultyDoc[]>(() => getStoredFaculty());
   const [facultyRoleFilter, setFacultyRoleFilter] = useState<'all' | 'Class Adviser' | 'Non-Adviser'>('all');
   const [newFacultyAdvisoryRole, setNewFacultyAdvisoryRole] = useState<'Class Adviser' | 'Non-Adviser'>('Class Adviser');
 
@@ -607,7 +633,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       requestedAt: string;
       status: string;
     }>
-  >([]);
+  >(() => getStoredFacultyRequests() as any);
 
   // State to reveal requested password in Admin view
   const [revealedReqPasswords, setRevealedReqPasswords] = useState<Record<string, boolean>>({});
@@ -627,25 +653,30 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       requestedAt: string;
       status: string;
     }>
-  >([]);
+  >(() => getStoredAdminRequests() as any);
 
   // Registered Admin Directory List
   const [adminList, setAdminList] = useState<
     Array<{ id: string; name: string; email: string; designation: string }>
-  >([
-    {
-      id: 'admin-master',
-      name: 'John Vic Garnica (Admin)',
-      email: 'johnvic.garnica@deped.gov.ph',
-      designation: 'Web Developer',
-    },
-    {
-      id: 'admin-norma',
-      name: 'Norma Jabagat',
-      email: 'norma.jabagat@deped.gov.ph',
-      designation: 'Master Teacher',
-    },
-  ]);
+  >(() => {
+    const cached = getStoredAdmins();
+    return cached.length > 0
+      ? cached
+      : [
+          {
+            id: 'admin-master',
+            name: 'John Vic Garnica (Admin)',
+            email: 'johnvic.garnica@deped.gov.ph',
+            designation: 'Web Developer',
+          },
+          {
+            id: 'admin-norma',
+            name: 'Norma Jabagat',
+            email: 'norma.jabagat@deped.gov.ph',
+            designation: 'Master Teacher',
+          },
+        ];
+  });
 
   // Custom Admin Passwords Map
   const [adminPasswords, setAdminPasswords] = useState<Record<string, string>>({});
@@ -684,7 +715,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   };
 
   // Password Reset Requests (changepass) State for Master Admin
-  const [passwordResetRequests, setPasswordResetRequests] = useState<PasswordResetReqDoc[]>([]);
+  const [passwordResetRequests, setPasswordResetRequests] = useState<PasswordResetReqDoc[]>(() =>
+    getStoredPasswordResetRequests()
+  );
   const [revealedResetPasswords, setRevealedResetPasswords] = useState<Record<string, boolean>>({});
 
   const toggleRevealResetPassword = (id: string) => {
@@ -1369,14 +1402,27 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Master Admin Indicator Badge */}
-        <div className="flex items-center space-x-2 bg-[#0d1524] border border-[#24334b] px-3 py-2 rounded-xl text-xs font-mono">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-slate-400 font-bold">Logged in as:</span>
-          <span className="text-slate-100 font-bold truncate max-w-[180px]">{currentUser.name}</span>
-          <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] px-1.5 py-0.2 rounded font-extrabold uppercase ml-1">
-            {currentUser.designation || (isMasterAdmin ? 'Web Developer' : 'Admin')}
-          </span>
+        {/* Master Admin Indicator Badge & Quick Online Monitor Shortcut */}
+        <div className="flex items-center flex-wrap gap-2">
+          {isMasterAdmin && (
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('online-users')}
+              className="flex items-center space-x-2 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 px-3 py-2 rounded-xl text-xs font-mono transition-all cursor-pointer shadow-xs text-emerald-300 hover:text-emerald-100"
+              title="Click to view all active & online logged-in users"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              <span className="font-bold">{onlineUsersCount} Online Now</span>
+            </button>
+          )}
+          <div className="flex items-center space-x-2 bg-[#0d1524] border border-[#24334b] px-3 py-2 rounded-xl text-xs font-mono">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-slate-400 font-bold">Logged in as:</span>
+            <span className="text-slate-100 font-bold truncate max-w-[180px]">{currentUser.name}</span>
+            <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] px-1.5 py-0.2 rounded font-extrabold uppercase ml-1">
+              {currentUser.designation || (isMasterAdmin ? 'Web Developer' : 'Admin')}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1405,6 +1451,29 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   Master
                 </span>
               )}
+            </button>
+          )}
+
+          {/* Master Admin Live Online Users Tab: STRICTLY VISIBLE ONLY TO MASTER ADMIN */}
+          {isMasterAdmin && !isCoordinator && (
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('online-users')}
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
+                adminSubTab === 'online-users'
+                  ? 'bg-teal-700 text-white shadow-md ring-2 ring-teal-400/60 border border-teal-500'
+                  : 'bg-teal-600/90 hover:bg-teal-600 text-white border border-teal-500/60 hover:shadow-xs'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5 text-teal-200 shrink-0" />
+              <span>Online Users</span>
+              <span className="bg-emerald-950/70 text-emerald-300 border border-emerald-400/40 text-[9px] px-1.5 py-0.2 rounded-full font-bold ml-0.5 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                {onlineUsersCount}
+              </span>
+              <span className="bg-teal-950/60 text-teal-300 border border-teal-500/30 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5 hidden xl:inline">
+                Live
+              </span>
             </button>
           )}
 
@@ -4027,6 +4096,21 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             currentUser={currentUser}
             videos={embeddedVideos}
             onSwitchToGallery={() => setAdminSubTab('gallery')}
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB 8: MASTER ADMIN LIVE ONLINE & ACTIVE USERS MONITOR */}
+      {adminSubTab === 'online-users' && isMasterAdmin && (
+        <div className="space-y-6 animate-fadeIn">
+          <AdminOnlineUsersMonitor
+            currentUser={currentUser}
+            presences={presences}
+            facultyList={facultyList}
+            adminList={adminList}
+            onForceLogoutUser={async (targetEmail) => {
+              await setUserOffline(targetEmail);
+            }}
           />
         </div>
       )}

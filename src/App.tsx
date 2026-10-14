@@ -60,6 +60,8 @@ import {
   deleteSchoolPermanentFolderFromFirestore,
   getStoredFaculty,
   subscribeFaculty,
+  updateUserPresence,
+  setUserOffline,
 } from './lib/firebase';
 
 export function App() {
@@ -347,6 +349,9 @@ export function App() {
 
   const handleLogout = () => {
     setIsLoggingOut(true);
+    if (currentUser?.email) {
+      setUserOffline(currentUser.email).catch(() => {});
+    }
     setTimeout(() => {
       try {
         localStorage.removeItem('svnhs_user_session');
@@ -576,11 +581,50 @@ export function App() {
     };
   }, []);
 
+  // Real-time user presence heartbeat & online session tracking
+  useEffect(() => {
+    if (!currentUser || !currentUser.email) return;
+
+    // Immediately post active status
+    updateUserPresence(currentUser, 'online', activeTab).catch(() => {});
+
+    // Periodic heartbeat every 25 seconds
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        updateUserPresence(currentUser, 'online', activeTab).catch(() => {});
+      } else {
+        updateUserPresence(currentUser, 'idle', activeTab).catch(() => {});
+      }
+    }, 25000);
+
+    const handleFocus = () => {
+      updateUserPresence(currentUser, 'online', activeTab).catch(() => {});
+    };
+
+    const handleBeforeUnload = () => {
+      if (currentUser?.email) {
+        setUserOffline(currentUser.email).catch(() => {});
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
+    };
+  }, [currentUser, activeTab]);
+
   const handleLogin = (user: UserProfile) => {
     setCurrentUser(user);
     try {
       sessionStorage.setItem('svnhs_active_session', JSON.stringify(user));
     } catch (_) {}
+    updateUserPresence(user, 'online', 'announcements').catch(() => {});
     const isCoord =
       user.designation === 'Coordinator' ||
       (user.designation?.toLowerCase().includes('coordinator') ?? false) ||

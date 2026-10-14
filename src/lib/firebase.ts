@@ -266,6 +266,12 @@ export const deleteAdminFromFirestore = async (email: string) => {
   }
 };
 
+export const ADMINS_STORAGE_KEY = 'svnhs_admins_cache_v1';
+
+export const getStoredAdmins = (): AdminDoc[] => {
+  return getOfflineDataSync<AdminDoc[]>(ADMINS_STORAGE_KEY, []);
+};
+
 export const subscribeAdmins = (onUpdate: (adminList: AdminDoc[]) => void) => {
   return onSnapshot(collection(db, ADMINS_COL), (snapshot) => {
     let list: AdminDoc[] = snapshot.docs.map((d) => d.data() as AdminDoc);
@@ -313,13 +319,24 @@ export const subscribeAdmins = (onUpdate: (adminList: AdminDoc[]) => void) => {
       });
     }
 
+    saveOfflineData(ADMINS_STORAGE_KEY, list);
     onUpdate(list);
   }, (err) => {
     console.error('Error subscribing to admins collection:', err);
+    const cached = getStoredAdmins();
+    if (cached && cached.length > 0) {
+      onUpdate(cached);
+    }
   });
 };
 
 // 3. FACULTY REGISTRATION REQUESTS
+export const FACULTY_REQ_STORAGE_KEY = 'svnhs_faculty_requests_cache_v1';
+
+export const getStoredFacultyRequests = (): RegistrationReqDoc[] => {
+  return getOfflineDataSync<RegistrationReqDoc[]>(FACULTY_REQ_STORAGE_KEY, []);
+};
+
 export const saveFacultyRequestsToFirestore = async (requests: RegistrationReqDoc[]) => {
   try {
     for (const req of requests) {
@@ -344,13 +361,21 @@ export const deleteFacultyRequestFromFirestore = async (requestId: string) => {
 export const subscribeFacultyRequests = (onUpdate: (requests: RegistrationReqDoc[]) => void) => {
   return onSnapshot(collection(db, FACULTY_REQ_COL), (snapshot) => {
     const list: RegistrationReqDoc[] = snapshot.docs.map((d) => d.data() as RegistrationReqDoc);
+    saveOfflineData(FACULTY_REQ_STORAGE_KEY, list);
     onUpdate(list);
   }, (err) => {
     console.error('Error subscribing to faculty requests collection:', err);
+    onUpdate(getStoredFacultyRequests());
   });
 };
 
 // 4. ADMIN REGISTRATION REQUESTS
+export const ADMIN_REQ_STORAGE_KEY = 'svnhs_admin_requests_cache_v1';
+
+export const getStoredAdminRequests = (): RegistrationReqDoc[] => {
+  return getOfflineDataSync<RegistrationReqDoc[]>(ADMIN_REQ_STORAGE_KEY, []);
+};
+
 export const saveAdminRequestsToFirestore = async (requests: RegistrationReqDoc[]) => {
   try {
     for (const req of requests) {
@@ -375,13 +400,21 @@ export const deleteAdminRequestFromFirestore = async (requestId: string) => {
 export const subscribeAdminRequests = (onUpdate: (requests: RegistrationReqDoc[]) => void) => {
   return onSnapshot(collection(db, ADMIN_REQ_COL), (snapshot) => {
     const list: RegistrationReqDoc[] = snapshot.docs.map((d) => d.data() as RegistrationReqDoc);
+    saveOfflineData(ADMIN_REQ_STORAGE_KEY, list);
     onUpdate(list);
   }, (err) => {
     console.error('Error subscribing to admin requests collection:', err);
+    onUpdate(getStoredAdminRequests());
   });
 };
 
 // 4.5. PASSWORD RESET REQUESTS (WITH TEMPORARY KEY changepass)
+export const PASSWORD_RESET_REQ_STORAGE_KEY = 'svnhs_password_reset_reqs_cache_v1';
+
+export const getStoredPasswordResetRequests = (): PasswordResetReqDoc[] => {
+  return getOfflineDataSync<PasswordResetReqDoc[]>(PASSWORD_RESET_REQ_STORAGE_KEY, []);
+};
+
 export const savePasswordResetRequestToFirestore = async (request: PasswordResetReqDoc) => {
   try {
     await setDoc(doc(db, PASSWORD_RESET_REQ_COL, request.id), {
@@ -420,9 +453,11 @@ export const updatePasswordResetRequestStatus = async (
 export const subscribePasswordResetRequests = (onUpdate: (requests: PasswordResetReqDoc[]) => void) => {
   return onSnapshot(collection(db, PASSWORD_RESET_REQ_COL), (snapshot) => {
     const list: PasswordResetReqDoc[] = snapshot.docs.map((d) => d.data() as PasswordResetReqDoc);
+    saveOfflineData(PASSWORD_RESET_REQ_STORAGE_KEY, list);
     onUpdate(list);
   }, (err) => {
     console.error('Error subscribing to password reset requests collection:', err);
+    onUpdate(getStoredPasswordResetRequests());
   });
 };
 
@@ -2616,6 +2651,129 @@ export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => v
 export const seedInitialEmbeddedVideosIfEmpty = async (): Promise<void> => {
   // Preload videos are permanently removed; purge any legacy preloads from Firestore & cache
   await cleanPreloadVideosFromFirestore();
+};
+
+// ==========================================
+// 17. USER PRESENCE & LIVE SESSION TRACKING
+// ==========================================
+const USER_PRESENCE_COL = 'userPresence';
+
+export interface UserPresence {
+  id: string; // docId: emailToDocId(email)
+  userId: string;
+  name: string;
+  email: string;
+  role: 'Faculty' | 'Admin';
+  department: string;
+  designation?: string;
+  advisoryRole?: 'Class Adviser' | 'Non-Adviser';
+  status: 'online' | 'idle' | 'offline';
+  lastSeen: string; // ISO timestamp
+  loginTime: string; // ISO timestamp
+  currentTab?: string;
+  deviceInfo?: string;
+}
+
+/**
+ * Record or heartbeat a user's live presence in Firestore.
+ */
+export const updateUserPresence = async (
+  user: UserProfile,
+  status: 'online' | 'idle' | 'offline' = 'online',
+  currentTab?: string
+): Promise<void> => {
+  if (!user || !user.email) return;
+  const cleanEmail = user.email.toLowerCase().trim();
+  const docId = emailToDocId(cleanEmail);
+
+  try {
+    const presenceDocRef = doc(db, USER_PRESENCE_COL, docId);
+    const now = new Date().toISOString();
+
+    const payload: Partial<UserPresence> = {
+      id: docId,
+      userId: user.id || `usr-${cleanEmail}`,
+      name: user.name || 'User',
+      email: cleanEmail,
+      role: user.role,
+      department: user.department || 'Senior High School Department',
+      status: status,
+      lastSeen: now,
+    };
+
+    if (user.designation) payload.designation = user.designation;
+    if (user.advisoryRole) payload.advisoryRole = user.advisoryRole;
+    if (currentTab) payload.currentTab = currentTab;
+    if (typeof navigator !== 'undefined') {
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+      payload.deviceInfo = isMobile ? 'Mobile Device' : 'Desktop / Laptop';
+    }
+
+    // Preserve original loginTime if document already exists
+    const existingSnap = await getDoc(presenceDocRef);
+    if (!existingSnap.exists() || !existingSnap.data()?.loginTime) {
+      payload.loginTime = now;
+    }
+
+    await setDoc(presenceDocRef, payload, { merge: true });
+  } catch (err) {
+    console.warn('Error updating user presence in Firestore:', err);
+  }
+};
+
+/**
+ * Set user offline upon logout or window dismissal.
+ */
+export const setUserOffline = async (email: string): Promise<void> => {
+  if (!email) return;
+  const cleanEmail = email.toLowerCase().trim();
+  const docId = emailToDocId(cleanEmail);
+
+  try {
+    const presenceDocRef = doc(db, USER_PRESENCE_COL, docId);
+    await updateDoc(presenceDocRef, {
+      status: 'offline',
+      lastSeen: new Date().toISOString(),
+    });
+  } catch (_) {
+    try {
+      const presenceDocRef = doc(db, USER_PRESENCE_COL, docId);
+      await setDoc(presenceDocRef, {
+        status: 'offline',
+        lastSeen: new Date().toISOString(),
+      }, { merge: true });
+    } catch (_) {}
+  }
+};
+
+/**
+ * Subscribe to all user presence records in real-time.
+ */
+export const subscribeUserPresence = (onUpdate: (presences: UserPresence[]) => void): (() => void) => {
+  return onSnapshot(
+    collection(db, USER_PRESENCE_COL),
+    (snapshot) => {
+      const list: UserPresence[] = snapshot.docs.map((d) => d.data() as UserPresence);
+      // Sort by lastSeen descending
+      list.sort((a, b) => (b.lastSeen || '').localeCompare(a.lastSeen || ''));
+      onUpdate(list);
+    },
+    (err) => {
+      console.warn('Error subscribing to user presence:', err);
+      onUpdate([]);
+    }
+  );
+};
+
+/**
+ * Helper to determine if a presence entry is currently active/online.
+ * Default threshold: 2 minutes (120,000ms).
+ */
+export const isPresenceOnline = (p: UserPresence, thresholdMs: number = 120000): boolean => {
+  if (!p || p.status === 'offline') return false;
+  if (!p.lastSeen) return false;
+  const diff = Date.now() - new Date(p.lastSeen).getTime();
+  return diff < thresholdMs;
 };
 
 
