@@ -5,10 +5,11 @@ import {
   UserProfile,
 } from '../types';
 import { extractFacultySurname } from '../lib/firebase';
-import { GoogleDriveWebview } from './GoogleDriveWebview';
+import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
 import {
   Folder,
   FolderOpen,
+  FolderPlus,
   Search,
   ExternalLink,
   Check,
@@ -23,7 +24,10 @@ import {
   Building,
   Trash2,
   X,
-  LayoutGrid,
+  Eye,
+  Download,
+  Clock,
+  Plus,
 } from 'lucide-react';
 
 interface AdminFacultyFoldersDirectoryProps {
@@ -31,34 +35,58 @@ interface AdminFacultyFoldersDirectoryProps {
   facultyFolders: FacultyFolder[];
   facultyFiles: FacultyPersonalFile[];
   currentUser: UserProfile;
+  onAddFacultyFolder?: (folder: Omit<FacultyFolder, 'id' | 'createdAt' | 'updatedAt' | 'itemCount'>) => void;
   onDeleteFacultyFolder?: (id: string) => void;
   onDeleteFacultyFile?: (id: string) => void;
 }
+
+const CATEGORY_OPTIONS = [
+  'Daily Lesson Log (DLL)',
+  'Table of Specifications (TOS)',
+  'Test Questions & Answer Keys',
+  'Budget of Work (BOW)',
+  'Learning Activity Sheets (LAS)',
+  'Instructional Media & PPT',
+  'Class Records & Grades',
+  'DepEd Forms & Portfolio',
+  'General Subject Materials',
+];
+
+const COLOR_THEMES = [
+  { name: 'Emerald', bg: 'bg-emerald-500/20', border: 'border-emerald-500/30', text: 'text-emerald-300' },
+  { name: 'Blue', bg: 'bg-blue-500/20', border: 'border-blue-500/30', text: 'text-blue-300' },
+  { name: 'Indigo', bg: 'bg-indigo-500/20', border: 'border-indigo-500/30', text: 'text-indigo-300' },
+  { name: 'Purple', bg: 'bg-purple-500/20', border: 'border-purple-500/30', text: 'text-purple-300' },
+  { name: 'Amber', bg: 'bg-amber-500/20', border: 'border-amber-500/30', text: 'text-amber-300' },
+  { name: 'Rose', bg: 'bg-rose-500/20', border: 'border-rose-500/30', text: 'text-rose-300' },
+];
 
 export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectoryProps> = ({
   facultyList,
   facultyFolders,
   facultyFiles,
   currentUser,
+  onAddFacultyFolder,
   onDeleteFacultyFolder,
+  onDeleteFacultyFile,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'has_folders' | 'empty'>('all');
   const [selectedFacultyEmail, setSelectedFacultyEmail] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  const [showFolderDriveEmbed, setShowFolderDriveEmbed] = useState<boolean>(true);
-  const [previewWebviewModal, setPreviewWebviewModal] = useState<{
-    isOpen: boolean;
-    url: string;
-    title: string;
-    subtitle?: string;
-  }>({
-    isOpen: false,
-    url: '',
-    title: '',
-    subtitle: '',
-  });
+  const [selectedPreviewFile, setSelectedPreviewFile] = useState<FacultyPersonalFile | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // In-app confirmation modal states (no window.confirm)
+  const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [fileToDelete, setFileToDelete] = useState<{ id: string; title: string; fileName: string } | null>(null);
+
+  // Admin Create Folder Modal state
+  const [isAddFolderModalOpen, setIsAddFolderModalOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderCategory, setNewFolderCategory] = useState(CATEGORY_OPTIONS[0]);
+  const [newFolderColor, setNewFolderColor] = useState('Blue');
+  const [newFolderDescription, setNewFolderDescription] = useState('');
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -150,78 +178,129 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
 
       return matchesSearch && matchesStatus;
     });
-  }, [allFacultyAccounts, searchTerm, statusFilter, facultyDataMap]);
+  }, [allFacultyAccounts, facultyDataMap, searchTerm, statusFilter]);
 
-  // Currently Selected Faculty Details
+  // Active faculty being inspected
   const activeFaculty = useMemo(() => {
     if (!selectedFacultyEmail) return null;
     return allFacultyAccounts.find((f) => f.email === selectedFacultyEmail) || null;
   }, [allFacultyAccounts, selectedFacultyEmail]);
 
+  // Folders for active faculty
   const activeFacultyFolders = useMemo(() => {
     if (!selectedFacultyEmail) return [];
     return facultyDataMap.folderMap[selectedFacultyEmail] || [];
   }, [facultyDataMap, selectedFacultyEmail]);
 
-  const activeFacultyFiles = useMemo(() => {
-    if (!selectedFacultyEmail) return [];
-    return facultyDataMap.fileMap[selectedFacultyEmail] || [];
-  }, [facultyDataMap, selectedFacultyEmail]);
-
-  // Selected folder inside active faculty
+  // Active folder within inspected faculty
   const activeFolder = useMemo(() => {
     if (!selectedFolderId) return null;
     return activeFacultyFolders.find((f) => f.id === selectedFolderId) || null;
   }, [activeFacultyFolders, selectedFolderId]);
 
+  // Files in the active folder
   const filesInActiveFolder = useMemo(() => {
-    if (!selectedFolderId) return [];
-    return activeFacultyFiles.filter((f) => f.folderId === selectedFolderId);
-  }, [activeFacultyFiles, selectedFolderId]);
+    if (!selectedFolderId || !selectedFacultyEmail) return [];
+    const allFacultyFiles = facultyDataMap.fileMap[selectedFacultyEmail] || [];
+    return allFacultyFiles.filter((file) => file.folderId === selectedFolderId);
+  }, [facultyDataMap, selectedFolderId, selectedFacultyEmail]);
+
+  // Confirm folder deletion
+  const handleConfirmDeleteFolder = () => {
+    if (!folderToDelete || !onDeleteFacultyFolder) return;
+    onDeleteFacultyFolder(folderToDelete.id);
+    if (selectedFolderId === folderToDelete.id) {
+      setSelectedFolderId(null);
+    }
+    showToast(`🗑️ Folder "${folderToDelete.name}" deleted.`);
+    setFolderToDelete(null);
+  };
+
+  // Confirm file deletion
+  const handleConfirmDeleteFile = () => {
+    if (!fileToDelete || !onDeleteFacultyFile) return;
+    onDeleteFacultyFile(fileToDelete.id);
+    if (selectedPreviewFile?.id === fileToDelete.id) {
+      setSelectedPreviewFile(null);
+    }
+    showToast(`Document "${fileToDelete.title}" removed.`);
+    setFileToDelete(null);
+  };
+
+  // Admin create folder for faculty
+  const handleCreateFolderForFaculty = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeFaculty || !newFolderName.trim() || !onAddFacultyFolder) return;
+
+    onAddFacultyFolder({
+      facultyEmail: activeFaculty.email,
+      facultyName: activeFaculty.name,
+      facultySurname: extractFacultySurname(activeFaculty.name),
+      name: newFolderName.trim(),
+      description: newFolderDescription.trim(),
+      category: newFolderCategory,
+      color: newFolderColor,
+    });
+
+    showToast(`Folder "${newFolderName.trim()}" created for ${activeFaculty.name}.`);
+    setIsAddFolderModalOpen(false);
+    setNewFolderName('');
+    setNewFolderDescription('');
+  };
 
   return (
-    <div className="space-y-6 animate-fadeIn">
-      {/* Toast Notification */}
+    <div className="space-y-6 animate-fadeIn pb-12">
+      {/* Toast Notice */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-[#0d1524] text-slate-100 px-4 py-3 rounded-2xl shadow-xl border border-[#24334b] flex items-center space-x-3 text-xs font-mono animate-slideUp">
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 flex items-center space-x-3 text-xs font-mono animate-slideUp">
           <Check className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Header Info Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 rounded-3xl p-6 sm:p-7 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-[#24334b]">
-        <div className="space-y-1.5">
-          <div className="flex items-center space-x-2">
-            <span className="bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[10px] sm:text-xs font-mono px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center space-x-1">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Admin Faculty Folders Explorer</span>
-            </span>
+      {/* Header Banner */}
+      <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-6 sm:p-8 space-y-4 shadow-sm relative overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/40 px-2.5 py-1 rounded-full flex items-center space-x-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                <span>Master Admin & Principal Console</span>
+              </span>
+              <span className="text-xs font-mono text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 rounded-full">
+                Unique Firebase Storage
+              </span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-100 font-sans tracking-tight">
+              Faculty Repository & Personal Folders Directory
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400 font-medium max-w-3xl leading-relaxed">
+              Alphabetical index by faculty surname. Inspect uploaded DLL, TOS, TQ, and instructional files (PDF, DOCX, DOC, PPTX, XLSX up to 2MB). Files are automatically purged after 1 week.
+            </p>
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight font-sans text-white">
-            Faculty Repositories by Surname
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-300 max-w-2xl font-medium">
-            Each folder below represents a registered faculty member organized by their <strong className="text-slate-100 font-semibold">SURNAME</strong>. Open any faculty directory to inspect their created lesson folders, Daily Lesson Logs, and uploaded files.
-          </p>
-        </div>
 
-        <div className="flex items-center space-x-3 text-xs font-mono shrink-0">
-          <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 text-center">
-            <div className="text-slate-400 text-[10px]">Total Faculty</div>
-            <div className="text-lg font-bold text-white">{allFacultyAccounts.length}</div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 text-center">
-            <div className="text-slate-400 text-[10px]">Total Folders</div>
-            <div className="text-lg font-bold text-blue-300">{facultyFolders.length}</div>
+          <div className="flex items-center space-x-3 shrink-0 text-xs font-mono">
+            <div className="bg-[#0d1524] border border-[#24334b] rounded-2xl p-3 text-center min-w-[100px]">
+              <div className="text-[10px] text-slate-400">Total Teachers</div>
+              <div className="text-lg font-bold text-slate-100 mt-0.5">{allFacultyAccounts.length}</div>
+            </div>
+            <div className="bg-[#0d1524] border border-[#24334b] rounded-2xl p-3 text-center min-w-[100px]">
+              <div className="text-[10px] text-slate-400">Total Folders</div>
+              <div className="text-lg font-bold text-blue-400 mt-0.5">{facultyFolders.length}</div>
+            </div>
+            <div className="bg-[#0d1524] border border-[#24334b] rounded-2xl p-3 text-center min-w-[100px]">
+              <div className="text-[10px] text-slate-400">Total Files</div>
+              <div className="text-lg font-bold text-emerald-400 mt-0.5">{facultyFiles.length}</div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* DETAILED VIEW OF SELECTED FACULTY */}
+      {/* Main Content Area */}
       {activeFaculty ? (
-        <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-6 sm:p-8 shadow-xs space-y-6 animate-fadeIn">
-          {/* Breadcrumb Header */}
+        /* VIEWING A SPECIFIC FACULTY MEMBER'S FOLDERS */
+        <div className="bg-[#141c2c] border border-[#24334b] rounded-3xl p-6 sm:p-8 space-y-6 animate-fadeIn shadow-sm">
+          {/* Breadcrumb Navigation Header */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#24334b] pb-5">
             <div className="flex items-center space-x-3">
               <button
@@ -230,41 +309,38 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                   setSelectedFolderId(null);
                   setSelectedFacultyEmail(null);
                 }}
-                className="p-2.5 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold font-mono cursor-pointer"
+                className="p-2.5 bg-[#172236] hover:bg-[#20304c] text-slate-200 rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold font-mono cursor-pointer border border-[#2d3e57]"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>All Faculty Surnames</span>
               </button>
 
-              <div className="h-5 w-px bg-[#24334b]" />
-
-              <div className="flex items-center space-x-2.5">
-                <div className="p-2.5 bg-[#1c273a] text-slate-200 border border-[#2d3e57] rounded-2xl font-bold font-mono text-sm">
-                  📁 {extractFacultySurname(activeFaculty.name)}
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-100 leading-tight">
-                    {activeFaculty.name}
-                  </h3>
-                  <div className="text-xs text-slate-400 font-mono flex items-center space-x-2">
-                    <span>{activeFaculty.email}</span>
-                    <span>•</span>
-                    <span className="text-blue-400 font-semibold">{activeFacultyFolders.length} folders created</span>
-                  </div>
-                </div>
-              </div>
+              {activeFolder && (
+                <>
+                  <div className="h-5 w-px bg-[#24334b]" />
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFolderId(null)}
+                    className="p-2.5 bg-[#172236] hover:bg-[#20304c] text-slate-200 rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold font-mono cursor-pointer border border-[#2d3e57]"
+                  >
+                    <span>{extractFacultySurname(activeFaculty.name)}'s Folders</span>
+                  </button>
+                </>
+              )}
             </div>
 
-            {selectedFolderId && (
-              <button
-                type="button"
-                onClick={() => setSelectedFolderId(null)}
-                className="px-3.5 py-2 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] rounded-xl text-xs font-mono font-bold transition-all cursor-pointer flex items-center space-x-1"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Back to {extractFacultySurname(activeFaculty.name)}'s Folders</span>
-              </button>
-            )}
+            <div className="flex items-center space-x-2">
+              {!activeFolder && onAddFacultyFolder && (
+                <button
+                  type="button"
+                  onClick={() => setIsAddFolderModalOpen(true)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  <span>+ Create Folder for Teacher</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* If viewing inside a specific folder of this faculty */}
@@ -284,53 +360,18 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 font-mono mt-0.5">
-                        Created on {activeFolder.createdAt || 'Recent'} • {filesInActiveFolder.length} documents
+                        Teacher: {activeFaculty.name} ({activeFaculty.email}) • {filesInActiveFolder.length} documents
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center space-x-2 flex-wrap gap-y-2">
-                    {activeFolder.driveUrl && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setShowFolderDriveEmbed(!showFolderDriveEmbed)}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-2xs border ${
-                            showFolderDriveEmbed
-                              ? 'bg-emerald-600 text-white border-emerald-500'
-                              : 'bg-[#1c273a] text-emerald-300 border-[#2d3e57] hover:bg-[#25344d]'
-                          }`}
-                        >
-                          <LayoutGrid className="w-3.5 h-3.5" />
-                          <span>{showFolderDriveEmbed ? 'Collapse Webview' : 'Show Webview'}</span>
-                        </button>
-
-                        <a
-                          href={activeFolder.driveUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold transition-all flex items-center space-x-1.5 shadow-xs"
-                        >
-                          <HardDrive className="w-3.5 h-3.5" />
-                          <span>Open in Drive</span>
-                          <ExternalLink className="w-3.5 h-3.5 ml-0.5" />
-                        </a>
-                      </>
-                    )}
-
                     {currentUser?.role === 'Admin' && onDeleteFacultyFolder && (
                       <button
                         type="button"
-                        onClick={() => {
-                          const isConfirmed = window.confirm(
-                            `Are you sure you want to delete folder "${activeFolder.name}" and all its uploaded files?`
-                          );
-                          if (isConfirmed) {
-                            onDeleteFacultyFolder(activeFolder.id);
-                            setSelectedFolderId(null);
-                            showToast(`🗑️ Folder "${activeFolder.name}" deleted from faculty repository.`);
-                          }
-                        }}
+                        onClick={() =>
+                          setFolderToDelete({ id: activeFolder.id, name: activeFolder.name })
+                        }
                         className="px-3.5 py-2 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-mono font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
                         title="Delete Faculty Folder"
                       >
@@ -349,18 +390,168 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                 )}
               </div>
 
-              {/* Embedded Google Drive Webview for the Folder */}
-              {activeFolder.driveUrl && showFolderDriveEmbed && (
-                <div className="animate-fadeIn">
-                  <GoogleDriveWebview
-                    url={activeFolder.driveUrl}
-                    title={`${activeFolder.name} - Google Drive`}
-                    subtitle={`Faculty Workspace Folder • ${activeFaculty.name}`}
-                    initialHeight={460}
-                    allowToggleViewMode={true}
-                  />
+              {/* UNIQUE FILE STORAGE SECTION: DOCUMENT PREVIEWS & LIST */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-2">
+                    <span>Documents in "{activeFolder.name}"</span>
+                    <span className="bg-[#172236] text-blue-300 border border-[#2d3e57] px-2 py-0.5 rounded-full text-[10px]">
+                      {filesInActiveFolder.length} files
+                    </span>
+                  </h3>
                 </div>
-              )}
+
+                {filesInActiveFolder.length === 0 ? (
+                  <div className="bg-[#0f1725] border-2 border-dashed border-[#24334b] rounded-3xl p-8 sm:p-12 text-center space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-blue-500/20 text-blue-300 mx-auto flex items-center justify-center">
+                      <File className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-base font-bold text-slate-200">
+                      No Documents Uploaded Yet
+                    </h4>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto">
+                      {activeFaculty.name} has not uploaded any files into this folder yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filesInActiveFolder.map((file) => {
+                      const fmt = (file.format || '').toLowerCase();
+                      const isPdf = fmt === 'pdf';
+                      const isDoc = fmt.includes('doc');
+                      const isSheet = fmt.includes('xls') || fmt.includes('sheet');
+                      const isPpt = fmt.includes('ppt') || fmt.includes('pres');
+
+                      let themeBorder = 'border-slate-700 hover:border-slate-500';
+                      let badgeBg = 'bg-slate-700/50 text-slate-300 border-slate-600';
+                      let typeLabel = fmt.toUpperCase();
+                      let iconComp = <File className="w-5 h-5 text-slate-300" />;
+
+                      if (isPdf) {
+                        themeBorder = 'border-rose-500/30 hover:border-rose-500/70';
+                        badgeBg = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+                        typeLabel = 'PDF';
+                        iconComp = <FileText className="w-5 h-5 text-rose-400" />;
+                      } else if (isDoc) {
+                        themeBorder = 'border-blue-500/30 hover:border-blue-500/70';
+                        badgeBg = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
+                        typeLabel = 'WORD';
+                        iconComp = <FileText className="w-5 h-5 text-blue-400" />;
+                      } else if (isSheet) {
+                        themeBorder = 'border-emerald-500/30 hover:border-emerald-500/70';
+                        badgeBg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                        typeLabel = 'EXCEL';
+                        iconComp = <FileSpreadsheet className="w-5 h-5 text-emerald-400" />;
+                      } else if (isPpt) {
+                        themeBorder = 'border-amber-500/30 hover:border-amber-500/70';
+                        badgeBg = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                        typeLabel = 'POWERPOINT';
+                        iconComp = <FileText className="w-5 h-5 text-amber-400" />;
+                      }
+
+                      // Remaining days
+                      const now = Date.now();
+                      const expireMs = file.expiresAt
+                        ? new Date(file.expiresAt).getTime()
+                        : new Date(file.uploadedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
+                      const diffDays = Math.max(0, Math.ceil((expireMs - now) / (24 * 60 * 60 * 1000)));
+
+                      return (
+                        <div
+                          key={file.id}
+                          onClick={() => setSelectedPreviewFile(file)}
+                          className={`bg-[#0f1725] border-2 ${themeBorder} rounded-3xl p-4 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-3 group hover:-translate-y-0.5 relative overflow-hidden`}
+                        >
+                          {/* Visual Preview Thumbnail Box */}
+                          <div className="w-full h-36 bg-[#0a0f1a] rounded-2xl border border-[#24334b] flex flex-col justify-between p-3 relative overflow-hidden group-hover:border-blue-500/40 transition-colors">
+                            <div className="flex items-center justify-between">
+                              <span
+                                className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${badgeBg}`}
+                              >
+                                {typeLabel}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-400 bg-[#141c2c] px-2 py-0.5 rounded-md border border-[#24334b]">
+                                {file.fileSizeFormatted}
+                              </span>
+                            </div>
+
+                            <div className="flex-1 flex flex-col justify-center items-center py-2 space-y-1.5 text-center">
+                              <div className="p-2 rounded-xl bg-[#141c2c] border border-[#24334b] shadow-inner group-hover:scale-110 transition-transform">
+                                {iconComp}
+                              </div>
+                              <div className="text-xs font-bold text-slate-200 line-clamp-1 px-2 font-sans">
+                                {file.title}
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500 truncate max-w-[180px]">
+                                {file.fileName}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1 border-t border-[#1c273a] text-[10px] font-mono text-slate-400">
+                              <span className="flex items-center space-x-1 text-blue-400 font-bold group-hover:text-blue-300">
+                                <Eye className="w-3 h-3" />
+                                <span>Inspect Preview</span>
+                              </span>
+                              <span className="text-slate-500">{file.uploadedAt ? file.uploadedAt.substring(0, 10) : ''}</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <h4 className="font-bold text-xs sm:text-sm text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
+                              {file.title}
+                            </h4>
+                            <div className="flex items-center space-x-1.5 text-[11px] font-mono text-amber-300/90 pt-0.5">
+                              <Clock className="w-3 h-3 shrink-0 text-amber-400" />
+                              <span>Auto-deletes in {diffDays} {diffDays === 1 ? 'day' : 'days'}</span>
+                            </div>
+                          </div>
+
+                          {/* Footer Actions */}
+                          <div
+                            className="pt-2 border-t border-[#24334b] flex items-center justify-between text-xs font-mono"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPreviewFile(file)}
+                              className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center space-x-1"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>View</span>
+                            </button>
+
+                            <div className="flex items-center space-x-1">
+                              {file.fileData && (
+                                <a
+                                  href={file.fileData}
+                                  download={file.fileName}
+                                  className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
+                                  title="Download"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+
+                              {currentUser?.role === 'Admin' && onDeleteFacultyFile && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setFileToDelete({ id: file.id, title: file.title, fileName: file.fileName })
+                                  }
+                                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
+                                  title="Delete document"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             /* List of Folders that this faculty created */
@@ -372,7 +563,7 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
               </div>
 
               {activeFacultyFolders.length === 0 ? (
-                <div className="text-center py-12 px-4 border-2 border-dashed border-[#24334b] rounded-3xl bg-[#0f1725] space-y-2">
+                <div className="text-center py-12 px-4 border-2 border-dashed border-[#24334b] rounded-3xl bg-[#0f1725] space-y-3">
                   <div className="w-12 h-12 rounded-2xl bg-blue-500/20 text-blue-400 mx-auto flex items-center justify-center">
                     <Folder className="w-6 h-6" />
                   </div>
@@ -380,10 +571,24 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                   <p className="text-xs text-slate-400 max-w-md mx-auto">
                     {activeFaculty.name} has not created any personal folders in their workspace yet.
                   </p>
+                  {onAddFacultyFolder && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAddFolderModalOpen(true)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-mono font-bold rounded-xl transition-all shadow-xs inline-flex items-center space-x-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Create Folder for {activeFaculty.name}</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {activeFacultyFolders.map((folder) => {
+                    const count = (facultyDataMap.fileMap[activeFaculty.email] || []).filter(
+                      (f) => f.folderId === folder.id
+                    ).length;
+
                     return (
                       <div
                         key={folder.id}
@@ -400,39 +605,29 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                             </span>
                           </div>
 
-                          <h5 className="font-bold text-sm text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
+                          <h5 className="font-bold text-sm text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1 font-sans">
                             {folder.name}
                           </h5>
 
                           {folder.description && (
-                            <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                            <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed font-sans">
                               {folder.description}
                             </p>
                           )}
                         </div>
 
                         <div className="pt-3 border-t border-[#24334b] flex items-center justify-between text-xs font-mono text-slate-400">
-                          <div className="flex items-center space-x-2">
-                            {folder.driveUrl && (
-                              <span className="text-[10px] text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1">
-                                <HardDrive className="w-3 h-3 text-emerald-400" />
-                                <span>Drive Webview</span>
-                              </span>
-                            )}
-                          </div>
+                          <span className="text-[11px] text-blue-300 font-bold bg-[#141c2c] px-2 py-0.5 rounded-md border border-[#24334b]">
+                            {count} {count === 1 ? 'file' : 'files'}
+                          </span>
+
                           <div className="flex items-center space-x-2">
                             {currentUser?.role === 'Admin' && onDeleteFacultyFolder && (
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  const isConfirmed = window.confirm(
-                                    `Delete folder "${folder.name}" and all its files from ${activeFaculty.name}'s repository?`
-                                  );
-                                  if (isConfirmed) {
-                                    onDeleteFacultyFolder(folder.id);
-                                    showToast(`🗑️ Folder "${folder.name}" deleted.`);
-                                  }
+                                  setFolderToDelete({ id: folder.id, name: folder.name });
                                 }}
                                 className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-colors cursor-pointer"
                                 title="Delete Folder"
@@ -441,7 +636,7 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                               </button>
                             )}
                             <span className="text-blue-400 font-bold flex items-center space-x-1 group-hover:translate-x-0.5 transition-transform">
-                              <span>Inspect</span>
+                              <span>Open</span>
                               <ChevronRight className="w-3.5 h-3.5" />
                             </span>
                           </div>
@@ -538,32 +733,40 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                     className="bg-[#141c2c] border border-[#24334b] hover:border-blue-500/60 rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5"
                   >
                     <div className="space-y-3">
-                      {/* Top Surname Badge & Status (Clean uniform typography, no highlighted background) */}
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center space-x-3">
-                          <div className={`p-3 rounded-2xl border ${hasFolders ? 'bg-blue-500/20 border-blue-500/30 text-blue-400' : 'bg-[#1c273a] border-[#2d3e57] text-slate-400'} shrink-0`}>
+                          <div
+                            className={`p-3 rounded-2xl border ${
+                              hasFolders
+                                ? 'bg-blue-500/20 border-blue-500/30 text-blue-400'
+                                : 'bg-[#1c273a] border-[#2d3e57] text-slate-400'
+                            } shrink-0`}
+                          >
                             <Folder className="w-6 h-6" />
                           </div>
                           <div>
                             <div className="flex items-center space-x-1.5">
-                              <h3 className="font-extrabold text-base sm:text-lg text-slate-100 tracking-tight group-hover:text-blue-400 transition-colors">
+                              <h3 className="font-extrabold text-base sm:text-lg text-slate-100 tracking-tight group-hover:text-blue-400 transition-colors font-sans">
                                 {surname}
                               </h3>
                             </div>
-                            <div className="text-xs text-slate-300 font-semibold truncate max-w-[170px]">
+                            <div className="text-xs text-slate-300 font-semibold truncate max-w-[170px] font-sans">
                               {faculty.name}
                             </div>
                           </div>
                         </div>
 
-                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
-                          hasFolders ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-[#1c273a] text-slate-400 border border-[#2d3e57]'
-                        }`}>
+                        <span
+                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
+                            hasFolders
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-[#1c273a] text-slate-400 border border-[#2d3e57]'
+                          }`}
+                        >
                           {hasFolders ? `${folders.length} Folders` : 'Empty'}
                         </span>
                       </div>
 
-                      {/* Faculty Meta Details */}
                       <div className="space-y-1 text-xs font-mono text-slate-400 pt-1">
                         <div className="flex items-center space-x-1.5 truncate">
                           <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -575,7 +778,6 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                         </div>
                       </div>
 
-                      {/* Folder Name Previews */}
                       {hasFolders && (
                         <div className="pt-2 border-t border-[#24334b] space-y-1">
                           <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
@@ -600,10 +802,9 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                       )}
                     </div>
 
-                    {/* Bottom Action */}
                     <div className="pt-3 border-t border-[#24334b] flex items-center justify-end text-xs font-mono">
                       <span className="text-blue-400 font-bold flex items-center space-x-1 group-hover:translate-x-1 transition-transform">
-                        <span>Open Folder</span>
+                        <span>Open Repository</span>
                         <ChevronRight className="w-3.5 h-3.5" />
                       </span>
                     </div>
@@ -615,62 +816,192 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
         </div>
       )}
 
-      {/* DOCUMENT / FOLDER WEBVIEW PREVIEW MODAL FOR ADMIN */}
-      {previewWebviewModal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-[#141c2c] rounded-3xl max-w-4xl w-full max-h-[90vh] shadow-2xl border border-[#24334b] flex flex-col overflow-hidden animate-scaleUp">
-            <div className="p-4 bg-[#0f1725] text-white flex items-center justify-between border-b border-[#24334b]">
-              <div className="flex items-center space-x-2.5 min-w-0">
-                <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl">
-                  <HardDrive className="w-4 h-4" />
+      {/* ADMIN ADD FOLDER MODAL */}
+      {isAddFolderModalOpen && activeFaculty && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/75 backdrop-blur-xs animate-fadeIn overflow-y-auto">
+          <div className="bg-[#121c30] rounded-3xl border border-[#24334b] shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden my-auto animate-scaleUp text-slate-100">
+            <div className="flex items-center justify-between border-b border-[#24334b] p-5 sm:p-6 pb-4 shrink-0 bg-[#141c2c]">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-blue-500/20 text-blue-400 rounded-2xl border border-blue-500/40">
+                  <FolderPlus className="w-5 h-5" />
                 </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-slate-100 truncate font-mono">
-                    {previewWebviewModal.title}
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white">
+                    Create Folder for {activeFaculty.name}
                   </h3>
-                  {previewWebviewModal.subtitle && (
-                    <p className="text-[11px] text-slate-400 truncate font-mono">
-                      {previewWebviewModal.subtitle}
-                    </p>
-                  )}
+                  <p className="text-xs text-slate-400 font-mono">
+                    Unique Firebase Storage
+                  </p>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2">
-                <a
-                  href={previewWebviewModal.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold rounded-xl transition-all flex items-center space-x-1"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open in Drive</span>
-                </a>
+              <button
+                type="button"
+                onClick={() => setIsAddFolderModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl transition-all cursor-pointer hover:bg-[#1a2638]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateFolderForFaculty} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6 space-y-4 text-xs font-mono scrollbar-thin scrollbar-thumb-slate-700">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Folder Name / Subject Title *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g., Grade 11 General Mathematics DLL"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Category
+                  </label>
+                  <select
+                    value={newFolderCategory}
+                    onChange={(e) => setNewFolderCategory(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer font-sans"
+                  >
+                    {CATEGORY_OPTIONS.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Description / Notes (Optional)
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Briefly describe what materials will be stored here..."
+                    value={newFolderDescription}
+                    onChange={(e) => setNewFolderDescription(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
+                  />
+                </div>
+              </div>
+
+              <div className="shrink-0 flex items-center justify-end space-x-3 px-6 py-4 border-t border-[#24334b] bg-[#101726]">
                 <button
                   type="button"
-                  onClick={() =>
-                    setPreviewWebviewModal({ isOpen: false, url: '', title: '', subtitle: '' })
-                  }
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-[#1c273a] rounded-xl transition-all cursor-pointer"
-                  title="Close Modal"
+                  onClick={() => setIsAddFolderModalOpen(false)}
+                  className="px-4 py-2 bg-[#172236] hover:bg-[#20304c] text-slate-300 rounded-xl font-bold transition-all cursor-pointer font-mono text-xs"
                 >
-                  <X className="w-5 h-5" />
+                  Cancel
                 </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-sm cursor-pointer font-mono text-xs"
+                >
+                  Create Folder
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* IN-APP CONFIRM FOLDER DELETION (NO window.confirm) */}
+      {folderToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-[#121c30] border border-rose-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-scaleUp text-slate-100">
+            <div className="flex items-center space-x-3 text-rose-400">
+              <div className="p-3 bg-rose-500/20 rounded-2xl border border-rose-500/40">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-white">Delete Faculty Folder?</h4>
+                <p className="text-xs text-slate-400 font-mono">Irreversible Action</p>
               </div>
             </div>
 
-            <div className="p-4 bg-[#0d1524] flex-1 overflow-auto">
-              <GoogleDriveWebview
-                url={previewWebviewModal.url}
-                title={previewWebviewModal.title}
-                subtitle={previewWebviewModal.subtitle}
-                initialHeight={520}
-                allowToggleViewMode={true}
-              />
+            <p className="text-xs text-slate-300 font-sans leading-relaxed">
+              Are you sure you want to delete folder <span className="font-bold text-white">"{folderToDelete.name}"</span> and all its uploaded documents from the Firebase database?
+            </p>
+
+            <div className="flex items-center justify-end space-x-3 pt-2 font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => setFolderToDelete(null)}
+                className="px-4 py-2 bg-[#1c2940] hover:bg-[#253654] text-slate-300 rounded-xl font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteFolder}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-md cursor-pointer flex items-center space-x-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Yes, Delete Folder</span>
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* IN-APP CONFIRM FILE DELETION (NO window.confirm) */}
+      {fileToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-[#121c30] border border-rose-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-scaleUp text-slate-100">
+            <div className="flex items-center space-x-3 text-rose-400">
+              <div className="p-3 bg-rose-500/20 rounded-2xl border border-rose-500/40">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-white">Delete Document?</h4>
+                <p className="text-xs text-slate-400 font-mono">Permanent Removal</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 font-sans leading-relaxed">
+              Are you sure you want to delete <span className="font-bold text-white">"{fileToDelete.title}"</span> ({fileToDelete.fileName}) from this teacher's folder?
+            </p>
+
+            <div className="flex items-center justify-end space-x-3 pt-2 font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => setFileToDelete(null)}
+                className="px-4 py-2 bg-[#1c2940] hover:bg-[#253654] text-slate-300 rounded-xl font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteFile}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-md cursor-pointer flex items-center space-x-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Yes, Delete File</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DOCUMENT PREVIEW MODAL */}
+      <FacultyDocumentViewerModal
+        isOpen={Boolean(selectedPreviewFile)}
+        file={selectedPreviewFile}
+        onClose={() => setSelectedPreviewFile(null)}
+        onDeleteFile={(id) => {
+          if (onDeleteFacultyFile) {
+            onDeleteFacultyFile(id);
+            showToast('Document deleted.');
+          }
+        }}
+        canDelete={currentUser?.role === 'Admin'}
+      />
     </div>
   );
 };

@@ -6,17 +6,18 @@ import {
   SchoolPermanentFolder,
 } from '../types';
 import {
-  extractDriveId,
   getStoredSchoolPermanentFolders,
   subscribeSchoolPermanentFolders,
   getStoredFaculty,
   subscribeFaculty,
 } from '../lib/firebase';
+import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
 import {
   Folder,
   FolderPlus,
   FileText,
+  FileSpreadsheet,
   File,
   Upload,
   Plus,
@@ -25,33 +26,24 @@ import {
   Search,
   ExternalLink,
   Download,
-  Copy,
   Check,
   Eye,
   X,
-  Sparkles,
   Layers,
   Calendar,
-  Tag,
-  HardDrive,
   FolderOpen,
-  FileSpreadsheet,
-  FileCode,
-  FileCheck,
-  Link,
+  FolderLock,
   ChevronRight,
-  Filter,
-  Info,
   ShieldCheck,
   User,
   ArrowLeft,
   RefreshCw,
-  LayoutGrid,
-  Maximize2,
   Lock,
-  FolderLock,
-  FileCheck2,
   GraduationCap,
+  Clock,
+  HardDrive,
+  AlertCircle,
+  FileCheck2,
 } from 'lucide-react';
 
 interface FacultyPersonalDashboardProps {
@@ -90,6 +82,9 @@ const COLOR_THEMES = [
   { name: 'Rose', bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', icon: 'text-rose-600', ring: 'ring-rose-500' },
 ];
 
+const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls'];
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
+
 export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> = ({
   currentUser,
   facultyFolders,
@@ -100,9 +95,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   onDeleteFolder,
   onAddFile,
   onDeleteFile,
-  onNavigateToRepository,
   onNavigateToAdminDashboard,
-  onNavigateToSubmissionReport,
 }) => {
   // Permanent School-Wide Folders state ("SCHOOL FORMS" and "SCHOOL DOCUMENTS")
   const [livePermanentFolders, setLivePermanentFolders] = useState<SchoolPermanentFolder[]>(() => {
@@ -258,45 +251,34 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     });
   }, [myFolders, searchTerm, selectedCategoryFilter]);
 
-  // Modals & Webview State
+  // Modals & Document Viewer State
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
   const [editingFolder, setEditingFolder] = useState<FacultyFolder | null>(null);
   const [isAddFileModalOpen, setIsAddFileModalOpen] = useState(false);
-  const [previewFile, setPreviewFile] = useState<FacultyPersonalFile | null>(null);
-  const [showFolderDriveEmbed, setShowFolderDriveEmbed] = useState<boolean>(true);
-  const [previewWebviewModal, setPreviewWebviewModal] = useState<{
-    isOpen: boolean;
-    url: string;
-    title: string;
-    subtitle?: string;
-  }>({
-    isOpen: false,
-    url: '',
-    title: '',
-    subtitle: '',
-  });
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectedPreviewFile, setSelectedPreviewFile] = useState<FacultyPersonalFile | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Form States - New Folder
+  // In-App Confirmation Modal States (Replacing window.confirm)
+  const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [fileToDelete, setFileToDelete] = useState<{ id: string; title: string; fileName: string } | null>(null);
+
+  // Form States - Folder Creation / Editing (NO GOOGLE DRIVE URL)
   const [folderName, setFolderName] = useState('');
   const [folderDescription, setFolderDescription] = useState('');
   const [folderCategory, setFolderCategory] = useState(CATEGORY_OPTIONS[0]);
   const [folderColor, setFolderColor] = useState('Emerald');
-  const [folderDriveUrl, setFolderDriveUrl] = useState('');
 
-  // Form States - Upload File to Folder
-  const [uploadMode, setUploadMode] = useState<'upload' | 'driveLink'>('upload');
+  // Form States - Upload File to Folder (Max 2MB, PDF/DOCX/DOC/PPTX/XLSX)
   const [fileTitle, setFileTitle] = useState('');
   const [fileDescription, setFileDescription] = useState('');
   const [fileCategory, setFileCategory] = useState(CATEGORY_OPTIONS[0]);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [customDriveUrl, setCustomDriveUrl] = useState('');
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
   const filesInActiveFolder = useMemo(() => {
@@ -309,7 +291,6 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     setFolderDescription('');
     setFolderCategory(CATEGORY_OPTIONS[0]);
     setFolderColor('Emerald');
-    setFolderDriveUrl('');
     setEditingFolder(null);
     setIsNewFolderModalOpen(true);
   };
@@ -325,10 +306,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     setFolderDescription(folder.description || '');
     setFolderCategory(folder.category || CATEGORY_OPTIONS[0]);
     setFolderColor(folder.color || 'Emerald');
-    setFolderDriveUrl(folder.driveUrl || '');
     setIsNewFolderModalOpen(true);
   };
 
+  // Create or Update Folder
   const handleSaveFolder = (e: React.FormEvent) => {
     e.preventDefault();
     if (!folderName.trim()) {
@@ -336,11 +317,9 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       return;
     }
 
-    const driveId = extractDriveId(folderDriveUrl.trim());
-
     if (editingFolder) {
       if (editingFolder.id === 'school-forms' || editingFolder.id === 'school-documents') {
-        showToast('Permanent school-wide folders cannot be edited here. Use Admin Dashboard.');
+        showToast('Permanent school-wide folders cannot be edited here.');
         setIsNewFolderModalOpen(false);
         return;
       }
@@ -349,8 +328,6 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         description: folderDescription.trim(),
         category: folderCategory,
         color: folderColor,
-        driveUrl: folderDriveUrl.trim(),
-        driveId: driveId || '',
       });
       showToast(`Folder "${folderName.trim()}" updated successfully.`);
     } else {
@@ -362,8 +339,6 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         description: folderDescription.trim(),
         category: folderCategory,
         color: folderColor,
-        driveUrl: folderDriveUrl.trim(),
-        driveId: driveId || '',
       });
       showToast(`Personal folder "${folderName.trim()}" created successfully!`);
     }
@@ -371,108 +346,148 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     setIsNewFolderModalOpen(false);
   };
 
-  const handleDeleteFolderConfirm = (folderId: string, folderTitle: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (folderId === 'school-forms' || folderId === 'school-documents') {
-      showToast('Permanent school-wide folders cannot be deleted.');
-      return;
+  // Confirm Folder Deletion
+  const handleConfirmDeleteFolder = () => {
+    if (!folderToDelete) return;
+    onDeleteFolder(folderToDelete.id);
+    if (activeFolderId === folderToDelete.id) {
+      setActiveFolderId(null);
     }
-    if (window.confirm(`Are you sure you want to delete the folder "${folderTitle}" and all files inside it? This action cannot be undone.`)) {
-      onDeleteFolder(folderId);
-      if (activeFolderId === folderId) {
-        setActiveFolderId(null);
-      }
-      showToast(`Folder "${folderTitle}" deleted.`);
-    }
+    showToast(`Folder "${folderToDelete.name}" and all contained documents deleted.`);
+    setFolderToDelete(null);
   };
 
+  // Confirm File Deletion
+  const handleConfirmDeleteFile = () => {
+    if (!fileToDelete) return;
+    onDeleteFile(fileToDelete.id);
+    if (selectedPreviewFile?.id === fileToDelete.id) {
+      setSelectedPreviewFile(null);
+    }
+    showToast(`File "${fileToDelete.title}" removed from folder.`);
+    setFileToDelete(null);
+  };
+
+  // Open File Upload Modal
   const handleOpenAddFileModal = (folderId: string) => {
     setActiveFolderId(folderId);
-    setUploadMode('upload');
     setFileTitle('');
     setFileDescription('');
     setFileCategory(activeFolder?.category || CATEGORY_OPTIONS[0]);
     setAttachedFile(null);
-    setCustomDriveUrl('');
+    setUploadError(null);
     setIsAddFileModalOpen(true);
   };
 
-  const handleFileSubmit = (e: React.FormEvent) => {
+  // Validate File Selection
+  const handleFileSelection = (selectedFile: File) => {
+    setUploadError(null);
+
+    // 1. Validate file extension
+    const ext = (selectedFile.name.split('.').pop() || '').toLowerCase();
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      setUploadError(
+        `Invalid file type ".${ext}". Only PDF, DOCX, DOC, PPTX, and XLSX files are permitted.`
+      );
+      setAttachedFile(null);
+      return;
+    }
+
+    // 2. Validate file size (maximum 2MB)
+    if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
+      const sizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2);
+      setUploadError(
+        `File exceeds maximum limit of 2MB (Selected file is ${sizeMb} MB). Please choose a file under 2MB.`
+      );
+      setAttachedFile(null);
+      return;
+    }
+
+    setAttachedFile(selectedFile);
+    if (!fileTitle.trim()) {
+      setFileTitle(selectedFile.name.replace(/\.[^/.]+$/, ''));
+    }
+  };
+
+  // Submit File Upload with Base64 Conversion and 1-Week Expiration
+  const handleFileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeFolderId) return;
+    if (!activeFolderId || !attachedFile) {
+      setUploadError('Please select a valid file to upload.');
+      return;
+    }
 
     if (!fileTitle.trim()) {
-      showToast('Please enter a file title.');
-      return;
-    }
-
-    if (uploadMode === 'upload' && !attachedFile) {
-      showToast('Please select a file to upload.');
-      return;
-    }
-
-    if (uploadMode === 'driveLink' && !customDriveUrl.trim()) {
-      showToast('Please enter a valid Google Drive link.');
+      setUploadError('Please enter a document title.');
       return;
     }
 
     setIsUploading(true);
+    setUploadError(null);
 
-    setTimeout(() => {
-      let fileName = 'document.pdf';
-      let fileSizeBytes = 1024 * 500; // 500 KB default
-      let fileSizeFormatted = '500 KB';
-      let format = 'pdf';
-
-      if (uploadMode === 'upload' && attachedFile) {
-        fileName = attachedFile.name;
-        fileSizeBytes = attachedFile.size;
+    try {
+      // Read file into Data URL
+      const reader = new FileReader();
+      reader.onload = () => {
+        const fileDataUrl = reader.result as string;
+        const fileName = attachedFile.name;
+        const fileSizeBytes = attachedFile.size;
         const sizeMb = fileSizeBytes / (1024 * 1024);
-        fileSizeFormatted = sizeMb >= 1 ? `${sizeMb.toFixed(1)} MB` : `${(fileSizeBytes / 1024).toFixed(0)} KB`;
-        const extMatch = fileName.match(/\.([0-9a-z]+)$/i);
-        format = extMatch ? extMatch[1].toLowerCase() : 'file';
-      } else {
-        fileName = `${fileTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.gdrive`;
-        format = 'gdrive';
-        fileSizeFormatted = 'Cloud Link';
-      }
+        const fileSizeFormatted =
+          sizeMb >= 1
+            ? `${sizeMb.toFixed(2)} MB`
+            : `${(fileSizeBytes / 1024).toFixed(0)} KB`;
+        const ext = (fileName.split('.').pop() || 'pdf').toLowerCase();
 
-      onAddFile({
-        folderId: activeFolderId,
-        facultyEmail: currentUser.email,
-        facultyName: currentUser.name,
-        title: fileTitle.trim(),
-        fileName,
-        fileSizeBytes,
-        fileSizeFormatted,
-        format,
-        category: fileCategory,
-        driveUrl: uploadMode === 'driveLink' ? customDriveUrl.trim() : (activeFolder?.driveUrl || ''),
-        isGoogleDriveLink: uploadMode === 'driveLink',
-        description: fileDescription.trim(),
-      });
+        // 1-week auto-delete expiration timestamp
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
+        onAddFile({
+          folderId: activeFolderId,
+          facultyEmail: currentUser.email,
+          facultyName: currentUser.name,
+          title: fileTitle.trim(),
+          fileName,
+          fileSizeBytes,
+          fileSizeFormatted,
+          format: ext,
+          category: fileCategory,
+          expiresAt,
+          fileData: fileDataUrl,
+          description: fileDescription.trim(),
+        });
+
+        setIsUploading(false);
+        setIsAddFileModalOpen(false);
+        showToast(`Document "${fileTitle.trim()}" uploaded to folder! Auto-deletes after 1 week.`);
+      };
+
+      reader.onerror = () => {
+        setUploadError('Failed to read file from local storage. Please try again.');
+        setIsUploading(false);
+      };
+
+      reader.readAsDataURL(attachedFile);
+    } catch (err) {
+      console.error('File upload error:', err);
+      setUploadError('Unexpected error during upload.');
       setIsUploading(false);
-      setIsAddFileModalOpen(false);
-      showToast(`File "${fileTitle.trim()}" added to folder.`);
-    }, 400);
+    }
   };
 
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    showToast('Copied to clipboard!');
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const getFormatIcon = (format: string) => {
-    const f = format.toLowerCase();
-    if (f === 'pdf') return <FileText className="w-4 h-4 text-rose-600" />;
-    if (f.includes('xls') || f.includes('csv') || f.includes('sheet')) return <FileSpreadsheet className="w-4 h-4 text-emerald-600" />;
-    if (f.includes('doc') || f.includes('word')) return <FileText className="w-4 h-4 text-blue-600" />;
-    if (f.includes('ppt') || f.includes('pres')) return <FileText className="w-4 h-4 text-amber-600" />;
-    if (f === 'gdrive' || f.includes('drive')) return <HardDrive className="w-4 h-4 text-blue-500" />;
-    return <File className="w-4 h-4 text-slate-500" />;
+  // Helper: File Download
+  const handleDirectDownload = (file: FacultyPersonalFile, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (file.fileData) {
+      const a = document.createElement('a');
+      a.href = file.fileData;
+      a.download = file.fileName || `${file.title}.${file.format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } else {
+      setSelectedPreviewFile(file);
+    }
   };
 
   return (
@@ -499,7 +514,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 <span>Personal Faculty Workspace</span>
               </span>
               <span className="text-blue-200 text-xs font-mono font-semibold">
-                Private & Secure
+                Unique Firebase Storage
               </span>
             </div>
 
@@ -507,7 +522,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               Welcome, {currentUser.name}
             </h1>
             <p className="text-blue-100 text-xs sm:text-sm font-medium max-w-2xl leading-relaxed">
-              Your personalized repository for Daily Lesson Logs (DLL), Table of Specifications (TOS), Test Questions, and class instructional materials. Only you have access to your personal folders.
+              Your personalized repository for Daily Lesson Logs (DLL), Table of Specifications (TOS), Test Questions, and class instructional materials. Upload PDF, Word, Excel, and PowerPoint documents (up to 2MB).
             </p>
           </div>
 
@@ -527,30 +542,21 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/10 text-xs font-mono">
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
             <div className="text-blue-200 text-[11px]">School Permanent Folders</div>
-            <div className="text-xl font-bold text-white mt-0.5">2</div>
+            <div className="text-xl font-bold text-white mt-0.5">{livePermanentFolders.length}</div>
           </div>
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
             <div className="text-blue-200 text-[11px]">Personal Folders</div>
             <div className="text-xl font-bold text-white mt-0.5">{myFolders.length}</div>
           </div>
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-            <div className="text-blue-200 text-[11px]">Personal Files</div>
+            <div className="text-blue-200 text-[11px]">Uploaded Documents</div>
             <div className="text-xl font-bold text-white mt-0.5">{myFiles.length}</div>
           </div>
           <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/10">
-            <div className="text-blue-200 text-[11px]">Advisory Role</div>
+            <div className="text-blue-200 text-[11px]">Retention Policy</div>
             <div className="text-xs font-bold text-amber-300 mt-1 flex items-center space-x-1">
-              {effectiveUser.advisoryRole === 'Class Adviser' ? (
-                <>
-                  <GraduationCap className="w-3.5 h-3.5 text-emerald-300" />
-                  <span className="text-emerald-300">Class Adviser</span>
-                </>
-              ) : (
-                <>
-                  <User className="w-3.5 h-3.5 text-slate-300" />
-                  <span className="text-slate-200">Non-Adviser</span>
-                </>
-              )}
+              <Clock className="w-3.5 h-3.5 text-amber-300" />
+              <span>1-Week Auto-Delete</span>
             </div>
           </div>
         </div>
@@ -570,35 +576,39 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
         <div className="text-xs font-mono text-slate-400 px-3 flex items-center space-x-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>Workspace active for {currentUser.name}</span>
+          <span>Storage linked to Firebase Database</span>
         </div>
       </div>
 
       {/* Main Workspace Navigation & Active Folder View */}
       {activeFolder ? (
         /* INSIDE ACTIVE FOLDER VIEW */
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 animate-fadeIn">
+        <div className="bg-[#0f1725] border border-[#24334b] rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 animate-fadeIn">
           {/* Breadcrumb & Navigation */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#24334b] pb-5">
             <div className="flex items-center space-x-3">
               <button
                 type="button"
                 onClick={() => setActiveFolderId(null)}
-                className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold font-mono cursor-pointer"
+                className="p-2.5 bg-[#172236] hover:bg-[#20304c] text-slate-200 rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold font-mono cursor-pointer border border-[#2d3e57]"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Back to Folders</span>
               </button>
 
-              <div className="h-5 w-px bg-slate-200" />
+              <div className="h-5 w-px bg-[#24334b]" />
 
               <div className="flex items-center space-x-2">
-                <div className={`p-2 rounded-xl ${isPermanentActive ? 'bg-indigo-50 text-indigo-700' : 'bg-blue-50 text-blue-600'}`}>
+                <div
+                  className={`p-2 rounded-xl ${
+                    isPermanentActive ? 'bg-indigo-500/20 text-indigo-300' : 'bg-blue-500/20 text-blue-300'
+                  }`}
+                >
                   {isPermanentActive ? <FolderLock className="w-5 h-5" /> : <FolderOpen className="w-5 h-5" />}
                 </div>
                 <div>
                   <div className="flex items-center space-x-2">
-                    <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
+                    <h2 className="text-base sm:text-lg font-bold text-slate-100 leading-tight">
                       {activeFolder.name}
                     </h2>
                     {isPermanentActive && (
@@ -608,15 +618,15 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center space-x-2 text-xs text-slate-500 font-mono mt-0.5">
-                    <span className="bg-slate-100 px-2 py-0.5 rounded-md font-semibold text-slate-700">
+                  <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono mt-0.5">
+                    <span className="bg-[#172236] px-2 py-0.5 rounded-md font-semibold text-slate-300 border border-[#24334b]">
                       {activeFolder.category || 'General'}
                     </span>
                     <span>•</span>
                     {isPermanentActive ? (
-                      <span className="text-emerald-700 font-bold">Admin Managed Link • Read Access</span>
+                      <span className="text-indigo-400 font-bold">Admin Managed Central Folder</span>
                     ) : (
-                      <span>{filesInActiveFolder.length} personal items</span>
+                      <span>{filesInActiveFolder.length} documents uploaded</span>
                     )}
                   </div>
                 </div>
@@ -624,30 +634,21 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             </div>
 
             <div className="flex items-center space-x-2">
-              {isPermanentActive ? (
-                <div className="flex items-center space-x-2">
-                  <span className="text-[11px] font-mono text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl font-bold flex items-center space-x-1.5">
-                    <Lock className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Permanent School Folder</span>
-                  </span>
-                  {currentUser.role === 'Admin' && onNavigateToAdminDashboard && (
-                    <button
-                      type="button"
-                      onClick={onNavigateToAdminDashboard}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-2xs flex items-center space-x-1 cursor-pointer"
-                      title="Administrators can change this embedded link in the Admin Dashboard"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>Edit Link in Admin Dashboard</span>
-                    </button>
-                  )}
-                </div>
-              ) : (
+              {!isPermanentActive && (
                 <>
                   <button
                     type="button"
+                    onClick={() => handleOpenAddFileModal(activeFolder.id)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-md flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>Upload Document (Max 2MB)</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={(e) => handleOpenEditFolderModal(activeFolder, e)}
-                    className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-all cursor-pointer"
+                    className="p-2 bg-[#172236] hover:bg-[#20304c] text-slate-300 rounded-xl transition-all cursor-pointer border border-[#2d3e57]"
                     title="Edit Folder Details"
                   >
                     <Edit2 className="w-4 h-4" />
@@ -655,8 +656,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
                   <button
                     type="button"
-                    onClick={(e) => handleDeleteFolderConfirm(activeFolder.id, activeFolder.name, e)}
-                    className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl transition-all cursor-pointer"
+                    onClick={() =>
+                      setFolderToDelete({ id: activeFolder.id, name: activeFolder.name })
+                    }
+                    className="p-2 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 rounded-xl transition-all cursor-pointer border border-rose-500/30"
                     title="Delete Folder"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -666,131 +669,233 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             </div>
           </div>
 
-          {/* School-Wide Permanent Banner */}
-          {isPermanentActive && (
-            <div className="bg-[#141c2c] border border-[#24334b] rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono shadow-2xs">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="font-bold text-slate-100 text-xs sm:text-sm">
-                    Official Central School Repository • {activeFolder.name}
-                  </div>
-                  <div className="text-slate-400 text-[11px] mt-0.5">
-                    This folder is permanent and visible to all faculty members. The embedded Google Drive link is centrally managed by School Administration through the Admin Dashboard.
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center space-x-2 shrink-0">
-                <span className="text-[10px] text-indigo-300 bg-[#0d1524] px-2.5 py-1 rounded-lg border border-indigo-500/40 font-bold uppercase">
-                  DepEd Official Link
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Folder Description and Optional Google Drive Link Banner */}
+          {/* Folder Description */}
           {activeFolder.description && (
-            <p className="text-xs sm:text-sm text-slate-300 bg-[#0d1524] p-3.5 rounded-2xl border border-[#24334b] font-medium">
-              <span className="font-bold text-slate-100">Description: </span>
+            <p className="text-xs sm:text-sm text-slate-300 bg-[#141c2c] p-4 rounded-2xl border border-[#24334b] font-medium leading-relaxed font-sans">
+              <span className="font-bold text-slate-100">Folder Notes: </span>
               {activeFolder.description}
             </p>
           )}
 
-          {/* Google Drive Embedded Webview Preview Section */}
-          {activeFolder.driveUrl ? (
-            <div className="space-y-3">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 bg-emerald-50/90 border border-emerald-200/90 rounded-2xl p-3.5">
-                <div className="flex items-center space-x-2.5 min-w-0">
-                  <div className="p-2 bg-emerald-600 text-white rounded-xl shadow-2xs">
-                    <HardDrive className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-bold text-xs text-emerald-950 font-mono">
-                        Embedded Google Drive Folder Webview
-                      </span>
-                      <span className="bg-emerald-600 text-white text-[9px] font-mono px-2 py-0.2 rounded-full font-bold uppercase">
-                        Live Preview
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-emerald-700 font-mono truncate max-w-md">
-                      {activeFolder.driveUrl}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-2 shrink-0 text-xs font-mono">
-                  <button
-                    type="button"
-                    onClick={() => setShowFolderDriveEmbed(!showFolderDriveEmbed)}
-                    className={`px-3 py-1.5 rounded-xl border transition-all flex items-center space-x-1.5 font-bold cursor-pointer shadow-2xs ${
-                      showFolderDriveEmbed
-                        ? 'bg-emerald-700 text-white border-emerald-800'
-                        : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                    }`}
-                  >
-                    <LayoutGrid className="w-3.5 h-3.5" />
-                    <span>{showFolderDriveEmbed ? 'Collapse Webview' : 'Show Webview'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(activeFolder.driveUrl || '', `drive-${activeFolder.id}`)}
-                    className="px-3 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-300 transition-all flex items-center space-x-1 font-bold cursor-pointer"
-                  >
-                    {copiedId === `drive-${activeFolder.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span className="hidden sm:inline">Copy Link</span>
-                  </button>
-
-                  <a
-                    href={activeFolder.driveUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center space-x-1 font-bold"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open Drive</span>
-                  </a>
-                </div>
-              </div>
-
-              {/* Embedded Webview Component */}
-              {showFolderDriveEmbed && (
-                <div className="animate-fadeIn">
-                  <GoogleDriveWebview
-                    url={activeFolder.driveUrl}
-                    title={`${activeFolder.name} - Google Drive`}
-                    subtitle={`Embedded folder preview • ${currentUser.name}`}
-                    initialHeight={460}
-                    allowToggleViewMode={true}
-                  />
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono">
+          {/* 1-WEEK RETENTION INFO BANNER FOR FACULTY WORKSPACE */}
+          {!isPermanentActive && (
+            <div className="bg-[#141c2c] border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono">
               <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-slate-200 text-slate-600 rounded-xl">
-                  <HardDrive className="w-4 h-4" />
+                <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl shrink-0">
+                  <Clock className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="font-bold text-slate-800">No Google Drive link embedded for this folder</div>
-                  <div className="text-slate-500 text-[11px]">
-                    Link your Google Drive folder URL to view your live files inside an embedded webview.
+                  <div className="font-bold text-amber-300">
+                    Automatic 1-Week File Deletion Policy
+                  </div>
+                  <div className="text-slate-400 text-[11px] mt-0.5">
+                    Uploaded documents (PDF, DOCX, DOC, PPTX, XLSX up to 2MB) are automatically cleaned up 7 days after upload to preserve storage space.
                   </div>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={(e) => handleOpenEditFolderModal(activeFolder, e)}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-all shadow-2xs flex items-center space-x-1.5 shrink-0 cursor-pointer"
-              >
-                <Link className="w-3.5 h-3.5" />
-                <span>+ Embed Google Drive Link</span>
-              </button>
+              <div className="text-[11px] text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl shrink-0">
+                ✓ Unique Firebase File Storage Active
+              </div>
+            </div>
+          )}
+
+          {/* PERMANENT SCHOOL FOLDER WEBVIEW IF CENTRAL */}
+          {isPermanentActive && activeFolder.driveUrl ? (
+            <div className="space-y-3">
+              <GoogleDriveWebview
+                url={activeFolder.driveUrl}
+                title={`${activeFolder.name} - Central DepEd Forms`}
+                subtitle="School-wide official repository"
+                initialHeight={460}
+                allowToggleViewMode={true}
+              />
+            </div>
+          ) : (
+            /* UNIQUE FILE STORAGE SECTION: DOCUMENT PREVIEWS & LIST */
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-2">
+                  <span>Documents Inside "{activeFolder.name}"</span>
+                  <span className="bg-[#172236] text-blue-300 border border-[#2d3e57] px-2 py-0.5 rounded-full text-[10px]">
+                    {filesInActiveFolder.length} files
+                  </span>
+                </h3>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddFileModal(activeFolder.id)}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Document</span>
+                </button>
+              </div>
+
+              {filesInActiveFolder.length === 0 ? (
+                /* Empty State in Folder */
+                <div className="bg-[#141c2c] border-2 border-dashed border-[#24334b] rounded-3xl p-8 sm:p-12 text-center space-y-4">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-500/20 border border-blue-500/40 text-blue-300 mx-auto flex items-center justify-center shadow-inner">
+                    <Upload className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-base font-bold text-slate-100">
+                      No Files in this Folder Yet
+                    </h4>
+                    <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+                      Upload your PDF, Word (.docx, .doc), Excel (.xlsx), or PowerPoint (.pptx) documents with a maximum size of 2MB. Files are automatically previewed inside the folder and stored in the Firebase database.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddFileModal(activeFolder.id)}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl transition-all shadow-sm inline-flex items-center space-x-2 cursor-pointer hover:scale-105 active:scale-95"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>Upload Document (Max 2MB)</span>
+                  </button>
+                </div>
+              ) : (
+                /* GRID OF FILE PREVIEW CARDS */
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filesInActiveFolder.map((file) => {
+                    const fmt = (file.format || '').toLowerCase();
+                    const isPdf = fmt === 'pdf';
+                    const isDoc = fmt.includes('doc');
+                    const isSheet = fmt.includes('xls') || fmt.includes('sheet');
+                    const isPpt = fmt.includes('ppt') || fmt.includes('pres');
+
+                    let themeBorder = 'border-slate-700 hover:border-slate-500';
+                    let badgeBg = 'bg-slate-700/50 text-slate-300 border-slate-600';
+                    let typeLabel = fmt.toUpperCase();
+                    let iconComp = <File className="w-5 h-5 text-slate-300" />;
+
+                    if (isPdf) {
+                      themeBorder = 'border-rose-500/30 hover:border-rose-500/70';
+                      badgeBg = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+                      typeLabel = 'PDF';
+                      iconComp = <FileText className="w-5 h-5 text-rose-400" />;
+                    } else if (isDoc) {
+                      themeBorder = 'border-blue-500/30 hover:border-blue-500/70';
+                      badgeBg = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
+                      typeLabel = 'WORD';
+                      iconComp = <FileText className="w-5 h-5 text-blue-400" />;
+                    } else if (isSheet) {
+                      themeBorder = 'border-emerald-500/30 hover:border-emerald-500/70';
+                      badgeBg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                      typeLabel = 'EXCEL';
+                      iconComp = <FileSpreadsheet className="w-5 h-5 text-emerald-400" />;
+                    } else if (isPpt) {
+                      themeBorder = 'border-amber-500/30 hover:border-amber-500/70';
+                      badgeBg = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                      typeLabel = 'POWERPOINT';
+                      iconComp = <FileText className="w-5 h-5 text-amber-400" />;
+                    }
+
+                    // Remaining days before auto delete
+                    const now = Date.now();
+                    const expireMs = file.expiresAt
+                      ? new Date(file.expiresAt).getTime()
+                      : new Date(file.uploadedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
+                    const diffDays = Math.max(0, Math.ceil((expireMs - now) / (24 * 60 * 60 * 1000)));
+
+                    return (
+                      <div
+                        key={file.id}
+                        onClick={() => setSelectedPreviewFile(file)}
+                        className={`bg-[#141c2c] border-2 ${themeBorder} rounded-3xl p-4 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-3 group hover:-translate-y-0.5 relative overflow-hidden`}
+                      >
+                        {/* AUTOMATIC VISUAL PREVIEW THUMBNAIL BOX */}
+                        <div className="w-full h-36 bg-[#0a0f1a] rounded-2xl border border-[#24334b] flex flex-col justify-between p-3 relative overflow-hidden group-hover:border-blue-500/40 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${badgeBg}`}
+                            >
+                              {typeLabel}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400 bg-[#141c2c] px-2 py-0.5 rounded-md border border-[#24334b]">
+                              {file.fileSizeFormatted}
+                            </span>
+                          </div>
+
+                          {/* Visual Representation of Document Content Inside Thumbnail */}
+                          <div className="flex-1 flex flex-col justify-center items-center py-2 space-y-1.5 text-center">
+                            <div className="p-2 rounded-xl bg-[#141c2c] border border-[#24334b] shadow-inner group-hover:scale-110 transition-transform">
+                              {iconComp}
+                            </div>
+                            <div className="text-xs font-bold text-slate-200 line-clamp-1 px-2 font-sans">
+                              {file.title}
+                            </div>
+                            <div className="text-[10px] font-mono text-slate-500 truncate max-w-[180px]">
+                              {file.fileName}
+                            </div>
+                          </div>
+
+                          {/* Quick Click-to-View Overlay Hint */}
+                          <div className="flex items-center justify-between pt-1 border-t border-[#1c273a] text-[10px] font-mono text-slate-400">
+                            <span className="flex items-center space-x-1 text-blue-400 font-bold group-hover:text-blue-300">
+                              <Eye className="w-3 h-3" />
+                              <span>Click to Preview</span>
+                            </span>
+                            <span className="text-slate-500">{file.uploadedAt ? file.uploadedAt.substring(0, 10) : ''}</span>
+                          </div>
+                        </div>
+
+                        {/* File Details & Auto-Delete Timer */}
+                        <div className="space-y-1">
+                          <div className="flex items-start justify-between gap-1">
+                            <h4 className="font-bold text-xs sm:text-sm text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
+                              {file.title}
+                            </h4>
+                          </div>
+
+                          <div className="flex items-center space-x-1.5 text-[11px] font-mono text-amber-300/90 pt-0.5">
+                            <Clock className="w-3 h-3 shrink-0 text-amber-400" />
+                            <span>Auto-deletes in {diffDays} {diffDays === 1 ? 'day' : 'days'}</span>
+                          </div>
+                        </div>
+
+                        {/* Card Footer Actions */}
+                        <div
+                          className="pt-2 border-t border-[#24334b] flex items-center justify-between text-xs font-mono"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPreviewFile(file)}
+                            className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center space-x-1"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Preview</span>
+                          </button>
+
+                          <div className="flex items-center space-x-1">
+                            <button
+                              type="button"
+                              onClick={(e) => handleDirectDownload(file, e)}
+                              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
+                              title="Download document"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFileToDelete({ id: file.id, title: file.title, fileName: file.fileName })
+                              }
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
+                              title="Delete file"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -837,11 +942,11 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center space-x-2">
                     <span>School Permanent Folders</span>
                     <span className="bg-indigo-600 text-white text-[10px] font-mono px-2 py-0.2 rounded-full font-bold">
-                      Set for All Faculty
+                      Central School Directory
                     </span>
                   </h2>
                   <p className="text-[11px] text-slate-400 font-mono">
-                    Official central folders. The embedded Google Drive link is managed centrally by administrators.
+                    Official central folders managed centrally by school administrators.
                   </p>
                 </div>
               </div>
@@ -860,50 +965,16 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   const isForms = permFolder.id === 'school-forms';
                   const isDocs = permFolder.id === 'school-documents';
 
-                  let bgGradient = 'from-[#141c2c] to-[#172236] hover:border-indigo-500/70';
-                  let iconBg = 'bg-indigo-600';
-                  let badgeColor = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
-
-                  if (isForms || permFolder.color === 'Blue') {
-                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-blue-500/70';
-                    iconBg = 'bg-blue-600';
-                    badgeColor = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
-                  } else if (isDocs || permFolder.color === 'Emerald') {
-                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-emerald-500/70';
-                    iconBg = 'bg-emerald-600';
-                    badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-                  } else if (permFolder.color === 'Purple') {
-                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-purple-500/70';
-                    iconBg = 'bg-purple-600';
-                    badgeColor = 'bg-purple-500/20 text-purple-300 border-purple-500/40';
-                  } else if (permFolder.color === 'Amber') {
-                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-amber-500/70';
-                    iconBg = 'bg-amber-600';
-                    badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-                  } else if (permFolder.color === 'Rose') {
-                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-rose-500/70';
-                    iconBg = 'bg-rose-600';
-                    badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
-                  } else if (permFolder.color === 'Teal') {
-                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-teal-500/70';
-                    iconBg = 'bg-teal-600';
-                    badgeColor = 'bg-teal-500/20 text-teal-300 border-teal-500/40';
-                  } else if (permFolder.color === 'Cyan') {
-                    bgGradient = 'from-[#141c2c] to-[#172236] hover:border-cyan-500/70';
-                    iconBg = 'bg-cyan-600';
-                    badgeColor = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
-                  }
-
                   return (
                     <div
                       key={permFolder.id}
                       onClick={() => setActiveFolderId(permFolder.id)}
-                      className={`bg-gradient-to-br ${bgGradient} border-2 border-[#24334b] rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden`}
+                      className="bg-gradient-to-br from-[#141c2c] to-[#172236] hover:border-indigo-500/70 border-2 border-[#24334b] rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden"
                     >
                       <div className="space-y-3">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center space-x-3">
-                            <div className={`p-3 rounded-2xl ${iconBg} text-white shadow-xs shrink-0`}>
+                            <div className="p-3 rounded-2xl bg-indigo-600 text-white shadow-xs shrink-0">
                               {isForms ? (
                                 <FileSpreadsheet className="w-6 h-6" />
                               ) : isDocs ? (
@@ -914,7 +985,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                             </div>
                             <div>
                               <div className="flex items-center space-x-2">
-                                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${badgeColor}`}>
+                                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border bg-indigo-500/20 text-indigo-300 border-indigo-500/40">
                                   {permFolder.category}
                                 </span>
                                 <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-[#0d1524] text-slate-300 border border-[#24334b] flex items-center space-x-1">
@@ -930,7 +1001,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
                           <div
                             className="p-1.5 text-slate-400 bg-[#0d1524] rounded-xl border border-[#24334b] shadow-2xs"
-                            title="School Central Folder (Admin/Coordinator Managed Link)"
+                            title="School Central Folder"
                           >
                             <Lock className="w-4 h-4 text-slate-400" />
                           </div>
@@ -944,11 +1015,11 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                       <div className="pt-3 border-t border-[#24334b] flex items-center justify-between text-xs font-mono">
                         <span className="text-[10px] text-slate-400 flex items-center space-x-1 font-semibold">
                           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>{permFolder.updatedBy ? `Set by ${permFolder.updatedBy}` : 'Central Drive Link'}</span>
+                          <span>Official Central Folder</span>
                         </span>
 
                         <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-400 group-hover:text-blue-300 group-hover:translate-x-1 transition-transform">
-                          <span>Open Live Drive</span>
+                          <span>Open Folder</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </div>
                       </div>
@@ -971,7 +1042,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     Personal Faculty Folders ({myFolders.length})
                   </h2>
                   <p className="text-[11px] text-slate-400 font-mono">
-                    Your private DLL, TOS, TQ, and instructional materials folders.
+                    Unique Firebase file storage for DLL, TOS, TQ, and instructional materials (Max 2MB per document, 1-week auto-delete).
                   </p>
                 </div>
               </div>
@@ -995,7 +1066,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 <div className="space-y-1">
                   <h3 className="text-base sm:text-lg font-bold text-slate-100">No Personal Folders Created Yet</h3>
                   <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
-                    You have access to the permanent school folders above. You can also create personal folders to organize your Daily Lesson Logs (DLL), Table of Specifications, and personal teaching materials.
+                    Create personal folders to organize your Daily Lesson Logs (DLL), Table of Specifications (TOS), and personal teaching materials with unique Firebase file storage and automatic previews.
                   </p>
                 </div>
                 <button
@@ -1022,114 +1093,101 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 </button>
               </div>
             ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredFolders.map((folder) => {
-                const filesCount = myFiles.filter((f) => f.folderId === folder.id).length;
-                const theme = COLOR_THEMES.find((t) => t.name === folder.color) || COLOR_THEMES[0];
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredFolders.map((folder) => {
+                  const filesCount = myFiles.filter((f) => f.folderId === folder.id).length;
+                  const theme = COLOR_THEMES.find((t) => t.name === folder.color) || COLOR_THEMES[0];
 
-                return (
-                  <div
-                    key={folder.id}
-                    onClick={() => setActiveFolderId(folder.id)}
-                    className="bg-[#141c2c] border border-[#24334b] hover:border-blue-500/70 rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden"
-                  >
-                    <div className="space-y-3">
-                      {/* Top Header */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center space-x-3">
-                          <div className={`p-3 rounded-2xl ${theme.bg} ${theme.border} border ${theme.icon} shrink-0`}>
-                            <Folder className="w-6 h-6" />
+                  return (
+                    <div
+                      key={folder.id}
+                      onClick={() => setActiveFolderId(folder.id)}
+                      className="bg-[#141c2c] border border-[#24334b] hover:border-blue-500/70 rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-4 group hover:-translate-y-0.5 relative overflow-hidden"
+                    >
+                      <div className="space-y-3">
+                        {/* Top Header */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center space-x-3">
+                            <div className={`p-3 rounded-2xl ${theme.bg} ${theme.border} border ${theme.icon} shrink-0`}>
+                              <Folder className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-[#0d1524] text-slate-300 border border-[#24334b] rounded-md">
+                                {folder.category || 'General'}
+                              </span>
+                              <h3 className="font-bold text-sm sm:text-base text-slate-100 line-clamp-1 group-hover:text-blue-400 transition-colors mt-1 font-sans">
+                                {folder.name}
+                              </h3>
+                            </div>
                           </div>
-                          <div>
-                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-[#0d1524] text-slate-300 border border-[#24334b] rounded-md">
-                              {folder.category || 'General'}
-                            </span>
-                            <h3 className="font-bold text-sm sm:text-base text-slate-100 line-clamp-1 group-hover:text-blue-400 transition-colors mt-1">
-                              {folder.name}
-                            </h3>
+
+                          {/* Quick Folder Controls */}
+                          <div
+                            className="flex items-center space-x-1 shrink-0 opacity-80 group-hover:opacity-100"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenEditFolderModal(folder, e)}
+                              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
+                              title="Edit folder"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFolderToDelete({ id: folder.id, name: folder.name })}
+                              className="p-1.5 text-slate-400 hover:text-rose-300 hover:bg-rose-500/20 rounded-lg transition-all"
+                              title="Delete folder"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
-                        {/* Quick Folder Controls */}
-                        <div
-                          className="flex items-center space-x-1 shrink-0 opacity-80 group-hover:opacity-100"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => handleOpenEditFolderModal(folder, e)}
-                            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
-                            title="Edit folder"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteFolderConfirm(folder.id, folder.name, e)}
-                            className="p-1.5 text-slate-400 hover:text-rose-300 hover:bg-rose-500/20 rounded-lg transition-all"
-                            title="Delete folder"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {/* Description */}
+                        {folder.description && (
+                          <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed font-sans">
+                            {folder.description}
+                          </p>
+                        )}
                       </div>
 
-                      {/* Description */}
-                      {folder.description && (
-                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed font-sans">
-                          {folder.description}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Footer Info */}
-                    <div className="pt-3 border-t border-[#24334b] flex items-center justify-end text-xs font-mono text-slate-400">
-                      {folder.driveUrl ? (
-                        <div className="flex items-center space-x-1.5">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveFolderId(folder.id);
-                              setShowFolderDriveEmbed(true);
-                            }}
-                            className="text-[10px] text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1 transition-all"
-                            title="Open Google Drive Webview"
-                          >
-                            <HardDrive className="w-3 h-3 text-emerald-400" />
-                            <span>Drive Webview</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-slate-400">
-                          {folder.createdAt || 'Recent'}
+                      {/* Footer Info */}
+                      <div className="pt-3 border-t border-[#24334b] flex items-center justify-between text-xs font-mono text-slate-400">
+                        <span className="text-[11px] text-blue-300 font-bold bg-[#0d1524] px-2 py-0.5 rounded-md border border-[#24334b]">
+                          {filesCount} {filesCount === 1 ? 'file' : 'files'}
                         </span>
-                      )}
+
+                        <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-400 group-hover:text-blue-300 group-hover:translate-x-1 transition-transform">
+                          <span>Open</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* CREATE / EDIT FOLDER MODAL */}
+      {/* CREATE / EDIT FOLDER MODAL (NO GOOGLE DRIVE FIELD) */}
       {isNewFolderModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 sm:p-8 space-y-5 animate-scaleUp">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/75 backdrop-blur-xs animate-fadeIn overflow-y-auto">
+          <div className="bg-[#121c30] rounded-3xl border border-[#24334b] shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden my-auto animate-scaleUp text-slate-100">
+            <div className="flex items-center justify-between border-b border-[#24334b] p-5 sm:p-6 pb-4 shrink-0 bg-[#141c2c]">
               <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-2xl">
+                <div className="p-2.5 bg-blue-500/20 text-blue-400 rounded-2xl border border-blue-500/40">
                   <FolderPlus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                  <h3 className="text-base sm:text-lg font-bold text-white">
                     {editingFolder ? 'Edit Personal Folder' : 'Create New Personal Folder'}
                   </h3>
-                  <p className="text-xs text-slate-500 font-mono">
-                    Owner: {currentUser.name}
+                  <p className="text-xs text-slate-400 font-mono">
+                    Owner: {currentUser.name} • Unique Storage
                   </p>
                 </div>
               </div>
@@ -1137,112 +1195,96 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               <button
                 type="button"
                 onClick={() => setIsNewFolderModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 rounded-xl transition-all cursor-pointer"
+                className="p-2 text-slate-400 hover:text-white rounded-xl transition-all cursor-pointer hover:bg-[#1a2638]"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveFolder} className="space-y-4 text-xs font-mono">
-              {/* Folder Name */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                  Folder Name / Subject Title *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., Grade 11 21st Century Lit DLL or Q1 TOS & Exam Bank"
-                  value={folderName}
-                  onChange={(e) => setFolderName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white transition-all font-sans"
-                />
-              </div>
+            <form onSubmit={handleSaveFolder} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6 space-y-4 text-xs font-mono scrollbar-thin scrollbar-thumb-slate-700">
+                {/* Folder Name */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Folder Name / Subject Title *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g., Grade 11 21st Century Lit DLL or Q1 TOS & Exam Bank"
+                    value={folderName}
+                    onChange={(e) => setFolderName(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
+                  />
+                </div>
 
-              {/* Category */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                  Folder Category
-                </label>
-                <select
-                  value={folderCategory}
-                  onChange={(e) => setFolderCategory(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500 cursor-pointer"
-                >
-                  {CATEGORY_OPTIONS.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {/* Category */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Folder Category
+                  </label>
+                  <select
+                    value={folderCategory}
+                    onChange={(e) => setFolderCategory(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer font-sans"
+                  >
+                    {CATEGORY_OPTIONS.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* Optional Google Drive Link */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block flex items-center justify-between">
-                  <span>Google Drive Folder Link (Optional)</span>
-                  <span className="text-emerald-700 font-normal">Auto ID extraction</span>
-                </label>
-                <input
-                  type="url"
-                  placeholder="https://drive.google.com/drive/folders/..."
-                  value={folderDriveUrl}
-                  onChange={(e) => setFolderDriveUrl(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
-                />
-                <p className="text-[10px] text-slate-500">
-                  Paste your Google Drive folder link to allow quick opening and syncing.
-                </p>
-              </div>
+                {/* Description */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Description / Notes (Optional)
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Briefly describe what materials will be stored here..."
+                    value={folderDescription}
+                    onChange={(e) => setFolderDescription(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
+                  />
+                </div>
 
-              {/* Description */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                  Description / Notes (Optional)
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Briefly describe what materials will be stored here..."
-                  value={folderDescription}
-                  onChange={(e) => setFolderDescription(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white transition-all font-sans"
-                />
-              </div>
-
-              {/* Color Theme Selector */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                  Folder Theme Color
-                </label>
-                <div className="flex items-center space-x-2">
-                  {COLOR_THEMES.map((theme) => (
-                    <button
-                      key={theme.name}
-                      type="button"
-                      onClick={() => setFolderColor(theme.name)}
-                      className={`w-7 h-7 rounded-xl ${theme.bg} ${theme.border} border-2 transition-all flex items-center justify-center cursor-pointer ${
-                        folderColor === theme.name ? 'ring-2 ' + theme.ring + ' scale-110' : 'opacity-70 hover:opacity-100'
-                      }`}
-                      title={theme.name}
-                    >
-                      {folderColor === theme.name && <Check className="w-3.5 h-3.5 text-slate-800" />}
-                    </button>
-                  ))}
+                {/* Color Theme Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Folder Theme Color
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    {COLOR_THEMES.map((theme) => (
+                      <button
+                        key={theme.name}
+                        type="button"
+                        onClick={() => setFolderColor(theme.name)}
+                        className={`w-7 h-7 rounded-xl ${theme.bg} ${theme.border} border-2 transition-all flex items-center justify-center cursor-pointer ${
+                          folderColor === theme.name ? 'ring-2 ' + theme.ring + ' scale-110' : 'opacity-70 hover:opacity-100'
+                        }`}
+                        title={theme.name}
+                      >
+                        {folderColor === theme.name && <Check className="w-3.5 h-3.5 text-slate-800" />}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-100">
+              {/* Fixed Footer */}
+              <div className="shrink-0 flex items-center justify-end space-x-3 px-6 py-4 border-t border-[#24334b] bg-[#101726]">
                 <button
                   type="button"
                   onClick={() => setIsNewFolderModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition-all cursor-pointer"
+                  className="px-4 py-2 bg-[#172236] hover:bg-[#20304c] text-slate-300 rounded-xl font-bold transition-all cursor-pointer font-mono text-xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-sm cursor-pointer"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-sm cursor-pointer font-mono text-xs"
                 >
                   {editingFolder ? 'Save Changes' : 'Create Folder'}
                 </button>
@@ -1252,21 +1294,22 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         </div>
       )}
 
-      {/* UPLOAD / ADD FILE MODAL */}
+      {/* UPLOAD FILE MODAL (MAX 2MB, PDF/DOCX/DOC/PPTX/XLSX) - SMOOTHLY SCROLLABLE DIALOG */}
       {isAddFileModalOpen && activeFolder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 sm:p-8 space-y-5 animate-scaleUp">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm animate-fadeIn overflow-y-auto">
+          <div className="bg-[#111927] rounded-3xl border border-[#24334b] shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden my-auto animate-scaleUp text-slate-100">
+            {/* Fixed Header */}
+            <div className="flex items-center justify-between border-b border-[#24334b] px-6 py-4 shrink-0 bg-[#141e30]">
               <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-2xl">
+                <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/40">
                   <Upload className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900">
-                    Add File to "{activeFolder.name}"
+                  <h3 className="text-base sm:text-lg font-bold text-white font-sans">
+                    Upload to "{activeFolder.name}"
                   </h3>
-                  <p className="text-xs text-slate-500 font-mono">
-                    Personal Folder Repository
+                  <p className="text-xs text-slate-400 font-mono">
+                    Unique Firebase File Storage • Max 2MB Limit
                   </p>
                 </div>
               </div>
@@ -1274,213 +1317,255 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               <button
                 type="button"
                 onClick={() => setIsAddFileModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 rounded-xl transition-all cursor-pointer"
+                className="p-2 text-slate-400 hover:text-white rounded-xl transition-all cursor-pointer hover:bg-[#1f2b3e]"
+                title="Close"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Mode Switcher */}
-            <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 font-mono text-xs">
-              <button
-                type="button"
-                onClick={() => setUploadMode('upload')}
-                className={`flex-1 py-2 rounded-lg font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
-                  uploadMode === 'upload' ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>Upload Local File</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setUploadMode('driveLink')}
-                className={`flex-1 py-2 rounded-lg font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
-                  uploadMode === 'driveLink' ? 'bg-white text-emerald-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <HardDrive className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Link Google Drive File</span>
-              </button>
-            </div>
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleFileSubmit} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5 space-y-4 text-xs font-mono scrollbar-thin scrollbar-thumb-slate-700">
+                {uploadError && (
+                  <div className="p-3.5 bg-rose-500/15 border border-rose-500/30 rounded-2xl flex items-center space-x-2.5 text-xs font-mono text-rose-300">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{uploadError}</span>
+                  </div>
+                )}
 
-            <form onSubmit={handleFileSubmit} className="space-y-4 text-xs font-mono">
-              {/* Document Title */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                  Document Title *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., Week 1 DLL - Introduction to Literature"
-                  value={fileTitle}
-                  onChange={(e) => setFileTitle(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white transition-all font-sans"
-                />
-              </div>
-
-              {/* Upload file or Google Drive URL */}
-              {uploadMode === 'upload' ? (
+                {/* Document Title */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                    Choose File (PDF, Word, Excel, PPT, Zip) *
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Document Title *
                   </label>
                   <input
-                    type="file"
+                    type="text"
                     required
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        setAttachedFile(e.target.files[0]);
-                        if (!fileTitle) {
-                          setFileTitle(e.target.files[0].name.replace(/\.[^/.]+$/, ''));
+                    placeholder="e.g., Week 1 DLL - Introduction to Literature"
+                    value={fileTitle}
+                    onChange={(e) => setFileTitle(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
+                  />
+                </div>
+
+                {/* File Picker with 2MB validation and drag & drop */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block flex items-center justify-between">
+                    <span>Select File (PDF, DOCX, DOC, PPTX, XLSX) *</span>
+                    <span className="text-emerald-400 font-bold">Max 2MB</span>
+                  </label>
+                  <div className="border-2 border-dashed border-[#24334b] hover:border-blue-500/60 rounded-2xl p-5 text-center bg-[#0d1524] transition-all relative">
+                    <input
+                      type="file"
+                      required
+                      accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleFileSelection(e.target.files[0]);
                         }
-                      }
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-mono file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer"
-                  />
-                  {attachedFile && (
-                    <div className="text-[11px] text-emerald-700 font-mono mt-1">
-                      ✓ Ready: {attachedFile.name} ({(attachedFile.size / 1024).toFixed(0)} KB)
+                      }}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                    <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
+                      <div className="p-2.5 bg-blue-500/15 rounded-xl text-blue-400 border border-blue-500/30">
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      {attachedFile ? (
+                        <div className="space-y-1">
+                          <p className="font-bold text-emerald-400 text-xs">
+                            ✓ Selected: {attachedFile.name}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            Size: {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB • Ready to upload
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <p className="text-slate-300 font-bold text-xs">
+                            Click to select or drag and drop document
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            Supports PDF, DOCX, DOC, PPTX, XLSX up to 2MB
+                          </p>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
-              ) : (
+
+                {/* Category */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                    Google Drive File / Doc Link *
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Material Classification
                   </label>
-                  <input
-                    type="url"
-                    required
-                    placeholder="https://docs.google.com/document/d/... or drive link"
-                    value={customDriveUrl}
-                    onChange={(e) => setCustomDriveUrl(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white transition-all"
+                  <select
+                    value={fileCategory}
+                    onChange={(e) => setFileCategory(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer font-sans"
+                  >
+                    {CATEGORY_OPTIONS.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Description */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Notes / Competencies Covered (Optional)
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Optional notes or lesson competencies..."
+                    value={fileDescription}
+                    onChange={(e) => setFileDescription(e.target.value)}
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
                   />
                 </div>
-              )}
 
-              {/* Category */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                  Material Classification
-                </label>
-                <select
-                  value={fileCategory}
-                  onChange={(e) => setFileCategory(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500 cursor-pointer"
-                >
-                  {CATEGORY_OPTIONS.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
+                {/* 1-Week Notice in Modal */}
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] text-amber-300/90 flex items-center space-x-2">
+                  <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Notice: Document will be automatically deleted after 1 week (7 days).</span>
+                </div>
               </div>
 
-              {/* Description */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
-                  Notes / Competencies Covered (Optional)
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Optional notes or lesson competencies..."
-                  value={fileDescription}
-                  onChange={(e) => setFileDescription(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white transition-all font-sans"
-                />
-              </div>
-
-              {/* Submit Buttons */}
-              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsAddFileModalOpen(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUploading}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-sm cursor-pointer flex items-center space-x-1.5"
-                >
-                  {isUploading ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Saving...</span>
-                    </>
+              {/* Fixed Action Footer */}
+              <div className="shrink-0 flex items-center justify-between border-t border-[#24334b] px-6 py-4 bg-[#0e1625]">
+                <div className="text-[11px] text-slate-400 font-mono">
+                  {attachedFile ? (
+                    <span className="text-emerald-400 font-bold">
+                      {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB / 2 MB Limit
+                    </span>
                   ) : (
-                    <>
-                      <Upload className="w-4 h-4" />
-                      <span>Add File to Folder</span>
-                    </>
+                    <span>Max file size: 2.0 MB</span>
                   )}
-                </button>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddFileModalOpen(false)}
+                    className="px-4 py-2 bg-[#172236] hover:bg-[#20304c] text-slate-300 rounded-xl font-bold transition-all cursor-pointer font-mono text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isUploading || !attachedFile}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl font-bold transition-all shadow-sm cursor-pointer flex items-center space-x-1.5 font-mono text-xs"
+                  >
+                    {isUploading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Uploading to Firebase...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4" />
+                        <span>Upload Document</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* DOCUMENT / FOLDER WEBVIEW PREVIEW MODAL */}
-      {previewWebviewModal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-scaleUp">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
-              <div className="flex items-center space-x-2.5 min-w-0">
-                <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl">
-                  <HardDrive className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-white truncate font-mono">
-                    {previewWebviewModal.title}
-                  </h3>
-                  {previewWebviewModal.subtitle && (
-                    <p className="text-[11px] text-slate-400 truncate font-mono">
-                      {previewWebviewModal.subtitle}
-                    </p>
-                  )}
-                </div>
+      {/* IN-APP CONFIRM FOLDER DELETION MODAL (NO window.confirm) */}
+      {folderToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-[#121c30] border border-rose-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-scaleUp text-slate-100">
+            <div className="flex items-center space-x-3 text-rose-400">
+              <div className="p-3 bg-rose-500/20 rounded-2xl border border-rose-500/40">
+                <Trash2 className="w-6 h-6" />
               </div>
-
-              <div className="flex items-center space-x-2">
-                <a
-                  href={previewWebviewModal.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold rounded-xl transition-all flex items-center space-x-1"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open in Drive</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPreviewWebviewModal({ isOpen: false, url: '', title: '', subtitle: '' })
-                  }
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
-                  title="Close Modal"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+              <div>
+                <h4 className="font-bold text-base text-white">Delete Faculty Folder?</h4>
+                <p className="text-xs text-slate-400 font-mono">Irreversible Action</p>
               </div>
             </div>
 
-            <div className="p-4 bg-slate-50 flex-1 overflow-auto">
-              <GoogleDriveWebview
-                url={previewWebviewModal.url}
-                title={previewWebviewModal.title}
-                subtitle={previewWebviewModal.subtitle}
-                initialHeight={520}
-                allowToggleViewMode={true}
-              />
+            <p className="text-xs text-slate-300 font-sans leading-relaxed">
+              Are you sure you want to delete folder <span className="font-bold text-white">"{folderToDelete.name}"</span> and all documents uploaded inside it? This will remove the folder and files permanently from the Firebase database.
+            </p>
+
+            <div className="flex items-center justify-end space-x-3 pt-2 font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => setFolderToDelete(null)}
+                className="px-4 py-2 bg-[#1c2940] hover:bg-[#253654] text-slate-300 rounded-xl font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteFolder}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-md cursor-pointer flex items-center space-x-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Yes, Delete Folder</span>
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* IN-APP CONFIRM FILE DELETION MODAL (NO window.confirm) */}
+      {fileToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-[#121c30] border border-rose-500/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-scaleUp text-slate-100">
+            <div className="flex items-center space-x-3 text-rose-400">
+              <div className="p-3 bg-rose-500/20 rounded-2xl border border-rose-500/40">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-white">Delete Document?</h4>
+                <p className="text-xs text-slate-400 font-mono">Immediate Removal</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 font-sans leading-relaxed">
+              Are you sure you want to remove <span className="font-bold text-white">"{fileToDelete.title}"</span> ({fileToDelete.fileName}) from this folder?
+            </p>
+
+            <div className="flex items-center justify-end space-x-3 pt-2 font-mono text-xs">
+              <button
+                type="button"
+                onClick={() => setFileToDelete(null)}
+                className="px-4 py-2 bg-[#1c2940] hover:bg-[#253654] text-slate-300 rounded-xl font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteFile}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-all shadow-md cursor-pointer flex items-center space-x-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Yes, Remove File</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULL INTERACTIVE DOCUMENT PREVIEW MODAL */}
+      <FacultyDocumentViewerModal
+        isOpen={Boolean(selectedPreviewFile)}
+        file={selectedPreviewFile}
+        onClose={() => setSelectedPreviewFile(null)}
+        onDeleteFile={(id) => {
+          onDeleteFile(id);
+          showToast('Document deleted.');
+        }}
+        canDelete={true}
+      />
     </div>
   );
 };

@@ -137,6 +137,7 @@ interface AdminDashboardViewProps {
   onAddDriveFolder?: (folder: Omit<DriveFolder, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onEditDriveFolder?: (id: string, updated: Partial<DriveFolder>) => void;
   onDeleteDriveFolder?: (id: string) => void;
+  onAddFacultyFolder?: (folder: Omit<FacultyFolder, 'id' | 'createdAt' | 'updatedAt' | 'itemCount'>) => void;
   onDeleteFacultyFolder?: (id: string) => void;
   onDeleteFacultyFile?: (id: string) => void;
   shouldOpenModal?: boolean;
@@ -162,6 +163,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   onAddDriveFolder,
   onEditDriveFolder,
   onDeleteDriveFolder,
+  onAddFacultyFolder,
   onDeleteFacultyFolder,
   onDeleteFacultyFile,
   shouldOpenModal,
@@ -3366,6 +3368,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           facultyFolders={facultyFolders}
           facultyFiles={facultyFiles}
           currentUser={currentUser}
+          onAddFacultyFolder={onAddFacultyFolder}
           onDeleteFacultyFolder={onDeleteFacultyFolder}
           onDeleteFacultyFile={onDeleteFacultyFile}
         />

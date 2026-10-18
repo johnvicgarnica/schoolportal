@@ -50,7 +50,7 @@ export interface FacultyFolder {
   description?: string;
   category?: string;
   color?: string;
-  driveUrl?: string;
+  driveUrl?: string; // Optional legacy / removed from UI
   driveId?: string;
   itemCount?: number;
   createdAt: string;
@@ -81,11 +81,13 @@ export interface FacultyPersonalFile {
   fileName: string;
   fileSizeBytes: number;
   fileSizeFormatted: string;
-  format: string;
+  format: string; // 'pdf' | 'docx' | 'doc' | 'pptx' | 'xlsx'
   category: string;
-  driveUrl?: string;
-  isGoogleDriveLink?: boolean;
-  uploadedAt: string;
+  uploadedAt: string; // ISO date string
+  expiresAt: string; // ISO date string (1 week from upload)
+  fileData?: string; // Base64 data URL
+  previewSnippet?: string; // Quick text snippet / summary
+  chunkCount?: number; // Number of chunks if stored split in Firestore
   description?: string;
   downloadUrl?: string;
 }

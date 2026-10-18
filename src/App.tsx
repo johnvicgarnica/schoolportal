@@ -507,6 +507,7 @@ export function App() {
       ...fileData,
       id: `ffile-${Date.now()}`,
       uploadedAt: today,
+      expiresAt: fileData.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     };
     setFacultyFiles((prev) => [newFile, ...prev]);
     saveFacultyFileToFirestore(newFile);
@@ -795,6 +796,7 @@ export function App() {
               onAddDriveFolder={handleAddDriveFolder}
               onEditDriveFolder={handleEditDriveFolder}
               onDeleteDriveFolder={handleDeleteDriveFolder}
+              onAddFacultyFolder={handleAddFacultyFolder}
               onDeleteFacultyFolder={handleDeleteFacultyFolder}
               onDeleteFacultyFile={handleDeleteFacultyFile}
               shouldOpenModal={shouldOpenAnnouncementModal}

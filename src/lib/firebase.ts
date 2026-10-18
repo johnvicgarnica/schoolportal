@@ -9,7 +9,9 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
-  onSnapshot
+  onSnapshot,
+  query,
+  where
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder, GalleryPhoto, EmbeddedVideo, UserProfile } from '../types';
@@ -91,6 +93,7 @@ const ANNOUNCEMENTS_COL = 'announcements';
 const DRIVE_FOLDERS_COL = 'driveFolders';
 const FACULTY_FOLDERS_COL = 'facultyFolders';
 const FACULTY_FILES_COL = 'facultyFiles';
+const FACULTY_FILE_CHUNKS_COL = 'facultyFileChunks';
 const FACULTY_SUBMISSIONS_COL = 'facultySubmissions';
 const FACULTY_TOSTQ_COL = 'facultyTosTq';
 const FACULTY_SCHOOL_FORMS_COL = 'facultySchoolForms';
@@ -1274,16 +1277,73 @@ export const deleteFacultyFileFromLocalStorage = (id: string) => {
   }
 };
 
+// Automatic cleanup of files older than 1 week (7 days)
+export const cleanupExpiredFacultyFiles = async () => {
+  try {
+    const files = getStoredFacultyFiles();
+    const now = Date.now();
+    for (const file of files) {
+      const expireTime = file.expiresAt
+        ? new Date(file.expiresAt).getTime()
+        : new Date(file.uploadedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
+      if (expireTime <= now) {
+        console.log(`[SVNHS Auto-Cleanup] Purging expired faculty file "${file.title}" (uploaded ${file.uploadedAt})`);
+        await deleteFacultyFileFromFirestore(file.id);
+      }
+    }
+  } catch (err) {
+    console.warn('Error during faculty file auto-cleanup:', err);
+  }
+};
+
 export const saveFacultyFileToFirestore = async (file: FacultyPersonalFile) => {
   try {
-    saveFacultyFileToLocalStorage(file);
-    await setDoc(doc(db, FACULTY_FILES_COL, file.id), file, { merge: true });
+    // Enforce 1-week expiration timestamp if not set
+    const preparedFile: FacultyPersonalFile = {
+      ...file,
+      expiresAt: file.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    };
+
+    // Always cache full file (including fileData) in local offline store
+    saveFacultyFileToLocalStorage(preparedFile);
+
+    const CHUNK_SIZE = 450000; // ~450 KB chunks to safely remain under Firestore 1MB doc limit
+    const rawData = preparedFile.fileData;
+
+    if (rawData && rawData.length > CHUNK_SIZE) {
+      // Split large file into multiple chunks
+      const totalChunks = Math.ceil(rawData.length / CHUNK_SIZE);
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkSlice = rawData.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        const chunkDocId = `${preparedFile.id}_chunk_${i}`;
+        await setDoc(doc(db, FACULTY_FILE_CHUNKS_COL, chunkDocId), {
+          fileId: preparedFile.id,
+          chunkIndex: i,
+          totalChunks,
+          data: chunkSlice,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      // Save main file document without giant fileData field to avoid 1MB limit
+      const { fileData: _omit, ...metadataDoc } = preparedFile;
+      await setDoc(doc(db, FACULTY_FILES_COL, preparedFile.id), {
+        ...metadataDoc,
+        chunkCount: totalChunks,
+      }, { merge: true });
+    } else {
+      // Small file (< 450KB) - store directly in document
+      await setDoc(doc(db, FACULTY_FILES_COL, preparedFile.id), {
+        ...preparedFile,
+        chunkCount: 1,
+      }, { merge: true });
+    }
 
     // Update folder itemCount if exists
     const folders = getStoredFacultyFolders();
-    const targetFolder = folders.find((f) => f.id === file.folderId);
+    const targetFolder = folders.find((f) => f.id === preparedFile.folderId);
     if (targetFolder) {
-      const folderFiles = getStoredFacultyFiles().filter((f) => f.folderId === file.folderId);
+      const folderFiles = getStoredFacultyFiles().filter((f) => f.folderId === preparedFile.folderId);
       targetFolder.itemCount = folderFiles.length;
       targetFolder.updatedAt = new Date().toISOString();
       await saveFacultyFolderToFirestore(targetFolder);
@@ -1291,6 +1351,61 @@ export const saveFacultyFileToFirestore = async (file: FacultyPersonalFile) => {
   } catch (err) {
     console.error('Error saving faculty file to Firestore:', err);
   }
+};
+
+/**
+ * Retrieve the full file data URL for viewing, previewing, or downloading.
+ * Reassembles chunks if the file was split into multiple documents in Firestore.
+ */
+export const getFacultyFileData = async (file: FacultyPersonalFile): Promise<string | null> => {
+  if (file.fileData) return file.fileData;
+
+  // Check local offline store
+  const storedList = getStoredFacultyFiles();
+  const cached = storedList.find((f) => f.id === file.id);
+  if (cached?.fileData) {
+    return cached.fileData;
+  }
+
+  // Check if chunked in Firestore
+  if (file.chunkCount && file.chunkCount > 1) {
+    try {
+      const chunksQuery = query(
+        collection(db, FACULTY_FILE_CHUNKS_COL),
+        where('fileId', '==', file.id)
+      );
+      const snapshot = await getDocs(chunksQuery);
+      if (!snapshot.empty) {
+        const chunkDocs = snapshot.docs.map((d) => d.data() as { chunkIndex: number; data: string });
+        chunkDocs.sort((a, b) => a.chunkIndex - b.chunkIndex);
+        const assembled = chunkDocs.map((c) => c.data).join('');
+        if (assembled) {
+          // Cache assembled in local store for next time
+          cached && (cached.fileData = assembled);
+          saveFacultyFileToLocalStorage({ ...file, fileData: assembled });
+          return assembled;
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching file chunks from Firestore:', err);
+    }
+  }
+
+  // Fallback: check main doc in Firestore
+  try {
+    const docSnap = await getDoc(doc(db, FACULTY_FILES_COL, file.id));
+    if (docSnap.exists()) {
+      const data = docSnap.data() as FacultyPersonalFile;
+      if (data.fileData) {
+        saveFacultyFileToLocalStorage(data);
+        return data.fileData;
+      }
+    }
+  } catch (err) {
+    console.warn('Error fetching file doc from Firestore:', err);
+  }
+
+  return null;
 };
 
 export const deleteFacultyFileFromFirestore = async (id: string) => {
@@ -1302,11 +1417,22 @@ export const deleteFacultyFileFromFirestore = async (id: string) => {
     deleteFacultyFileFromLocalStorage(id);
     await deleteDoc(doc(db, FACULTY_FILES_COL, id));
 
+    // Delete any chunks if present
+    if (file?.chunkCount && file.chunkCount > 1) {
+      for (let i = 0; i < file.chunkCount; i++) {
+        try {
+          await deleteDoc(doc(db, FACULTY_FILE_CHUNKS_COL, `${id}_chunk_${i}`));
+        } catch {
+          // Ignore individual chunk delete error
+        }
+      }
+    }
+
     if (folderId) {
       const folders = getStoredFacultyFolders();
       const targetFolder = folders.find((f) => f.id === folderId);
       if (targetFolder) {
-        const remaining = getStoredFacultyFiles().filter((f) => f.folderId === folderId);
+        const remaining = getStoredFacultyFiles().filter((f) => f.folderId === folderId && f.id !== id);
         targetFolder.itemCount = remaining.length;
         targetFolder.updatedAt = new Date().toISOString();
         await saveFacultyFolderToFirestore(targetFolder);
@@ -1324,7 +1450,11 @@ export const subscribeFacultyFiles = (onUpdate: (files: FacultyPersonalFile[]) =
       const list: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
       list.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
 
+      // Clean up local list with fresh data
       saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
+
+      // Trigger asynchronous background cleanup of any expired 1-week files
+      cleanupExpiredFacultyFiles();
 
       onUpdate(list);
     },
