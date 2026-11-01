@@ -13,11 +13,14 @@ import {
   EmbeddedVideo,
 } from '../types';
 import { AdminFacultyFoldersDirectory } from './AdminFacultyFoldersDirectory';
+import { GoogleDocsSpreadsheetEditor } from './GoogleDocsSpreadsheetEditor';
+import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
 import { SubmissionReportView } from './SubmissionReportView';
 import { AdminGalleryManager } from './AdminGalleryManager';
 import { AdminVideoManager } from './AdminVideoManager';
 import { AdminOnlineUsersMonitor } from './AdminOnlineUsersMonitor';
+import { AdminDatabaseStorageManager } from './AdminDatabaseStorageManager';
 import {
   saveFacultyToFirestore,
   updateFacultyAdvisoryRoleInFirestore,
@@ -64,6 +67,8 @@ import {
   getStoredFacultyRequests,
   getStoredAdminRequests,
   getStoredPasswordResetRequests,
+  saveFacultyFileToFirestore,
+  getFacultyFileData,
 } from '../lib/firebase';
 import {
   Megaphone,
@@ -109,6 +114,7 @@ import {
   Video,
   Activity,
   Radio,
+  HardDrive,
 } from 'lucide-react';
 
 interface AdminDashboardViewProps {
@@ -172,20 +178,22 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
-  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', 'submission-report', 'gallery', 'videos', or 'online-users')
+  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', 'submission-report', 'gallery', 'videos', 'online-users', or 'database-storage')
   // Default to 'announcements' so passwords page is not exposed by default
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery' | 'videos' | 'online-users'>('announcements');
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery' | 'videos' | 'online-users' | 'database-storage'>('announcements');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
 
   // Real-time user presence & online logged-in users tracking (Master Admin)
   const [presences, setPresences] = useState<UserPresence[]>([]);
 
   useEffect(() => {
+    // Only subscribe to user presence when the 'online-users' monitor tab is active
+    if (adminSubTab !== 'online-users') return;
     const unsubPresence = subscribeUserPresence((list) => {
       setPresences(list || []);
     });
     return () => unsubPresence();
-  }, []);
+  }, [adminSubTab]);
 
   const onlineUsersCount = useMemo(() => {
     return presences.filter((p) => isPresenceOnline(p)).length;
@@ -197,12 +205,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   });
 
   useEffect(() => {
+    // Only subscribe to gallery photos when the 'gallery' manager tab is active
+    if (adminSubTab !== 'gallery') return;
     seedInitialGalleryPhotosIfEmpty();
     const unsub = subscribeGalleryPhotos((photos) => {
       setGalleryPhotos(photos || []);
     });
     return () => unsub();
-  }, []);
+  }, [adminSubTab]);
 
   // Login Page Embedded Videos State (Master Admin)
   const [embeddedVideos, setEmbeddedVideos] = useState<EmbeddedVideo[]>(() => {
@@ -210,11 +220,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   });
 
   useEffect(() => {
+    // Only subscribe to videos when the 'videos' manager tab is active
+    if (adminSubTab !== 'videos') return;
     const unsubVideos = subscribeEmbeddedVideos((videos) => {
       setEmbeddedVideos(videos || []);
     });
     return () => unsubVideos();
-  }, []);
+  }, [adminSubTab]);
 
   // School Permanent Folders State (SCHOOL FORMS & SCHOOL DOCUMENTS)
   const [schoolFolders, setSchoolFolders] = useState<SchoolPermanentFolder[]>(() => {
@@ -230,13 +242,15 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   }, [propPermanentFolders]);
 
   useEffect(() => {
+    // Only subscribe directly if parent App.tsx didn't pass folders down
+    if (propPermanentFolders && propPermanentFolders.length > 0) return;
     const unsub = subscribeSchoolPermanentFolders((list) => {
       if (list && list.length > 0) {
         setSchoolFolders(list);
       }
     });
     return () => unsub();
-  }, []);
+  }, [propPermanentFolders]);
 
   const formsPermanentFolder = useMemo(() => {
     return schoolFolders.find((f) => f.id === 'school-forms') || INITIAL_SCHOOL_PERMANENT_FOLDERS[0];
@@ -270,89 +284,187 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     }
   }, [docsPermanentFolder]);
 
-  const handleSaveFormsLink = async (e: React.FormEvent) => {
+  // Admin In-App Spreadsheet Editor state
+  const [adminSpreadsheetFile, setAdminSpreadsheetFile] = useState<FacultyPersonalFile | null>(null);
+  const [adminSpreadsheetDataUrl, setAdminSpreadsheetDataUrl] = useState<string | null>(null);
+  const [adminPreviewFile, setAdminPreviewFile] = useState<FacultyPersonalFile | null>(null);
+
+  const handleOpenAdminSpreadsheetEditor = async (file: FacultyPersonalFile) => {
+    try {
+      let data = file.fileData;
+      if (!data) {
+        data = await getFacultyFileData(file);
+      }
+      setAdminSpreadsheetFile(file);
+      setAdminSpreadsheetDataUrl(data || '');
+    } catch (err) {
+      console.error('Error opening spreadsheet editor in admin:', err);
+      showToast('⚠️ Could not open spreadsheet data.');
+    }
+  };
+
+  const handleSaveAdminSpreadsheet = async (updatedFileDoc: FacultyPersonalFile) => {
+    try {
+      await saveFacultyFileToFirestore(updatedFileDoc);
+      showToast(`⚡ Spreadsheet "${updatedFileDoc.title}" saved directly to Firebase!`);
+    } catch (err) {
+      console.error('Error saving spreadsheet in admin:', err);
+      showToast('⚠️ Error saving spreadsheet changes.');
+    }
+  };
+
+  // Admin Direct Upload Modal State (for School Forms & School Documents)
+  const [adminUploadModal, setAdminUploadModal] = useState<{ folderId: string; subfolderId?: string } | null>(null);
+  const [adminUploadTitle, setAdminUploadTitle] = useState<string>('');
+  const [adminUploadGrade, setAdminUploadGrade] = useState<string>('Grade 11');
+  const [adminUploadSection, setAdminUploadSection] = useState<string>('');
+  const [adminUploadFile, setAdminUploadFile] = useState<File | null>(null);
+  const [adminUploadError, setAdminUploadError] = useState<string | null>(null);
+  const [isAdminUploading, setIsAdminUploading] = useState<boolean>(false);
+
+  const handleOpenAdminUpload = (folderId: string) => {
+    setAdminUploadModal({ folderId });
+    setAdminUploadGrade('Grade 11');
+    setAdminUploadSection('');
+    setAdminUploadTitle('');
+    setAdminUploadFile(null);
+    setAdminUploadError(null);
+  };
+
+  const handleAdminFileSelection = (selectedFile: File) => {
+    setAdminUploadError(null);
+    const ext = (selectedFile.name.split('.').pop() || '').toLowerCase();
+    const validExts = ['xlsx', 'xls', 'pdf', 'docx', 'doc'];
+
+    if (!validExts.includes(ext)) {
+      setAdminUploadError(`Invalid file format. Allowed: ${validExts.map((e) => `.${e}`).join(', ')}`);
+      setAdminUploadFile(null);
+      return;
+    }
+
+    if (selectedFile.size > 2 * 1024 * 1024) {
+      const sizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2);
+      setAdminUploadError(`File exceeds maximum limit of 2MB (Selected file is ${sizeMb} MB).`);
+      setAdminUploadFile(null);
+      return;
+    }
+
+    setAdminUploadFile(selectedFile);
+    if (!adminUploadTitle.trim()) {
+      setAdminUploadTitle(selectedFile.name.replace(/\.[^/.]+$/, ''));
+    }
+  };
+
+  const handleAdminFileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminUploadModal || !adminUploadFile) {
+      setAdminUploadError('Please choose a file to upload.');
+      return;
+    }
+
+    if (!adminUploadTitle.trim()) {
+      setAdminUploadError('Please provide a document title.');
+      return;
+    }
+
+    setIsAdminUploading(true);
+    setAdminUploadError(null);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const fileDataUrl = reader.result as string;
+        const fileSizeBytes = adminUploadFile.size;
+        const sizeMb = fileSizeBytes / (1024 * 1024);
+        const fileSizeFormatted = sizeMb >= 1 ? `${sizeMb.toFixed(2)} MB` : `${(fileSizeBytes / 1024).toFixed(0)} KB`;
+        const ext = (adminUploadFile.name.split('.').pop() || 'xlsx').toLowerCase();
+
+        const finalTitle = adminUploadTitle.trim();
+        const finalFileName = adminUploadFile.name;
+
+        const newFileDoc: FacultyPersonalFile = {
+          id: `school_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          folderId: adminUploadModal.folderId,
+          facultyEmail: currentUser.email || 'admin@deped.gov.ph',
+          facultyName: currentUser.name || 'School Administration',
+          title: finalTitle,
+          fileName: finalFileName,
+          fileSizeBytes,
+          fileSizeFormatted,
+          format: ext as any,
+          category: adminUploadModal.folderId === 'school-forms' ? 'DepEd Forms & Portfolio' : 'School Documents',
+          uploadedAt: new Date().toISOString(),
+          fileData: fileDataUrl,
+          description: '',
+        };
+
+        await saveFacultyFileToFirestore(newFileDoc);
+        setIsAdminUploading(false);
+        setAdminUploadModal(null);
+        showToast(`⚡ File "${finalTitle}" successfully uploaded to School Firebase Repository!`);
+      };
+
+      reader.readAsDataURL(adminUploadFile);
+    } catch (err) {
+      console.error('Error uploading file in admin:', err);
+      setAdminUploadError('Failed to upload file.');
+      setIsAdminUploading(false);
+    }
+  };
+
+  const handleSaveForms = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingForms(true);
-    const driveId = extractDriveId(formsUrlInput.trim());
+    const driveId = extractDriveId(formsUrlInput.trim()) || '';
     try {
       if (onUpdateSchoolPermanentFolder) {
         onUpdateSchoolPermanentFolder('school-forms', {
           driveUrl: formsUrlInput.trim(),
+          driveId,
           description: formsDescInput.trim(),
           updatedBy: currentUser.name || 'Admin',
         });
       } else {
         await updateSchoolPermanentFolderInFirestore('school-forms', {
           driveUrl: formsUrlInput.trim(),
+          driveId,
           description: formsDescInput.trim(),
-          driveId: driveId || '',
           updatedBy: currentUser.name || 'Admin',
         });
       }
-      showToast('⚡ SCHOOL FORMS embedded Google Drive link saved! Visible immediately in all faculty workspaces.');
+      showToast('⚡ SCHOOL FORMS Google Drive link & details updated!');
     } catch {
-      showToast('⚠️ Error updating SCHOOL FORMS link. Please check network.');
+      showToast('⚠️ Error updating folder link.');
     } finally {
       setIsSavingForms(false);
     }
   };
 
-  const handleSaveDocsLink = async (e: React.FormEvent) => {
+  const handleSaveDocs = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingDocs(true);
-    const driveId = extractDriveId(docsUrlInput.trim());
+    const driveId = extractDriveId(docsUrlInput.trim()) || '';
     try {
       if (onUpdateSchoolPermanentFolder) {
         onUpdateSchoolPermanentFolder('school-documents', {
           driveUrl: docsUrlInput.trim(),
+          driveId,
           description: docsDescInput.trim(),
           updatedBy: currentUser.name || 'Admin',
         });
       } else {
         await updateSchoolPermanentFolderInFirestore('school-documents', {
           driveUrl: docsUrlInput.trim(),
+          driveId,
           description: docsDescInput.trim(),
-          driveId: driveId || '',
           updatedBy: currentUser.name || 'Admin',
         });
       }
-      showToast('⚡ SCHOOL DOCUMENTS embedded Google Drive link saved! Visible immediately in all faculty workspaces.');
+      showToast('⚡ SCHOOL DOCUMENTS Google Drive link & details updated!');
     } catch {
-      showToast('⚠️ Error updating SCHOOL DOCUMENTS link. Please check network.');
+      showToast('⚠️ Error updating folder link.');
     } finally {
       setIsSavingDocs(false);
-    }
-  };
-
-  const handleResetFormsDefault = async () => {
-    if (window.confirm('Reset SCHOOL FORMS embedded link to official DepEd default?')) {
-      const defaultUrl = INITIAL_SCHOOL_PERMANENT_FOLDERS[0].driveUrl;
-      const defaultDesc = INITIAL_SCHOOL_PERMANENT_FOLDERS[0].description;
-      setFormsUrlInput(defaultUrl);
-      setFormsDescInput(defaultDesc);
-      await updateSchoolPermanentFolderInFirestore('school-forms', {
-        driveUrl: defaultUrl,
-        description: defaultDesc,
-        driveId: extractDriveId(defaultUrl) || '',
-        updatedBy: currentUser.name || 'Admin',
-      });
-      showToast('⚡ SCHOOL FORMS link reset to default.');
-    }
-  };
-
-  const handleResetDocsDefault = async () => {
-    if (window.confirm('Reset SCHOOL DOCUMENTS embedded link to official DepEd default?')) {
-      const defaultUrl = INITIAL_SCHOOL_PERMANENT_FOLDERS[1].driveUrl;
-      const defaultDesc = INITIAL_SCHOOL_PERMANENT_FOLDERS[1].description;
-      setDocsUrlInput(defaultUrl);
-      setDocsDescInput(defaultDesc);
-      await updateSchoolPermanentFolderInFirestore('school-documents', {
-        driveUrl: defaultUrl,
-        description: defaultDesc,
-        driveId: extractDriveId(defaultUrl) || '',
-        updatedBy: currentUser.name || 'Admin',
-      });
-      showToast('⚡ SCHOOL DOCUMENTS link reset to default.');
     }
   };
 
@@ -598,10 +710,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   // Restrict Accounts & Passwords tab strictly to Master Admin, and restrict Faculty Folders from Coordinator
   // Ensure non-coordinator admin does not have submission-report subtab in Admin Dashboard (redundant since there is outer Submission Report)
   useEffect(() => {
-    if (!isMasterAdmin && (adminSubTab === 'passwords' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'online-users')) {
+    if (!isMasterAdmin && (adminSubTab === 'passwords' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'online-users' || adminSubTab === 'database-storage')) {
       setAdminSubTab('announcements');
     }
-    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'online-users')) {
+    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'online-users' || adminSubTab === 'database-storage')) {
       setAdminSubTab('announcements');
     }
     if (!isCoordinator && adminSubTab === 'submission-report') {
@@ -764,8 +876,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     }
   };
 
-  // Real-Time Firebase Subscriptions
+  // Real-Time Firebase Subscriptions - strictly active only when Accounts & Passwords tab is open
   useEffect(() => {
+    if (adminSubTab !== 'passwords') return;
+
     const unsubFaculty = subscribeFaculty((list) => {
       setFacultyList(list || []);
     });
@@ -813,7 +927,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       unsubSettings();
       unsubPasswordResets();
     };
-  }, []);
+  }, [adminSubTab]);
 
   // Handlers for Faculty Requests
   const handleAcceptRequest = (req: { id: string; name: string; email: string; password: string; department?: string }) => {
@@ -1382,22 +1496,22 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       )}
 
       {/* Main Admin Dashboard Header Banner */}
-      <div className="bg-[#141c2c] p-6 rounded-2xl border border-[#24334b] shadow-xs relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="space-y-1.5 relative z-10">
+      <div className="bg-[#141c2c] px-4 py-3 sm:px-5 sm:py-3.5 rounded-2xl border border-[#24334b] shadow-xs relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div className="space-y-0.5 relative z-10">
           <div className="flex items-center space-x-2.5">
-            <div className="p-2.5 bg-blue-500/20 border border-blue-500/40 rounded-xl text-blue-400 shadow-2xs">
-              <ShieldCheck className="w-6 h-6" />
+            <div className="p-2 bg-blue-500/20 border border-blue-500/40 rounded-xl text-blue-400 shadow-2xs shrink-0">
+              <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-xl font-bold font-mono text-slate-100 tracking-tight">
+              <div className="flex items-center space-x-2 flex-wrap">
+                <h1 className="text-base sm:text-lg font-bold font-mono text-slate-100 tracking-tight">
                   {isCoordinator ? 'SVNHS Coordinator Dashboard' : 'SVNHS Admin Security & Management Dashboard'}
                 </h1>
-                <span className="bg-blue-500/20 text-blue-300 border border-blue-500/40 text-[10px] px-2 py-0.5 rounded font-mono font-extrabold uppercase">
+                <span className="bg-blue-500/20 text-blue-300 border border-blue-500/40 text-[9px] px-2 py-0.5 rounded font-mono font-extrabold uppercase">
                   {isCoordinator ? 'COORDINATOR PANEL' : 'MASTER CONTROL'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">
+              <p className="text-[11px] sm:text-xs text-slate-400 font-medium">
                 {isCoordinator ? 'San Vicente National High School • Senior High School Coordinator Panel' : 'San Vicente National High School • Administrator Panel'}
               </p>
             </div>
@@ -1405,19 +1519,19 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
 
         {/* Master Admin Indicator Badge & Quick Online Monitor Shortcut */}
-        <div className="flex items-center flex-wrap gap-2">
+        <div className="flex items-center flex-wrap gap-2 shrink-0">
           {isMasterAdmin && (
             <button
               type="button"
               onClick={() => setAdminSubTab('online-users')}
-              className="flex items-center space-x-2 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 px-3 py-2 rounded-xl text-xs font-mono transition-all cursor-pointer shadow-xs text-emerald-300 hover:text-emerald-100"
+              className="flex items-center space-x-1.5 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all cursor-pointer shadow-xs text-emerald-300 hover:text-emerald-100"
               title="Click to view all active & online logged-in users"
             >
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
               <span className="font-bold">{onlineUsersCount} Online Now</span>
             </button>
           )}
-          <div className="flex items-center space-x-2 bg-[#0d1524] border border-[#24334b] px-3 py-2 rounded-xl text-xs font-mono">
+          <div className="flex items-center space-x-1.5 bg-[#0d1524] border border-[#24334b] px-2.5 py-1.5 rounded-lg text-xs font-mono">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-slate-400 font-bold">Logged in as:</span>
             <span className="text-slate-100 font-bold truncate max-w-[180px]">{currentUser.name}</span>
@@ -1563,6 +1677,26 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </button>
           )}
 
+          {/* Master Admin Firebase Database Storage & Data Usage Subtab */}
+          {isMasterAdmin && !isCoordinator && (
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('database-storage')}
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
+                adminSubTab === 'database-storage'
+                  ? 'bg-cyan-700 text-white shadow-md ring-2 ring-cyan-400/60 border border-cyan-500'
+                  : 'bg-cyan-600/90 hover:bg-cyan-600 text-white border border-cyan-500/60 hover:shadow-xs'
+              }`}
+              title="Monitor Firebase database quota and manage data usage"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-cyan-200 shrink-0" />
+              <span>Database Storage</span>
+              <span className="bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5 hidden xl:inline">
+                1 GiB
+              </span>
+            </button>
+          )}
+
           {/* RETAINED FOR COORDINATOR DASHBOARD: Submission Report for Class Advisers */}
           {isCoordinator && (
             <button
@@ -1642,8 +1776,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {pendingPasswordResets.map((req) => (
-                      <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                    {pendingPasswordResets.map((req, idx) => (
+                      <tr key={`${req.id || 'reset'}-${req.email}-${idx}`} className="hover:bg-slate-50 transition-colors">
                         <td className="p-3 font-bold text-slate-900 flex items-center space-x-2">
                           <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                           <span>{req.name}</span>
@@ -1752,10 +1886,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {facultyRequests.map((req) => {
+                    {facultyRequests.map((req, idx) => {
                       const isJHS = (req.department || '').toLowerCase().includes('junior');
                       return (
-                        <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                        <tr key={`${req.id || 'faculty-req'}-${req.email}-${idx}`} className="hover:bg-slate-50 transition-colors">
                           <td className="p-3 font-bold text-slate-900 flex items-center space-x-2">
                             <UserCheck className="w-4 h-4 text-amber-600 shrink-0" />
                             <span>{req.name}</span>
@@ -1881,8 +2015,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {adminRequests.map((req) => (
-                      <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                    {adminRequests.map((req, idx) => (
+                      <tr key={`${req.id || 'admin-req'}-${req.email}-${idx}`} className="hover:bg-slate-50 transition-colors">
                         <td className="p-3 font-bold text-slate-900 flex items-center space-x-2">
                           <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
                           <span>{req.name}</span>
@@ -2344,7 +2478,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         }
                         return true;
                       })
-                      .map((f) => {
+                      .map((f, idx) => {
                       const emailKey = f.email.toLowerCase();
                       const customPass = customFacultyPasswords[emailKey];
                       const isCustom = Boolean(customPass);
@@ -2352,7 +2486,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       const roleValue = f.advisoryRole || 'Non-Adviser';
 
                       return (
-                        <tr key={f.id} className="hover:bg-slate-50 transition-colors">
+                        <tr key={`${f.id || 'faculty'}-${emailKey}-${idx}`} className="hover:bg-slate-50 transition-colors">
                           <td className="p-3 font-bold text-slate-900">{f.name}</td>
                           <td className="p-3 text-slate-700">{f.email}</td>
 
@@ -2529,12 +2663,12 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {adminList.map((admin) => {
+                  {adminList.map((admin, idx) => {
                     const cleanEmail = admin.email.toLowerCase();
                     const isMaster = cleanEmail === (masterAdminEmail || 'johnvic.garnica@deped.gov.ph').toLowerCase();
 
                     return (
-                      <tr key={admin.id} className="hover:bg-slate-50 transition-colors">
+                      <tr key={`${admin.id || 'admin'}-${cleanEmail}-${idx}`} className="hover:bg-slate-50 transition-colors">
                         <td className="p-3 font-bold text-slate-900 flex items-center space-x-2">
                           <span>{admin.name}</span>
                           {isMaster && (
@@ -3371,6 +3505,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           onAddFacultyFolder={onAddFacultyFolder}
           onDeleteFacultyFolder={onDeleteFacultyFolder}
           onDeleteFacultyFile={onDeleteFacultyFile}
+          onOpenSpreadsheetEditor={handleOpenAdminSpreadsheetEditor}
         />
       )}
 
@@ -3396,7 +3531,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   School Forms & Documents Management
                 </h2>
                 <p className="text-xs sm:text-sm text-indigo-100/90 max-w-2xl leading-relaxed">
-                  Manage the official Google Drive folders for <strong className="text-white">"SCHOOL FORMS"</strong>, <strong className="text-white">"SCHOOL DOCUMENTS"</strong>, and add necessary department folders. These folders appear permanently in every faculty member's <strong className="text-white">"My Workspace"</strong> view.
+                  Manage official school repositories for <strong className="text-white">"SCHOOL FORMS"</strong> and <strong className="text-white">"SCHOOL DOCUMENTS"</strong>. All documents are stored directly in Firebase Cloud Storage (strictly max 2MB per upload) with permanent retention and in-app viewing/editing.
                 </p>
               </div>
 
@@ -3482,7 +3617,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </span>
           </div>
 
-          {/* TWO PERMANENT FOLDER EDITORS */}
+          {/* TWO PERMANENT FOLDER EDITORS - FIREBASE CENTRAL STORAGE */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* 1. SCHOOL FORMS */}
             <div className="bg-[#141c2c] border-2 border-[#24334b] hover:border-blue-500/60 rounded-3xl p-6 shadow-sm space-y-5 transition-all">
@@ -3496,9 +3631,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       <span className="bg-blue-500/20 text-blue-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-blue-500/40 uppercase">
                         Permanent System Folder
                       </span>
-                      <span className="text-[10px] font-mono text-slate-400 font-semibold flex items-center space-x-1">
-                        <Lock className="w-3 h-3 text-slate-400" />
-                        <span>All Faculty Workspaces</span>
+                      <span className="text-[10px] font-mono text-emerald-400 font-semibold flex items-center space-x-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Firebase Cloud Storage • Max 2MB</span>
                       </span>
                     </div>
                     <h3 className="text-lg font-bold text-slate-100 mt-1">
@@ -3507,133 +3642,148 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 rounded-md font-bold">
-                    Active
-                  </span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAdminUpload('school-forms')}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Upload File (Max 2MB)</span>
+                  </button>
                 </div>
               </div>
 
-              <form onSubmit={handleSaveFormsLink} className="space-y-4 text-xs font-mono">
-                <div>
-                  <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1 flex items-center justify-between">
-                    <span className="flex items-center space-x-1.5">
-                      <Link className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Embedded Google Drive Link *</span>
-                    </span>
-                    {extractDriveId(formsUrlInput) ? (
-                      <span className="text-[10px] text-emerald-400 font-bold lowercase">
-                        Drive ID: {extractDriveId(formsUrlInput)?.substring(0, 14)}...
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-amber-400">Standard Google Drive folder URL</span>
-                    )}
-                  </label>
-                  <input
-                    type="url"
-                    value={formsUrlInput}
-                    onChange={(e) => setFormsUrlInput(e.target.value)}
-                    placeholder="https://drive.google.com/drive/folders/..."
-                    required
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:bg-[#101a2c] font-mono transition-all"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Paste the shared Google Drive folder link containing DepEd SF1-SF10, Clearance, Inventory, and official School Forms.
-                  </p>
+              {/* FIREBASE CENTRAL STORAGE STATUS BANNER */}
+              <div className="bg-[#0d1524] border border-blue-500/30 rounded-2xl p-4 space-y-2 text-xs font-mono">
+                <div className="flex items-center justify-between">
+                  <span className="text-blue-300 font-bold flex items-center space-x-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span>Firebase Cloud Storage Active</span>
+                  </span>
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded font-bold">
+                    Strict Max 2MB / File
+                  </span>
                 </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
+                  All DepEd school forms and SF 2 attendance documents are uploaded and stored directly in Firebase Cloud Storage without external Google Drive links. Files are permanent and never auto-deleted.
+                </p>
+              </div>
 
+              {/* Uploaded Files in School Forms */}
+              <div className="space-y-2 max-h-56 overflow-y-auto overscroll-contain pr-1 scrollbar-thin scrollbar-thumb-slate-700">
+                {(() => {
+                  const filteredFormsFiles = facultyFiles.filter(
+                    (f) => f.folderId === 'school-forms'
+                  );
+
+                  if (filteredFormsFiles.length === 0) {
+                    return (
+                      <div className="p-4 text-center text-xs font-mono text-slate-400 border border-dashed border-[#24334b] rounded-2xl bg-[#0d1524]">
+                        No school form documents in Firebase yet. Click "+ Upload File" or faculty can upload in their workspace.
+                      </div>
+                    );
+                  }
+
+                  return filteredFormsFiles.map((file) => {
+                    const isSheet = (file.format || '').toLowerCase().includes('xls');
+
+                    return (
+                      <div
+                        key={file.id}
+                        className="p-3 bg-[#0d1524] border border-[#24334b] rounded-2xl flex items-center justify-between gap-3 text-xs font-mono hover:border-slate-600 transition-all"
+                      >
+                        <div className="flex items-center space-x-2.5 min-w-0">
+                          <div className={`p-2 rounded-xl shrink-0 ${isSheet ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                            {isSheet ? <FileSpreadsheet className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-100 truncate flex items-center space-x-1.5">
+                              <span>{file.title}</span>
+                              {file.gradeLevel && (
+                                <span className="bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 text-[9px] px-1.5 py-0.2 rounded">
+                                  {file.gradeLevel} - {file.section}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate">
+                              {file.fileName} • {file.fileSizeFormatted} • By: {file.facultyName || 'Faculty'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setAdminPreviewFile(file)}
+                            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                            title="View original file"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View</span>
+                          </button>
+                          {isSheet && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAdminSpreadsheetEditor(file)}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                              title="Edit spreadsheet inside app"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit in App</span>
+                            </button>
+                          )}
+                          {file.fileData && (
+                            <a
+                              href={file.fileData}
+                              download={file.fileName || `${file.title}.xlsx`}
+                              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
+                              title="Download file"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onDeleteFacultyFile?.(file.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all cursor-pointer"
+                            title="Delete file"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+
+              {/* Instructions / Description for Faculty */}
+              <form onSubmit={handleSaveForms} className="space-y-3 pt-3 border-t border-[#24334b] text-xs font-mono">
                 <div>
                   <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1">
-                    Folder Description & Instructions for Faculty
+                    Folder Guidelines / Instructions for Faculty
                   </label>
                   <textarea
                     rows={2}
                     value={formsDescInput}
                     onChange={(e) => setFormsDescInput(e.target.value)}
-                    placeholder="Provide notes or guidelines for faculty regarding school forms..."
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:bg-[#101a2c] font-mono transition-all resize-none"
+                    placeholder="Provide notes or instructions for faculty regarding school forms..."
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-mono transition-all resize-none"
                   />
                 </div>
 
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#24334b]">
-                  <div className="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowFormsPreview(!showFormsPreview)}
-                      className="px-3 py-2 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-slate-300" />
-                      <span>{showFormsPreview ? 'Hide Preview' : 'Preview Webview'}</span>
-                    </button>
-
-                    {formsPermanentFolder.driveUrl && (
-                      <a
-                        href={formsPermanentFolder.driveUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
-                        title="Open in new browser tab"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Open Drive</span>
-                      </a>
-                    )}
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      onClick={handleResetFormsDefault}
-                      className="p-2 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-xl transition-all cursor-pointer"
-                      title="Reset to default official link"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                    </button>
-
-                    <button
-                      type="submit"
-                      disabled={isSavingForms}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
-                    >
-                      {isSavingForms ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Saving...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-3.5 h-3.5" />
-                          <span>Save Link for All</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isSavingForms}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                  >
+                    {isSavingForms ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    <span>Save Details</span>
+                  </button>
                 </div>
               </form>
-
-              {/* Embedded Webview Preview */}
-              {showFormsPreview && (
-                <div className="mt-4 pt-4 border-t border-[#24334b] space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono text-slate-200">
-                    <span className="font-bold flex items-center space-x-1.5">
-                      <FolderLock className="w-4 h-4 text-blue-400" />
-                      <span>Live Drive Webview (SCHOOL FORMS)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowFormsPreview(false)}
-                      className="text-slate-400 hover:text-slate-200"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <GoogleDriveWebview
-                    driveUrl={formsUrlInput || formsPermanentFolder.driveUrl || ''}
-                    title="SCHOOL FORMS Preview"
-                    height="400px"
-                  />
-                </div>
-              )}
             </div>
 
             {/* 2. SCHOOL DOCUMENTS */}
@@ -3648,9 +3798,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-emerald-500/40 uppercase">
                         Permanent System Folder
                       </span>
-                      <span className="text-[10px] font-mono text-slate-400 font-semibold flex items-center space-x-1">
-                        <Lock className="w-3 h-3 text-slate-400" />
-                        <span>All Faculty Workspaces</span>
+                      <span className="text-[10px] font-mono text-emerald-400 font-semibold flex items-center space-x-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Firebase Cloud Storage • Max 2MB</span>
                       </span>
                     </div>
                     <h3 className="text-lg font-bold text-slate-100 mt-1">
@@ -3659,133 +3809,141 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 rounded-md font-bold">
-                    Active
-                  </span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAdminUpload('school-documents')}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Upload Document (Max 2MB)</span>
+                  </button>
                 </div>
               </div>
 
-              <form onSubmit={handleSaveDocsLink} className="space-y-4 text-xs font-mono">
-                <div>
-                  <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1 flex items-center justify-between">
-                    <span className="flex items-center space-x-1.5">
-                      <Link className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Embedded Google Drive Link *</span>
-                    </span>
-                    {extractDriveId(docsUrlInput) ? (
-                      <span className="text-[10px] text-emerald-400 font-bold lowercase">
-                        Drive ID: {extractDriveId(docsUrlInput)?.substring(0, 14)}...
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-amber-400">Standard Google Drive folder URL</span>
-                    )}
-                  </label>
-                  <input
-                    type="url"
-                    value={docsUrlInput}
-                    onChange={(e) => setDocsUrlInput(e.target.value)}
-                    placeholder="https://drive.google.com/drive/folders/..."
-                    required
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 focus:bg-[#101a2c] font-mono transition-all"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Paste the shared Google Drive folder link containing School Memos, DepEd Orders, Division Advisories, and Institutional Policies.
-                  </p>
+              {/* FIREBASE CENTRAL STORAGE STATUS BANNER */}
+              <div className="bg-[#0d1524] border border-emerald-500/30 rounded-2xl p-4 space-y-2 text-xs font-mono">
+                <div className="flex items-center justify-between">
+                  <span className="text-emerald-300 font-bold flex items-center space-x-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span>Firebase Cloud Storage Active</span>
+                  </span>
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded font-bold">
+                    Strict Max 2MB / File
+                  </span>
                 </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
+                  All official school memorandums, department orders, and curriculum circulars are uploaded and stored directly in Firebase Cloud Storage without external Google Drive links. Files are permanent and never auto-deleted.
+                </p>
+              </div>
 
+              {/* Uploaded Files in School Documents */}
+              <div className="space-y-2 max-h-56 overflow-y-auto overscroll-contain pr-1 scrollbar-thin scrollbar-thumb-slate-700">
+                {(() => {
+                  const docsFiles = facultyFiles.filter((f) => f.folderId === 'school-documents');
+
+                  if (docsFiles.length === 0) {
+                    return (
+                      <div className="p-4 text-center text-xs font-mono text-slate-400 border border-dashed border-[#24334b] rounded-2xl bg-[#0d1524]">
+                        No school documents in Firebase yet. Click "+ Upload Document" to upload institutional memos, circulars, or policies.
+                      </div>
+                    );
+                  }
+
+                  return docsFiles.map((file) => {
+                    const isSheet = (file.format || '').toLowerCase().includes('xls');
+
+                    return (
+                      <div
+                        key={file.id}
+                        className="p-3 bg-[#0d1524] border border-[#24334b] rounded-2xl flex items-center justify-between gap-3 text-xs font-mono hover:border-slate-600 transition-all"
+                      >
+                        <div className="flex items-center space-x-2.5 min-w-0">
+                          <div className={`p-2 rounded-xl shrink-0 ${isSheet ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                            {isSheet ? <FileSpreadsheet className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-100 truncate">
+                              {file.title}
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate">
+                              {file.fileName} • {file.fileSizeFormatted} • By: {file.facultyName || 'Faculty'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setAdminPreviewFile(file)}
+                            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                            title="View original file"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View</span>
+                          </button>
+                          {isSheet && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAdminSpreadsheetEditor(file)}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                              title="Edit spreadsheet inside app"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit in App</span>
+                            </button>
+                          )}
+                          {file.fileData && (
+                            <a
+                              href={file.fileData}
+                              download={file.fileName || `${file.title}.pdf`}
+                              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
+                              title="Download document"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onDeleteFacultyFile?.(file.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all cursor-pointer"
+                            title="Delete file"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+
+              {/* Instructions / Description for Faculty */}
+              <form onSubmit={handleSaveDocs} className="space-y-3 pt-3 border-t border-[#24334b] text-xs font-mono">
                 <div>
                   <label className="block text-[11px] uppercase font-bold text-slate-200 mb-1">
-                    Folder Description & Instructions for Faculty
+                    Folder Guidelines / Instructions for Faculty
                   </label>
                   <textarea
                     rows={2}
                     value={docsDescInput}
                     onChange={(e) => setDocsDescInput(e.target.value)}
                     placeholder="Provide notes or guidelines for faculty regarding school documents..."
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 focus:bg-[#101a2c] font-mono transition-all resize-none"
+                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 font-mono transition-all resize-none"
                   />
                 </div>
 
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#24334b]">
-                  <div className="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowDocsPreview(!showDocsPreview)}
-                      className="px-3 py-2 bg-[#1c273a] hover:bg-[#25344d] text-slate-200 border border-[#2d3e57] font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all cursor-pointer"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-slate-300" />
-                      <span>{showDocsPreview ? 'Hide Preview' : 'Preview Webview'}</span>
-                    </button>
-
-                    {docsPermanentFolder.driveUrl && (
-                      <a
-                        href={docsPermanentFolder.driveUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition-all"
-                        title="Open in new browser tab"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Open Drive</span>
-                      </a>
-                    )}
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      onClick={handleResetDocsDefault}
-                      className="p-2 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-xl transition-all cursor-pointer"
-                      title="Reset to default official link"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                    </button>
-
-                    <button
-                      type="submit"
-                      disabled={isSavingDocs}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
-                    >
-                      {isSavingDocs ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Saving...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-3.5 h-3.5" />
-                          <span>Save Link for All</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isSavingDocs}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-2xs flex items-center space-x-1.5 transition-all cursor-pointer"
+                  >
+                    {isSavingDocs ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    <span>Save Details</span>
+                  </button>
                 </div>
               </form>
-
-              {/* Embedded Webview Preview */}
-              {showDocsPreview && (
-                <div className="mt-4 pt-4 border-t border-[#24334b] space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono text-slate-200">
-                    <span className="font-bold flex items-center space-x-1.5">
-                      <FolderLock className="w-4 h-4 text-emerald-400" />
-                      <span>Live Drive Webview (SCHOOL DOCUMENTS)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowDocsPreview(false)}
-                      className="text-slate-400 hover:text-slate-200"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <GoogleDriveWebview
-                    driveUrl={docsUrlInput || docsPermanentFolder.driveUrl || ''}
-                    title="SCHOOL DOCUMENTS Preview"
-                    height="400px"
-                  />
-                </div>
-              )}
             </div>
           </div>
 
@@ -4118,6 +4276,22 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
       )}
 
+      {/* SUB-TAB 9: MASTER ADMIN FIREBASE DATABASE STORAGE & DATA USAGE */}
+      {adminSubTab === 'database-storage' && isMasterAdmin && (
+        <div className="space-y-6 animate-fadeIn">
+          <AdminDatabaseStorageManager
+            currentUser={currentUser}
+            facultyFiles={facultyFiles}
+            facultyFolders={facultyFolders}
+            announcements={announcements}
+            galleryPhotos={galleryPhotos}
+            embeddedVideos={embeddedVideos}
+            facultyList={facultyList}
+            onDeleteFacultyFile={onDeleteFacultyFile}
+          />
+        </div>
+      )}
+
       {/* ADD / EDIT SCHOOL FOLDER MODAL */}
       {isAddFolderModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto animate-fadeIn">
@@ -4364,6 +4538,188 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* ADMIN DIRECT UPLOAD MODAL (FOR SCHOOL FORMS & SCHOOL DOCUMENTS) */}
+      {adminUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm animate-fadeIn overflow-y-auto">
+          <div className="bg-[#111927] rounded-3xl border border-[#24334b] shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden my-auto animate-scaleUp text-slate-100">
+            <div className="flex items-center justify-between border-b border-[#24334b] px-6 py-4 shrink-0 bg-[#141e30]">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/40">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <div>
+                    <h3 className="text-base sm:text-lg font-bold text-white font-sans">
+                      {adminUploadModal.folderId === 'school-forms'
+                        ? 'Upload School Form'
+                        : 'Upload School Document'}
+                    </h3>
+                    <p className="text-xs text-slate-400 font-mono">
+                      Firebase Cloud Storage • Max 2MB Limit • Direct App Editing
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setAdminUploadModal(null)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl transition-all cursor-pointer hover:bg-[#1f2b3e]"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAdminFileSubmit} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-5 space-y-4 text-xs font-mono scrollbar-thin scrollbar-thumb-slate-700">
+                  {adminUploadError && (
+                    <div className="p-3.5 bg-rose-500/15 border border-rose-500/30 rounded-2xl flex items-center space-x-2.5 text-xs font-mono text-rose-300">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>{adminUploadError}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                      Document Title *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g., School Form Template or DepEd Memo"
+                      value={adminUploadTitle}
+                      onChange={(e) => setAdminUploadTitle(e.target.value)}
+                      className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-sans"
+                    />
+                  </div>
+
+                {/* File input */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block flex items-center justify-between">
+                    <span>Select File (.xlsx, .xls, .pdf) *</span>
+                    <span className="text-emerald-400 font-bold">Max 2MB Limit</span>
+                  </label>
+                  <div className="border-2 border-dashed border-[#24334b] hover:border-emerald-500/60 rounded-2xl p-5 text-center bg-[#0d1524] transition-all relative">
+                    <input
+                      type="file"
+                      required
+                      accept=".xlsx,.xls,.pdf,.docx,.doc"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleAdminFileSelection(e.target.files[0]);
+                        }
+                      }}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                    <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
+                      <div className="p-2.5 bg-emerald-500/15 rounded-xl text-emerald-400 border border-emerald-500/30">
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      {adminUploadFile ? (
+                        <div className="space-y-1">
+                          <p className="font-bold text-emerald-400 text-xs">
+                            ✓ Selected: {adminUploadFile.name}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            Size: {(adminUploadFile.size / (1024 * 1024)).toFixed(2)} MB • Within 2MB limit
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <p className="text-slate-300 font-bold text-xs">
+                            Click to select spreadsheet (.xlsx, .xls) or document (.pdf)
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            Maximum upload file size is strictly limited to 2MB
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-[11px] text-indigo-300 flex items-center space-x-2">
+                  <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span>Files uploaded by Admin are saved permanently to Firebase with no external Google Drive links.</span>
+                </div>
+              </div>
+
+              <div className="shrink-0 flex items-center justify-between border-t border-[#24334b] px-6 py-4 bg-[#0e1625]">
+                <div className="text-[11px] text-slate-400 font-mono">
+                  {adminUploadFile ? (
+                    <span className="text-emerald-400 font-bold">
+                      {(adminUploadFile.size / (1024 * 1024)).toFixed(2)} MB / 2.0 MB Limit
+                    </span>
+                  ) : (
+                    <span>Strict 2.0 MB Limit</span>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setAdminUploadModal(null)}
+                    className="px-4 py-2 bg-[#172236] hover:bg-[#20304c] text-slate-300 rounded-xl font-bold transition-all cursor-pointer font-mono text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isAdminUploading || !adminUploadFile}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl font-bold transition-all shadow-sm cursor-pointer flex items-center space-x-1.5 font-mono text-xs"
+                  >
+                    {isAdminUploading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4" />
+                        <span>Upload to Firebase</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN GOOGLE DOCS / SHEETS SPREADSHEET EDITOR */}
+      {adminSpreadsheetFile && (
+        <GoogleDocsSpreadsheetEditor
+          file={adminSpreadsheetFile}
+          fileDataUrl={adminSpreadsheetDataUrl || ''}
+          onClose={() => {
+            setAdminSpreadsheetFile(null);
+            setAdminSpreadsheetDataUrl(null);
+          }}
+          onSaveFile={handleSaveAdminSpreadsheet}
+          readOnly={false}
+        />
+      )}
+
+      {/* ADMIN DOCUMENT & SPREADSHEET VIEWER MODAL */}
+      <FacultyDocumentViewerModal
+        isOpen={Boolean(adminPreviewFile)}
+        file={adminPreviewFile}
+        onClose={() => setAdminPreviewFile(null)}
+        currentUser={currentUser}
+        onCommentSaved={(updated) => {
+          setAdminPreviewFile(updated);
+        }}
+        onDeleteFile={(id) => {
+          onDeleteFacultyFile?.(id);
+          setAdminPreviewFile(null);
+        }}
+        canDelete={true}
+        onOpenSpreadsheetEditor={(file, dataUrl) => {
+          setAdminPreviewFile(null);
+          setAdminSpreadsheetFile(file);
+          setAdminSpreadsheetDataUrl(dataUrl || file.fileData || '');
+        }}
+      />
     </div>
   );
 };

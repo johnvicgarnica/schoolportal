@@ -4,27 +4,26 @@ import {
   FacultyDoc,
   AdminDoc,
   RegistrationReqDoc,
-  subscribeFaculty,
-  subscribeAdmins,
-  subscribeFacultyRequests,
-  subscribeAdminRequests,
-  subscribeUserPasswords,
-  subscribeSettings,
+  getStoredFaculty,
+  getStoredAdmins,
   saveFacultyRequestsToFirestore,
   saveAdminRequestsToFirestore,
   seedInitialAdminIfEmpty,
   PasswordResetReqDoc,
   savePasswordResetRequestToFirestore,
-  subscribePasswordResetRequests,
-  subscribeGalleryPhotos,
+  fetchGalleryPhotosOnce,
   getStoredGalleryPhotos,
+  GALLERY_STORAGE_KEY,
   seedInitialGalleryPhotosIfEmpty,
-  subscribeEmbeddedVideos,
+  fetchEmbeddedVideosOnce,
   getStoredEmbeddedVideos,
-  subscribeAnnouncements,
+  VIDEOS_STORAGE_KEY,
+  fetchAnnouncementsOnce,
   getStoredAnnouncements,
   verifyUserDirectlyFromFirestore,
+  FIRESTORE_UPGRADE_URL,
 } from '../lib/firebase';
+import { subscribeOfflineCache } from '../lib/offlineStore';
 import { AutoSwipingGallery } from './AutoSwipingGallery';
 import { ScrollableVideoSection } from './ScrollableVideoSection';
 import { ScrollableAnnouncementSection } from './ScrollableAnnouncementSection';
@@ -142,28 +141,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   }, [isOnline]);
 
   // Live Firestore State
-  const [facultyList, setFacultyList] = useState<FacultyDoc[]>([]);
-  const [adminList, setAdminList] = useState<AdminDoc[]>([
-    {
-      id: 'admin-master',
-      name: 'John Vic Garnica (Admin)',
-      email: 'johnvic.garnica@deped.gov.ph',
-      designation: 'Web Developer',
-    },
-    {
-      id: 'admin-norma',
-      name: 'Norma Jabagat',
-      email: 'norma.jabagat@deped.gov.ph',
-      designation: 'Master Teacher',
-    },
-  ]);
-  const [facultyRequests, setFacultyRequests] = useState<RegistrationReqDoc[]>([]);
-  const [adminRequests, setAdminRequests] = useState<RegistrationReqDoc[]>([]);
-  const [facultyPasswords, setFacultyPasswords] = useState<Record<string, string>>({});
-  const [adminPasswords, setAdminPasswords] = useState<Record<string, string>>({});
-  const [masterFacultyPassword, setMasterFacultyPassword] = useState<string>('shs304868');
-  const [masterAdminPassword, setMasterAdminPassword] = useState<string>('garjohn@1995');
-  const [masterAdminEmail, setMasterAdminEmail] = useState<string>('johnvic.garnica@deped.gov.ph');
+  const [facultyList, setFacultyList] = useState<FacultyDoc[]>(() => getStoredFaculty());
+  const [adminList, setAdminList] = useState<AdminDoc[]>(() => {
+    const cached = getStoredAdmins();
+    return cached.length > 0
+      ? cached
+      : [
+          {
+            id: 'admin-master',
+            name: 'John Vic Garnica (Admin)',
+            email: 'johnvic.garnica@deped.gov.ph',
+            designation: 'Web Developer',
+          },
+          {
+            id: 'admin-norma',
+            name: 'Norma Jabagat',
+            email: 'norma.jabagat@deped.gov.ph',
+            designation: 'Master Teacher',
+          },
+        ];
+  });
+  const [masterFacultyPassword] = useState<string>('shs304868');
+  const [masterAdminPassword] = useState<string>('garjohn@1995');
+  const [masterAdminEmail] = useState<string>('johnvic.garnica@deped.gov.ph');
 
   // Forgot Password / Temporary Password ("changepass") Dialog State
   const TEMPORARY_PASSWORD = 'changepass';
@@ -185,19 +185,24 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     role: 'Faculty' | 'Admin';
     department?: string;
   } | null>(null);
-  const [passwordResetRequests, setPasswordResetRequests] = useState<PasswordResetReqDoc[]>([]);
 
-  // Load auto-swiping gallery photos
+  // Load auto-swiping gallery photos from local cache on first load
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>(() => {
     return getStoredGalleryPhotos();
   });
-  const [isLoadingGallery, setIsLoadingGallery] = useState<boolean>(true);
+  const [isLoadingGallery, setIsLoadingGallery] = useState<boolean>(() => {
+    const cached = getStoredGalleryPhotos();
+    return !cached || cached.length === 0;
+  });
 
-  // Load embedded videos provided by Master Admin
+  // Load embedded videos provided by Master Admin from local cache on first load
   const [embeddedVideos, setEmbeddedVideos] = useState<EmbeddedVideo[]>(() => {
     return getStoredEmbeddedVideos();
   });
-  const [isLoadingVideos, setIsLoadingVideos] = useState<boolean>(true);
+  const [isLoadingVideos, setIsLoadingVideos] = useState<boolean>(() => {
+    const cached = getStoredEmbeddedVideos();
+    return !cached || cached.length === 0;
+  });
 
   // Load announcements
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
@@ -206,83 +211,56 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState<boolean>(true);
 
   useEffect(() => {
-    // Seed initial admin account and default collections into Firestore if needed
+    // Seed initial admin account and default collections into Firestore if needed (runs once)
     seedInitialAdminIfEmpty();
     seedInitialGalleryPhotosIfEmpty();
 
-    // 1. Subscribe to Gallery Photos
-    const unsubGallery = subscribeGalleryPhotos((photos) => {
-      setGalleryPhotos(photos || []);
+    // One-Time Fetches with Deduplication Cache: Strictly minimizes server reads
+    fetchGalleryPhotosOnce().then((photos) => {
+      if (photos && photos.length > 0) {
+        setGalleryPhotos(photos);
+      }
       setIsLoadingGallery(false);
     });
 
-    // 1b. Subscribe to Embedded Videos (Master Admin provided)
-    const unsubVideos = subscribeEmbeddedVideos((videos) => {
-      setEmbeddedVideos(videos || []);
+    fetchEmbeddedVideosOnce().then((videos) => {
+      if (videos && videos.length > 0) {
+        setEmbeddedVideos(videos);
+      }
       setIsLoadingVideos(false);
     });
 
-    // 1c. Subscribe to Announcements
-    const unsubAnnouncements = subscribeAnnouncements((list) => {
-      setAnnouncements(list || []);
+    fetchAnnouncementsOnce().then((list) => {
+      if (list && list.length > 0) {
+        setAnnouncements(list);
+      }
       setIsLoadingAnnouncements(false);
     });
 
-    // 2. Subscribe to Faculty Directory
-    const unsubFaculty = subscribeFaculty((list) => {
-      setFacultyList(list || []);
-    });
-
-    // 3. Subscribe to Admins Directory
-    const unsubAdmins = subscribeAdmins((list) => {
-      setAdminList(list || []);
-    });
-
-    // 4. Subscribe to Faculty Registration Requests
-    const unsubFacultyReq = subscribeFacultyRequests((requests) => {
-      setFacultyRequests(requests || []);
-    });
-
-    // 5. Subscribe to Admin Registration Requests
-    const unsubAdminReq = subscribeAdminRequests((requests) => {
-      setAdminRequests(requests || []);
-    });
-
-    // 6. Subscribe to User Passwords
-    const unsubPasswords = subscribeUserPasswords(({ facultyMap, adminMap }) => {
-      setFacultyPasswords(facultyMap || {});
-      setAdminPasswords(adminMap || {});
-    });
-
-    // 7. Subscribe to Settings
-    const unsubSettings = subscribeSettings((settings) => {
-      if (settings.svnhs_faculty_password) {
-        setMasterFacultyPassword(settings.svnhs_faculty_password);
+    // In-memory cross-tab broadcast listeners (0 database reads)
+    const unsubGalleryCache = subscribeOfflineCache<GalleryPhoto[]>(
+      GALLERY_STORAGE_KEY,
+      (photos) => {
+        if (Array.isArray(photos)) {
+          setGalleryPhotos(photos);
+          setIsLoadingGallery(false);
+        }
       }
-      if (settings.svnhs_admin_password) {
-        setMasterAdminPassword(settings.svnhs_admin_password);
-      }
-      if (settings.svnhs_admin_email) {
-        setMasterAdminEmail(settings.svnhs_admin_email);
-      }
-    });
+    );
 
-    // 8. Subscribe to Password Reset Requests
-    const unsubPasswordResets = subscribePasswordResetRequests((reqs) => {
-      setPasswordResetRequests(reqs || []);
-    });
+    const unsubVideosCache = subscribeOfflineCache<EmbeddedVideo[]>(
+      VIDEOS_STORAGE_KEY,
+      (videos) => {
+        if (Array.isArray(videos)) {
+          setEmbeddedVideos(videos);
+          setIsLoadingVideos(false);
+        }
+      }
+    );
 
     return () => {
-      unsubGallery();
-      unsubVideos();
-      unsubAnnouncements();
-      unsubFaculty();
-      unsubAdmins();
-      unsubFacultyReq();
-      unsubAdminReq();
-      unsubPasswords();
-      unsubSettings();
-      unsubPasswordResets();
+      unsubGalleryCache();
+      unsubVideosCache();
     };
   }, []);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);

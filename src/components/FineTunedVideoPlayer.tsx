@@ -30,7 +30,45 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
-  const [isMuted, setIsMuted] = useState<boolean>(true); // default muted ensures strict browser autoplay compliance
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isPlayerInView, setIsPlayerInView] = useState<boolean>(true);
+  const [isTabVisible, setIsTabVisible] = useState<boolean>(
+    typeof document !== 'undefined' ? !document.hidden : true
+  );
+
+  // Monitor browser tab visibility: pause playback when running in background
+  useEffect(() => {
+    const handleVis = () => {
+      setIsTabVisible(typeof document !== 'undefined' ? !document.hidden : true);
+    };
+    document.addEventListener('visibilitychange', handleVis);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVis);
+    };
+  }, []);
+
+  // Monitor viewport presence: only autoplay when video section appears on the screen
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setIsPlayerInView(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          setIsPlayerInView(entry.isIntersecting);
+        }
+      },
+      { threshold: [0, 0.05, 0.2] }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const shouldPlay = isActive && isPlayerInView && isTabVisible;
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [showControls, setShowControls] = useState<boolean>(false); // Start hidden for clean playback view
@@ -138,10 +176,11 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     return '*';
   };
 
-  // Generate safe iframe URL with verified autoplay & muted parameters
+  // Generate safe iframe URL with verified autoplay parameters
   const getIframeUrl = () => {
     if (youtubeId) {
-      // YouTube embed with enablejsapi=1, autoplay=1, mute=1, playsinline=1 for guaranteed mobile zero-click autoplay
+      // YouTube embed with enablejsapi=1, autoplay=1, mute=1, playsinline=1
+      // Note: mute=1 is required for initial autoplay permission in iframes; JS API unMutes once loaded & visible
       return `https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&playsinline=1&enablejsapi=1&controls=1&rel=0&modestbranding=1&iv_load_policy=3`;
     }
 
@@ -182,9 +221,6 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
       if (!url.includes('autoplay=')) {
         url += (url.includes('?') ? '&' : '?') + 'autoplay=1';
       }
-      if (!url.includes('mute=')) {
-        url += '&mute=1';
-      }
       if (!url.includes('playsinline=')) {
         url += '&playsinline=1';
       }
@@ -194,7 +230,7 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
     return '';
   };
 
-  // Format raw code fallback while preserving autoplay capabilities
+  // Format raw code fallback while preserving unmuted autoplay capabilities
   const getSanitizedRawCode = () => {
     let formatted = raw;
     if (formatted.includes('<iframe')) {
@@ -223,8 +259,10 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         formatted = formatted.replace('<video', '<video playsinline webkit-playsinline="true"');
       }
       if (!formatted.includes('autoplay')) {
-        formatted = formatted.replace('<video', '<video autoplay muted');
+        formatted = formatted.replace('<video', '<video autoplay');
       }
+      // Strip any muted attribute to ensure audio plays
+      formatted = formatted.replace(/\s+muted(?:=["'][^"']*?["'])?/gi, '');
     }
     return formatted;
   };
@@ -255,61 +293,83 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         );
       } catch (_) {}
 
-      if (isActive && youtubeId) {
-        // Enforce mute first then trigger play with progressive retries for YouTube
-        sendYouTubeCommand('mute');
-        setTimeout(() => sendYouTubeCommand('playVideo'), 100);
-        setTimeout(() => sendYouTubeCommand('playVideo'), 350);
-        setTimeout(() => sendYouTubeCommand('playVideo'), 800);
-      } else if (!isActive && youtubeId) {
-        // Ensure inactive videos stay paused
+      if (shouldPlay && youtubeId) {
+        // First start playback (muted per initial iframe permission)
+        sendYouTubeCommand('playVideo');
+        // Progressively unmute audio as playback connects
+        setTimeout(() => {
+          sendYouTubeCommand('playVideo');
+          sendYouTubeCommand('unMute');
+          sendYouTubeCommand('setVolume', 100);
+        }, 200);
+        setTimeout(() => {
+          sendYouTubeCommand('unMute');
+          sendYouTubeCommand('setVolume', 100);
+        }, 600);
+        setTimeout(() => {
+          sendYouTubeCommand('unMute');
+          sendYouTubeCommand('setVolume', 100);
+        }, 1200);
+      } else if (!shouldPlay && youtubeId) {
         sendYouTubeCommand('pauseVideo');
       }
     }
   };
 
-  // AUTOPLAY WHEN ACTIVE, STOP WHEN SCROLLED TO ANOTHER VIDEO
+  // AUTOPLAY WHEN ACTIVE & VISIBLE ON SCREEN; PAUSE WHEN NOT VISIBLE OR IN BACKGROUND
   useEffect(() => {
-    if (isActive) {
+    if (shouldPlay) {
       // 1. Direct HTML5 Video Autoplay
       if (videoRef.current) {
-        videoRef.current.defaultMuted = true;
-        videoRef.current.muted = true;
-        videoRef.current.playsInline = true;
-        videoRef.current.setAttribute('playsinline', '');
-        videoRef.current.setAttribute('webkit-playsinline', 'true');
-        videoRef.current.setAttribute('muted', '');
-        videoRef.current.setAttribute('autoplay', '');
+        const startHtml5 = async () => {
+          const v = videoRef.current;
+          if (!v) return;
 
-        const playPromise = videoRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              setIsPlaying(true);
-            })
-            .catch(() => {
-              // Retry with guaranteed muted state
-              if (videoRef.current) {
-                videoRef.current.defaultMuted = true;
-                videoRef.current.muted = true;
-                videoRef.current
-                  .play()
-                  .then(() => setIsPlaying(true))
-                  .catch(() => {});
-              }
-            });
-        }
+          v.playsInline = true;
+          v.setAttribute('playsinline', '');
+          v.setAttribute('webkit-playsinline', 'true');
+          v.setAttribute('autoplay', '');
+
+          // Attempt unmuted play first
+          v.muted = false;
+          v.volume = 1.0;
+
+          try {
+            await v.play();
+            setIsPlaying(true);
+            setIsMuted(false);
+          } catch (err) {
+            // Browser autoplay policy blocked unmuted autoplay on published domain.
+            // Play with muted state so video autoplays smoothly without being stuck
+            if (videoRef.current) {
+              videoRef.current.muted = true;
+              setIsMuted(true);
+              try {
+                await videoRef.current.play();
+                setIsPlaying(true);
+              } catch (_) {}
+            }
+          }
+        };
+
+        startHtml5();
       }
 
-      // 2. YouTube iframe play with retry to guarantee receipt once player boots
-      sendYouTubeCommand('mute');
+      // 2. YouTube iframe play with audio unmuting
       sendYouTubeCommand('playVideo');
       const t1 = setTimeout(() => {
-        sendYouTubeCommand('mute');
         sendYouTubeCommand('playVideo');
+        sendYouTubeCommand('unMute');
+        sendYouTubeCommand('setVolume', 100);
       }, 250);
-      const t2 = setTimeout(() => sendYouTubeCommand('playVideo'), 700);
-      const t3 = setTimeout(() => sendYouTubeCommand('playVideo'), 1200);
+      const t2 = setTimeout(() => {
+        sendYouTubeCommand('unMute');
+        sendYouTubeCommand('setVolume', 100);
+      }, 700);
+      const t3 = setTimeout(() => {
+        sendYouTubeCommand('unMute');
+        sendYouTubeCommand('setVolume', 100);
+      }, 1300);
 
       return () => {
         clearTimeout(t1);
@@ -317,71 +377,53 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
         clearTimeout(t3);
       };
     } else {
-      // STOP playback when scrolled away to next video
+      // STOP/PAUSE playback when not visible on screen, scrolled away, or in the background
       if (videoRef.current) {
         videoRef.current.pause();
         setIsPlaying(false);
       }
 
-      // Stop YouTube iframe playback immediately
+      // Pause YouTube iframe playback immediately
       sendYouTubeCommand('pauseVideo');
       const tPause = setTimeout(() => sendYouTubeCommand('pauseVideo'), 150);
       return () => clearTimeout(tPause);
     }
-  }, [isActive, sendYouTubeCommand]);
+  }, [shouldPlay, sendYouTubeCommand]);
 
-  // Window-level interaction fallback: if the browser held autoplay due to user gesture policy,
-  // the first touch, scroll, or click anywhere on the page unlocks and starts playback
+  // Window-level interaction fallback to ensure sound is unmuted as soon as user touches/scrolls/clicks
   useEffect(() => {
-    if (!isActive) return;
+    if (!shouldPlay) return;
 
     const handleFirstUserGesture = () => {
-      if (videoRef.current && videoRef.current.paused) {
-        videoRef.current.defaultMuted = true;
-        videoRef.current.muted = true;
-        videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      if (videoRef.current) {
+        videoRef.current.muted = false;
+        videoRef.current.volume = 1.0;
+        setIsMuted(false);
+        if (videoRef.current.paused && shouldPlay) {
+          videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+        }
       }
-      sendYouTubeCommand('mute');
       sendYouTubeCommand('playVideo');
+      sendYouTubeCommand('unMute');
+      sendYouTubeCommand('setVolume', 100);
     };
 
-    window.addEventListener('pointerdown', handleFirstUserGesture, { once: true, passive: true });
-    window.addEventListener('touchstart', handleFirstUserGesture, { once: true, passive: true });
-    window.addEventListener('scroll', handleFirstUserGesture, { once: true, passive: true });
+    window.addEventListener('pointerdown', handleFirstUserGesture, { passive: true });
+    window.addEventListener('touchstart', handleFirstUserGesture, { passive: true });
+    window.addEventListener('scroll', handleFirstUserGesture, { passive: true });
+    window.addEventListener('wheel', handleFirstUserGesture, { passive: true });
+    window.addEventListener('keydown', handleFirstUserGesture, { passive: true });
+    window.addEventListener('click', handleFirstUserGesture, { passive: true });
 
     return () => {
       window.removeEventListener('pointerdown', handleFirstUserGesture);
       window.removeEventListener('touchstart', handleFirstUserGesture);
       window.removeEventListener('scroll', handleFirstUserGesture);
+      window.removeEventListener('wheel', handleFirstUserGesture);
+      window.removeEventListener('keydown', handleFirstUserGesture);
+      window.removeEventListener('click', handleFirstUserGesture);
     };
-  }, [isActive, sendYouTubeCommand]);
-
-  // Intersection Observer for mobile: start autoplay as soon as the video player scrolls into viewport
-  useEffect(() => {
-    if (!isActive) return;
-    const el = containerRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            if (videoRef.current && videoRef.current.paused) {
-              videoRef.current.defaultMuted = true;
-              videoRef.current.muted = true;
-              videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-            }
-            sendYouTubeCommand('mute');
-            sendYouTubeCommand('playVideo');
-          }
-        });
-      },
-      { threshold: 0.2 }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [isActive, sendYouTubeCommand]);
+  }, [shouldPlay, sendYouTubeCommand]);
 
   // Video control helpers: robust auto-hide timers
   const scheduleHideControls = useCallback((delay = 1800) => {
@@ -608,19 +650,29 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
           // @ts-expect-error webkit-playsinline for iOS Safari
           webkit-playsinline="true"
           preload="auto"
-          autoPlay={isActive}
+          autoPlay={shouldPlay}
           muted={isMuted}
           loop
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onCanPlay={() => {
-            if (isActive && videoRef.current && videoRef.current.paused) {
-              videoRef.current.defaultMuted = true;
-              videoRef.current.muted = true;
+            if (shouldPlay && videoRef.current && videoRef.current.paused) {
+              videoRef.current.muted = false;
+              videoRef.current.volume = 1.0;
               videoRef.current.play().then(() => {
                 setIsPlaying(true);
+                setIsMuted(false);
                 scheduleHideControls(1500);
-              }).catch(() => {});
+              }).catch(() => {
+                if (videoRef.current) {
+                  videoRef.current.muted = true;
+                  setIsMuted(true);
+                  videoRef.current.play().then(() => {
+                    setIsPlaying(true);
+                    scheduleHideControls(1500);
+                  }).catch(() => {});
+                }
+              });
             }
           }}
           onPlay={() => {
@@ -638,6 +690,22 @@ export const FineTunedVideoPlayer: React.FC<FineTunedVideoPlayerProps> = ({
           style={{ objectFit: 'contain' }}
           className="w-full h-full object-contain object-center bg-black cursor-pointer block mx-auto my-auto"
         />
+
+        {/* Quick Unmute Floating Badge if browser restricted audio before interaction */}
+        {isMuted && isPlaying && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleMute();
+            }}
+            className="absolute top-2 left-2 z-30 px-2.5 py-1 bg-black/85 hover:bg-black text-white text-[10px] font-mono rounded-lg border border-white/25 flex items-center space-x-1.5 shadow-md cursor-pointer transition-transform hover:scale-105 active:scale-95 animate-fadeIn"
+            title="Tap to enable sound"
+          >
+            <VolumeX className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+            <span className="font-bold">Tap for Sound</span>
+          </button>
+        )}
 
         {/* Double-Tap Fullscreen Visual Confirmation Badge */}
         {doubleTapFeedback && (

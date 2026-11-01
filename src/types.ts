@@ -55,13 +55,15 @@ export interface FacultyFolder {
   itemCount?: number;
   createdAt: string;
   updatedAt: string;
+  subjectTitle?: string;
+  gradeLevel?: string;
 }
 
 export interface SchoolPermanentFolder {
   id: string;
   name: string;
   description: string;
-  driveUrl: string;
+  driveUrl?: string; // Optional / deprecated, all files uploaded to Firebase
   driveId?: string;
   category: string;
   color: string;
@@ -70,26 +72,42 @@ export interface SchoolPermanentFolder {
   updatedAt: string;
   updatedBy?: string;
   createdBy?: string;
+  subfolders?: { id: string; name: string; description?: string }[];
 }
 
 export interface FacultyPersonalFile {
   id: string;
   folderId: string;
+  subfolderId?: string; // Subfolder identifier, e.g. 'school-form-2'
   facultyEmail: string;
   facultyName: string;
   title: string;
   fileName: string;
   fileSizeBytes: number;
   fileSizeFormatted: string;
-  format: string; // 'pdf' | 'docx' | 'doc' | 'pptx' | 'xlsx'
+  format: string; // 'pdf' | 'xls' | 'xlsx'
   category: string;
   uploadedAt: string; // ISO date string
-  expiresAt: string; // ISO date string (1 week from upload)
+  expiresAt?: string; // ISO date string (optional for permanent folders)
   fileData?: string; // Base64 data URL
   previewSnippet?: string; // Quick text snippet / summary
   chunkCount?: number; // Number of chunks if stored split in Firestore
   description?: string;
   downloadUrl?: string;
+  gradeLevel?: string; // e.g. "Grade 11", "Grade 12"
+  section?: string; // e.g. "Diamond", "STEM-A"
+  masterTeacherComment?: string;
+  masterTeacherCommentedAt?: string;
+  masterTeacherCommentedBy?: string;
+  masterTeacherComments?: MasterTeacherComment[];
+}
+
+export interface MasterTeacherComment {
+  id: string;
+  comment: string;
+  commentedBy: string;
+  designation?: string;
+  commentedAt: string;
 }
 
 export type FileCategory =

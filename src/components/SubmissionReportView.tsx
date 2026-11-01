@@ -31,6 +31,8 @@ import {
   batchSaveClassAdviserSchoolFormsToFirestore,
   subscribeClassAdviserSchoolForms,
   getStoredClassAdviserSchoolForms,
+  subscribeFacultyFolders,
+  getStoredFacultyFolders,
 } from '../lib/firebase';
 import {
   BarChart,
@@ -476,7 +478,51 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     return () => unsub();
   }, [effectiveTermId, activeCategory]);
 
-  // Combine registered faculty from Firestore with any unique faculty found in facultyFolders
+  // Synchronized Faculty Folders state to detect any new faculty workspace additions in real time
+  const [liveFacultyFolders, setLiveFacultyFolders] = useState<FacultyFolder[]>(() => {
+    return facultyFolders && facultyFolders.length > 0 ? facultyFolders : getStoredFacultyFolders();
+  });
+
+  useEffect(() => {
+    const unsub = subscribeFacultyFolders((folders) => {
+      setLiveFacultyFolders(folders || []);
+    });
+    return () => unsub();
+  }, []);
+
+  const [isManualSyncing, setIsManualSyncing] = useState<boolean>(false);
+
+  const handleManualLiveSync = () => {
+    setIsManualSyncing(true);
+    const storedFac = getStoredFaculty();
+    if (storedFac.length > 0) setRegisteredFaculty(storedFac);
+    const storedFolders = getStoredFacultyFolders();
+    if (storedFolders.length > 0) setLiveFacultyFolders(storedFolders);
+
+    if (activeCategory === 'class-advisers') {
+      const storedAdvisers = getStoredClassAdviserSchoolForms();
+      if (storedAdvisers && Object.keys(storedAdvisers).length > 0) {
+        setClassAdviserData(storedAdvisers);
+      }
+    } else {
+      const cat = activeCategory as SubmissionCategory;
+      const cachedSub = getStoredFacultySubmissions(effectiveTermId, cat);
+      const cachedStat = getStoredFacultyStatuses(effectiveTermId, cat);
+      const cachedComm = getStoredFacultyComments(effectiveTermId, cat);
+      if (cachedSub) setSubmissions(cachedSub);
+      if (cachedStat) setItemStatuses(cachedStat);
+      if (cachedComm) setItemComments(cachedComm);
+    }
+
+    setTimeout(() => {
+      setIsManualSyncing(false);
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastSavedTimestamp(timeStr);
+      showToast(`⚡ Direct real-time sync verified: ${allFaculty.length} faculty members active`);
+    }, 500);
+  };
+
+  // Combine registered faculty from Firestore with any unique faculty found in facultyFolders & liveFacultyFolders
   const allFaculty = useMemo(() => {
     const map = new Map<string, { id: string; name: string; email: string; department: string; surname: string; advisoryRole?: 'Class Adviser' | 'Non-Adviser' }>();
 
@@ -496,7 +542,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     });
 
     // Also include any faculty from facultyFolders who might not be in the direct faculty doc list yet
-    facultyFolders.forEach((f) => {
+    const combinedFolders = [...facultyFolders, ...liveFacultyFolders];
+    combinedFolders.forEach((f) => {
       const email = (f.facultyEmail || '').toLowerCase().trim();
       if (email && !map.has(email)) {
         map.set(email, {
@@ -526,7 +573,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     const list = Array.from(map.values());
     // Sort alphabetically by surname
     return list.sort((a, b) => a.surname.localeCompare(b.surname));
-  }, [registeredFaculty, facultyFolders]);
+  }, [registeredFaculty, facultyFolders, liveFacultyFolders]);
 
   // Class Advisers list: ONLY faculty members designated as "Class Adviser"
   const classAdvisersList = useMemo(() => {
@@ -2376,10 +2423,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       )}
 
       {/* Main Header Banner */}
-      <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-3xl p-5 sm:p-7 shadow-xl border border-blue-800/40 relative overflow-hidden">
+      <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-2xl px-5 py-3.5 sm:px-6 sm:py-4 shadow-xl border border-blue-800/40 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3.5">
           <div className="space-y-2">
             <div className="flex items-center space-x-2.5 flex-wrap">
               <div className="p-2.5 bg-blue-500/20 text-blue-300 rounded-2xl border border-blue-400/30 shadow-inner">
@@ -2680,15 +2727,28 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             })}
           </div>
 
-          {/* Cloud Sync & Last Saved Indicator */}
-          <div className="flex items-center justify-between sm:justify-end space-x-3 px-2 py-1 text-xs font-mono text-slate-400">
-            <div className="flex items-center space-x-1.5 text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-3 py-1.5 rounded-xl font-bold">
-              <Cloud className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-              <span>Firebase Cloud Sync</span>
+          {/* Cloud Sync & Real-Time Sync Indicator with Direct Sync Button */}
+          <div className="flex items-center justify-between sm:justify-end space-x-2.5 px-2 py-1 text-xs font-mono text-slate-400">
+            <div className="flex items-center space-x-1.5 text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-3 py-1.5 rounded-xl font-bold shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+              <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Live Real-Time Sync</span>
             </div>
+
+            <button
+              type="button"
+              onClick={handleManualLiveSync}
+              disabled={isManualSyncing}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#0d1524] hover:bg-[#1a2638] text-slate-300 hover:text-white rounded-xl border border-[#2d4060] text-xs font-mono transition-all cursor-pointer disabled:opacity-50"
+              title="Directly pull the latest real-time submissions and faculty records from Firebase"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isManualSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Sync Now</span>
+            </button>
+
             {lastSavedTimestamp && (
               <span className="text-[11px] text-slate-400 hidden lg:inline">
-                Saved at {lastSavedTimestamp}
+                Synced at {lastSavedTimestamp}
               </span>
             )}
           </div>

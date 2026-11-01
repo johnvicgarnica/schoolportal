@@ -1,0 +1,16 @@
+{
+  "name": "convert-excel-to-google-sheet",
+  "version": "1.0.0",
+  "description": "Google Cloud Function converting Excel (.xlsx) files to editable Google Sheets with Firebase Admin & Google Drive API",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.4.2",
+    "@googleapis/drive": "^8.0.0",
+    "busboy": "^1.6.0",
+    "firebase-admin": "^12.0.0",
+    "google-auth-library": "^9.7.0"
+  }
+}

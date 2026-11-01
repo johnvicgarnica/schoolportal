@@ -28,6 +28,10 @@ import {
   Download,
   Clock,
   Plus,
+  Award,
+  MessageSquare,
+  BookOpen,
+  Sparkles,
 } from 'lucide-react';
 
 interface AdminFacultyFoldersDirectoryProps {
@@ -38,6 +42,7 @@ interface AdminFacultyFoldersDirectoryProps {
   onAddFacultyFolder?: (folder: Omit<FacultyFolder, 'id' | 'createdAt' | 'updatedAt' | 'itemCount'>) => void;
   onDeleteFacultyFolder?: (id: string) => void;
   onDeleteFacultyFile?: (id: string) => void;
+  onOpenSpreadsheetEditor?: (file: FacultyPersonalFile, fileDataUrl?: string) => void;
 }
 
 const CATEGORY_OPTIONS = [
@@ -69,6 +74,7 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
   onAddFacultyFolder,
   onDeleteFacultyFolder,
   onDeleteFacultyFile,
+  onOpenSpreadsheetEditor,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'has_folders' | 'empty'>('all');
@@ -81,10 +87,11 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
   const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
   const [fileToDelete, setFileToDelete] = useState<{ id: string; title: string; fileName: string } | null>(null);
 
-  // Admin Create Folder Modal state
+  // Admin Create Folder Modal state (FolderCategory + SubjectTitle + GradeLevel)
   const [isAddFolderModalOpen, setIsAddFolderModalOpen] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
-  const [newFolderCategory, setNewFolderCategory] = useState(CATEGORY_OPTIONS[0]);
+  const [folderCategory, setFolderCategory] = useState<string>('DLL');
+  const [subjectTitle, setSubjectTitle] = useState<string>('');
+  const [gradeLevel, setGradeLevel] = useState<string>('7');
   const [newFolderColor, setNewFolderColor] = useState('Blue');
   const [newFolderDescription, setNewFolderDescription] = useState('');
 
@@ -230,21 +237,29 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
   // Admin create folder for faculty
   const handleCreateFolderForFaculty = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeFaculty || !newFolderName.trim() || !onAddFacultyFolder) return;
+    const cleanSubject = subjectTitle.trim();
+    if (!activeFaculty || !cleanSubject || !onAddFacultyFolder) {
+      showToast('Please type the Subject Title.');
+      return;
+    }
+
+    const finalFolderName = `${folderCategory} ${cleanSubject} ${gradeLevel}`;
 
     onAddFacultyFolder({
       facultyEmail: activeFaculty.email,
       facultyName: activeFaculty.name,
       facultySurname: extractFacultySurname(activeFaculty.name),
-      name: newFolderName.trim(),
+      name: finalFolderName,
       description: newFolderDescription.trim(),
-      category: newFolderCategory,
+      category: folderCategory,
       color: newFolderColor,
+      subjectTitle: cleanSubject,
+      gradeLevel: gradeLevel,
     });
 
-    showToast(`Folder "${newFolderName.trim()}" created for ${activeFaculty.name}.`);
+    showToast(`Folder "${finalFolderName}" created for ${activeFaculty.name}.`);
     setIsAddFolderModalOpen(false);
-    setNewFolderName('');
+    setSubjectTitle('');
     setNewFolderDescription('');
   };
 
@@ -275,7 +290,7 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
               Faculty Repository & Personal Folders Directory
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 font-medium max-w-3xl leading-relaxed">
-              Alphabetical index by faculty surname. Inspect uploaded DLL, TOS, TQ, and instructional files (PDF, DOCX, DOC, PPTX, XLSX up to 2MB). Files are automatically purged after 1 week.
+              Alphabetical index by faculty surname. Inspect uploaded DLL, TOS, TQ, and instructional PDF documents (PDF up to 2MB). Files are automatically purged after 1 week.
             </p>
           </div>
 
@@ -410,12 +425,12 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                       No Documents Uploaded Yet
                     </h4>
                     <p className="text-xs text-slate-400 max-w-md mx-auto">
-                      {activeFaculty.name} has not uploaded any files into this folder yet.
+                      {activeFaculty.name} has not uploaded any PDF documents into this folder yet.
                     </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filesInActiveFolder.map((file) => {
+                    {filesInActiveFolder.map((file, idx) => {
                       const fmt = (file.format || '').toLowerCase();
                       const isPdf = fmt === 'pdf';
                       const isDoc = fmt.includes('doc');
@@ -453,12 +468,12 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                       const now = Date.now();
                       const expireMs = file.expiresAt
                         ? new Date(file.expiresAt).getTime()
-                        : new Date(file.uploadedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
+                        : new Date(file.uploadedAt).getTime() + 15 * 24 * 60 * 60 * 1000;
                       const diffDays = Math.max(0, Math.ceil((expireMs - now) / (24 * 60 * 60 * 1000)));
 
                       return (
                         <div
-                          key={file.id}
+                          key={`${file.id || 'file'}-${idx}`}
                           onClick={() => setSelectedPreviewFile(file)}
                           className={`bg-[#0f1725] border-2 ${themeBorder} rounded-3xl p-4 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-3 group hover:-translate-y-0.5 relative overflow-hidden`}
                         >
@@ -496,10 +511,29 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                             </div>
                           </div>
 
-                          <div className="space-y-1">
+                          <div className="space-y-1.5">
                             <h4 className="font-bold text-xs sm:text-sm text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
                               {file.title}
                             </h4>
+
+                            {/* Master Teacher Comment Indicator */}
+                            {(file.masterTeacherComment || (file.masterTeacherComments && file.masterTeacherComments.length > 0)) ? (
+                              <div className="bg-indigo-950/70 border border-indigo-500/40 rounded-xl p-1.5 space-y-0.5">
+                                <div className="flex items-center space-x-1 text-indigo-300 font-bold text-[10px] font-mono">
+                                  <Award className="w-3 h-3 text-amber-400 shrink-0" />
+                                  <span>Master Teacher Feedback Attached</span>
+                                </div>
+                                <p className="text-[10px] text-slate-200 line-clamp-1 italic font-sans pl-1">
+                                  "{file.masterTeacherComment || file.masterTeacherComments?.[0]?.comment}"
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="flex items-center space-x-1 text-[10px] font-mono text-slate-400 bg-[#0d1524] px-2 py-0.5 rounded-md border border-[#24334b] w-fit">
+                                <MessageSquare className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                                <span>No MT comment yet</span>
+                              </div>
+                            )}
+
                             <div className="flex items-center space-x-1.5 text-[11px] font-mono text-amber-300/90 pt-0.5">
                               <Clock className="w-3 h-3 shrink-0 text-amber-400" />
                               <span>Auto-deletes in {diffDays} {diffDays === 1 ? 'day' : 'days'}</span>
@@ -584,14 +618,14 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {activeFacultyFolders.map((folder) => {
+                  {activeFacultyFolders.map((folder, idx) => {
                     const count = (facultyDataMap.fileMap[activeFaculty.email] || []).filter(
                       (f) => f.folderId === folder.id
                     ).length;
 
                     return (
                       <div
-                        key={folder.id}
+                        key={`${folder.id || 'folder'}-${idx}`}
                         onClick={() => setSelectedFolderId(folder.id)}
                         className="bg-[#0f1725] hover:bg-[#1a2638] border border-[#24334b] hover:border-blue-500/60 rounded-3xl p-5 shadow-2xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between space-y-3 group"
                       >
@@ -784,9 +818,9 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                             Faculty Folders:
                           </div>
                           <div className="flex flex-wrap gap-1">
-                            {folders.slice(0, 3).map((f) => (
+                            {folders.slice(0, 3).map((f, idx) => (
                               <span
-                                key={f.id}
+                                key={`${f.id || 'f'}-${idx}`}
                                 className="text-[11px] font-sans bg-[#0d1524] border border-[#24334b] text-slate-300 px-2 py-0.5 rounded-md truncate max-w-[150px]"
                               >
                                 {f.name}
@@ -846,35 +880,137 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
 
             <form onSubmit={handleCreateFolderForFaculty} className="flex-1 min-h-0 flex flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6 space-y-4 text-xs font-mono scrollbar-thin scrollbar-thumb-slate-700">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Folder Name / Subject Title *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., Grade 11 General Mathematics DLL"
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
-                  />
+                {/* 1. FIRST OPTION: FOLDER CATEGORY (options: "DLL" or "TOS&TQ") */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-200 uppercase tracking-wider block flex items-center space-x-1.5">
+                      <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">1</span>
+                      <span>Folder Category *</span>
+                    </label>
+                    <span className="text-[10px] text-blue-400 font-mono">Options: DLL or TOS&TQ</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setFolderCategory('DLL')}
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        folderCategory === 'DLL'
+                          ? 'bg-blue-600/25 border-blue-500 text-white ring-2 ring-blue-500/50 shadow-md'
+                          : 'bg-[#0d1524] border-[#24334b] text-slate-400 hover:text-white hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold font-mono tracking-wide">DLL</span>
+                        {folderCategory === 'DLL' && (
+                          <div className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-sans mt-1">Daily Lesson Log</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFolderCategory('TOS&TQ')}
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        folderCategory === 'TOS&TQ'
+                          ? 'bg-indigo-600/25 border-indigo-500 text-white ring-2 ring-indigo-500/50 shadow-md'
+                          : 'bg-[#0d1524] border-[#24334b] text-slate-400 hover:text-white hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold font-mono tracking-wide">TOS&TQ</span>
+                        {folderCategory === 'TOS&TQ' && (
+                          <div className="w-5 h-5 rounded-full bg-indigo-500 text-white flex items-center justify-center">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-sans mt-1">Table of Specs & Exam</span>
+                    </button>
+                  </div>
                 </div>
 
+                {/* 2. NEXT OPTION: SUBJECT TITLE */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Category
-                  </label>
-                  <select
-                    value={newFolderCategory}
-                    onChange={(e) => setNewFolderCategory(e.target.value)}
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer font-sans"
-                  >
-                    {CATEGORY_OPTIONS.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-200 uppercase tracking-wider block flex items-center space-x-1.5">
+                      <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">2</span>
+                      <span>Subject Title *</span>
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-mono">Type Subject</span>
+                  </div>
+                  <div className="relative">
+                    <BookOpen className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g., Mathematics, English, Science, General Mathematics..."
+                      value={subjectTitle}
+                      onChange={(e) => setSubjectTitle(e.target.value)}
+                      className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 transition-all font-sans"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. NEXT OPTION: GRADE LEVEL (options: 7, 8, 9, 10, 11, 12) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-200 uppercase tracking-wider block flex items-center space-x-1.5">
+                      <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">3</span>
+                      <span>Grade Level *</span>
+                    </label>
+                    <span className="text-[10px] text-emerald-400 font-mono">Select: 7 to 12</span>
+                  </div>
+
+                  <div className="grid grid-cols-6 gap-2">
+                    {['7', '8', '9', '10', '11', '12'].map((g) => {
+                      const isSelected = gradeLevel === g;
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => setGradeLevel(g)}
+                          className={`py-2 px-1 rounded-xl border text-center transition-all cursor-pointer font-mono font-bold text-xs flex flex-col items-center justify-center ${
+                            isSelected
+                              ? 'bg-emerald-600 text-white border-emerald-500 ring-2 ring-emerald-500/50 shadow-md scale-105'
+                              : 'bg-[#0d1524] border-[#24334b] text-slate-400 hover:text-white hover:border-slate-600'
+                          }`}
+                        >
+                          <span className="text-[10px] uppercase font-sans opacity-70">Grade</span>
+                          <span className="text-sm font-extrabold">{g}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 4. AUTOMATICALLY CREATED FOLDER NAME (FolderCategory + SubjectTitle + Grade Level) */}
+                <div className="bg-[#0b121e] border-2 border-blue-500/40 rounded-2xl p-4 space-y-2 shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-300 font-bold flex items-center space-x-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Automatically Created Folder Name</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-md font-bold">
+                      Format: Category + Subject + Grade
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2.5 bg-[#090e18] border border-[#24334b] rounded-xl px-3.5 py-2.5">
+                    <Folder className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span className="text-sm font-bold font-mono text-white tracking-wide truncate">
+                      {subjectTitle.trim()
+                        ? `${folderCategory} ${subjectTitle.trim()} ${gradeLevel}`
+                        : `${folderCategory} [Type Subject Title Above] ${gradeLevel}`}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] font-sans text-slate-400 leading-normal">
+                    The folder will be created for {activeFaculty.name} with format: FolderCategory+SubjectTitle+Grade Level.
+                  </p>
                 </div>
 
                 <div className="space-y-1.5">
@@ -882,7 +1018,7 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
                     Description / Notes (Optional)
                   </label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     placeholder="Briefly describe what materials will be stored here..."
                     value={newFolderDescription}
                     onChange={(e) => setNewFolderDescription(e.target.value)}
@@ -994,6 +1130,10 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
         isOpen={Boolean(selectedPreviewFile)}
         file={selectedPreviewFile}
         onClose={() => setSelectedPreviewFile(null)}
+        currentUser={currentUser}
+        onCommentSaved={(updated) => {
+          setSelectedPreviewFile(updated);
+        }}
         onDeleteFile={(id) => {
           if (onDeleteFacultyFile) {
             onDeleteFacultyFile(id);
@@ -1001,6 +1141,12 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
           }
         }}
         canDelete={currentUser?.role === 'Admin'}
+        onOpenSpreadsheetEditor={(file, dataUrl) => {
+          setSelectedPreviewFile(null);
+          if (onOpenSpreadsheetEditor) {
+            onOpenSpreadsheetEditor(file, dataUrl);
+          }
+        }}
       />
     </div>
   );

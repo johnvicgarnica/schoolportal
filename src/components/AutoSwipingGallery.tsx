@@ -99,7 +99,8 @@ export const AutoSwipingGallery: React.FC<AutoSwipingGalleryProps> = ({
     touchEndXRef.current = null;
   };
 
-  if (isLoading) {
+  // Only show loading spinner if there are no cached photos available to display
+  if (isLoading && validPhotos.length === 0) {
     return (
       <div className={`w-full bg-slate-900/60 border border-slate-700/60 rounded-3xl p-6 text-center text-slate-400 ${className}`}>
         <div className="flex flex-col items-center justify-center space-y-2 py-4">

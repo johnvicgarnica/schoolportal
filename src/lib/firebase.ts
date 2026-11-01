@@ -1,7 +1,8 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   initializeFirestore,
-  memoryLocalCache,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection,
   doc,
   getDoc,
@@ -11,23 +12,35 @@ import {
   updateDoc,
   onSnapshot,
   query,
-  where
+  where,
+  limit,
+  startAfter,
+  orderBy,
+  getCountFromServer,
+  QueryDocumentSnapshot,
+  DocumentData,
+  QueryConstraint
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder, GalleryPhoto, EmbeddedVideo, UserProfile } from '../types';
+import { Announcement, DriveFolder, FacultyFolder, FacultyPersonalFile, SchoolPermanentFolder, GalleryPhoto, EmbeddedVideo, UserProfile, MasterTeacherComment } from '../types';
 import { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
 export { INITIAL_DRIVE_FOLDERS, INITIAL_SCHOOL_PERMANENT_FOLDERS } from '../mockData';
 import { saveOfflineData, getOfflineDataSync, getOfflineData } from './offlineStore';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
+// Direct Firebase Console database upgrade URL for quota reset/plan upgrade
+export const FIRESTORE_UPGRADE_URL =
+  'https://console.firebase.google.com/project/project-841905357866/firestore/databases/ai-studio-svnhsshsdeptfile-148e0721-c9cf-4964-b4a2-daa5a6e3b4d4/data?openUpgradeDialog=true';
+
+// Persistent Local Caching: Offline data stored locally; repeat reads pull from IndexedDB instead of hitting servers
 export const db = firebaseConfig.firestoreDatabaseId
   ? initializeFirestore(
       app,
       {
         ignoreUndefinedProperties: true,
         experimentalForceLongPolling: true,
-        localCache: memoryLocalCache(),
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
       },
       firebaseConfig.firestoreDatabaseId
     )
@@ -36,9 +49,88 @@ export const db = firebaseConfig.firestoreDatabaseId
       {
         ignoreUndefinedProperties: true,
         experimentalForceLongPolling: true,
-        localCache: memoryLocalCache(),
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
       }
     );
+
+// Quota Exceeded Detector
+export const isQuotaError = (err: any): boolean => {
+  if (!err) return false;
+  const msg = (err?.message || err?.code || String(err) || '').toLowerCase();
+  return (
+    err?.code === 'resource-exhausted' ||
+    msg.includes('quota') ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('free daily read units') ||
+    msg.includes('quota limit exceeded')
+  );
+};
+
+let quotaExceededLogged = false;
+export const handleFirestoreError = (actionName: string, err: any) => {
+  if (isQuotaError(err)) {
+    if (!quotaExceededLogged) {
+      console.warn(
+        `[SVNHS Firestore Quota Protection] Daily read quota limit reached during "${actionName}". ` +
+        `Application is serving all data directly from persistent local cache. ` +
+        `To restore server reads or upgrade billing: ${FIRESTORE_UPGRADE_URL}`
+      );
+      quotaExceededLogged = true;
+    }
+  } else {
+    console.error(`Error during ${actionName}:`, err);
+  }
+};
+
+// In-Memory Query Deduplication & TTL Cache to prevent repeat reads across re-renders
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+const queryCache = new Map<string, CacheEntry<any>>();
+const inFlightRequests = new Map<string, Promise<any>>();
+
+export function invalidateFirestoreQueryCache(prefix?: string) {
+  if (!prefix) {
+    queryCache.clear();
+    return;
+  }
+  for (const key of queryCache.keys()) {
+    if (key.startsWith(prefix)) {
+      queryCache.delete(key);
+    }
+  }
+}
+
+export async function fetchWithCacheDedupe<T>(
+  cacheKey: string,
+  fetchFn: () => Promise<T>,
+  ttlMs: number = 3 * 60 * 1000 // 3 minutes TTL default
+): Promise<T> {
+  const cached = queryCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && now - cached.timestamp < ttlMs) {
+    return cached.data;
+  }
+
+  // Deduplicate concurrent in-flight requests
+  if (inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey) as Promise<T>;
+  }
+
+  const promise = (async () => {
+    try {
+      const data = await fetchFn();
+      queryCache.set(cacheKey, { data, timestamp: Date.now() });
+      return data;
+    } finally {
+      inFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightRequests.set(cacheKey, promise);
+  return promise;
+}
 
 // Types
 export interface FacultyDoc {
@@ -102,7 +194,7 @@ const GALLERY_COL = 'gallery_photos';
 const FACULTY_SUBMISSIONS_STORAGE_KEY = 'svnhs_faculty_submissions_cache_v1';
 const FACULTY_TOSTQ_STORAGE_KEY = 'svnhs_faculty_tostq_cache_v1';
 const FACULTY_SCHOOL_FORMS_STORAGE_KEY = 'svnhs_faculty_school_forms_cache_v1';
-const GALLERY_STORAGE_KEY = 'svnhs_gallery_photos_cache_v1';
+export const GALLERY_STORAGE_KEY = 'svnhs_gallery_photos_cache_v1';
 
 // Helper: Sanitize email for doc ID
 const emailToDocId = (email: string) => email.trim().toLowerCase().replace(/[^a-z0-9]/gi, '_');
@@ -139,6 +231,7 @@ export const extractFacultySurname = (fullName: string): string => {
 // 1. FACULTY DIRECTORY
 export const saveFacultyToFirestore = async (facultyList: FacultyDoc[]) => {
   try {
+    invalidateFirestoreQueryCache('faculty');
     for (const f of facultyList) {
       const docId = emailToDocId(f.email);
       await setDoc(doc(db, FACULTY_COL, docId), {
@@ -151,69 +244,180 @@ export const saveFacultyToFirestore = async (facultyList: FacultyDoc[]) => {
       }, { merge: true });
     }
   } catch (err) {
-    console.error('Error saving faculty to Firestore:', err);
+    handleFirestoreError('saving faculty to Firestore', err);
   }
 };
 
 export const updateFacultyAdvisoryRoleInFirestore = async (email: string, advisoryRole: 'Class Adviser' | 'Non-Adviser') => {
   try {
+    invalidateFirestoreQueryCache('faculty');
     const docId = emailToDocId(email);
     await setDoc(doc(db, FACULTY_COL, docId), {
       advisoryRole: advisoryRole,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
   } catch (err) {
-    console.error('Error updating faculty advisory role in Firestore:', err);
+    handleFirestoreError('updating faculty advisory role in Firestore', err);
   }
 };
 
 export const updateFacultyDepartmentInFirestore = async (email: string, department: string) => {
   try {
+    invalidateFirestoreQueryCache('faculty');
     const docId = emailToDocId(email);
     await setDoc(doc(db, FACULTY_COL, docId), {
       department: department,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
   } catch (err) {
-    console.error('Error updating faculty department in Firestore:', err);
+    handleFirestoreError('updating faculty department in Firestore', err);
   }
 };
 
 export const deleteFacultyFromFirestore = async (email: string) => {
   try {
+    invalidateFirestoreQueryCache('faculty');
     await deleteDoc(doc(db, FACULTY_COL, emailToDocId(email)));
   } catch (err) {
-    console.error('Error deleting faculty from Firestore:', err);
+    handleFirestoreError('deleting faculty from Firestore', err);
   }
 };
 
 export const FACULTY_STORAGE_KEY = 'svnhs_faculty_cache_v1';
 
 export const getStoredFaculty = (): FacultyDoc[] => {
-  return getOfflineDataSync<FacultyDoc[]>(FACULTY_STORAGE_KEY, []);
+  const cached = getOfflineDataSync<FacultyDoc[]>(FACULTY_STORAGE_KEY, []);
+  const seenEmails = new Set<string>();
+  const seenIds = new Set<string>();
+  const uniqueFaculty: FacultyDoc[] = [];
+
+  for (const f of cached) {
+    const emailLower = (f.email || '').toLowerCase().trim();
+    if (emailLower && seenEmails.has(emailLower)) continue;
+    if (emailLower) seenEmails.add(emailLower);
+
+    let uniqueId = f.id;
+    if (!uniqueId || seenIds.has(uniqueId)) {
+      uniqueId = emailLower ? `faculty-${emailToDocId(emailLower)}` : `faculty-${Math.random().toString(36).substring(2, 9)}`;
+    }
+    seenIds.add(uniqueId);
+
+    uniqueFaculty.push({
+      ...f,
+      id: uniqueId,
+    });
+  }
+
+  return uniqueFaculty;
 };
 
 export const saveFacultyToLocalStorage = (list: FacultyDoc[]) => {
   saveOfflineData(FACULTY_STORAGE_KEY, list);
 };
 
-export const subscribeFaculty = (onUpdate: (facultyList: FacultyDoc[]) => void) => {
-  return onSnapshot(collection(db, FACULTY_COL), (snapshot) => {
-    const list: FacultyDoc[] = snapshot.docs.map((d) => d.data() as FacultyDoc);
-    if (list && list.length > 0) {
-      saveFacultyToLocalStorage(list);
+// Server Aggregation: Count of faculty members without fetching whole document array
+export const getFacultyCountFromServer = async (): Promise<number> => {
+  try {
+    const snapshot = await getCountFromServer(collection(db, FACULTY_COL));
+    return snapshot.data().count;
+  } catch (err) {
+    handleFirestoreError('counting faculty from server', err);
+    return getStoredFaculty().length;
+  }
+};
+
+// One-Time Fetch: Avoids continuous onSnapshot reads, uses TTL cache deduplication
+export const fetchFacultyOnce = async (pageSize: number = 25): Promise<FacultyDoc[]> => {
+  return fetchWithCacheDedupe('faculty_once', async () => {
+    try {
+      const q = query(collection(db, FACULTY_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: FacultyDoc[] = snapshot.docs.map((d) => d.data() as FacultyDoc);
+      if (list.length > 0) {
+        saveFacultyToLocalStorage(list);
+        return list;
+      }
+      return getStoredFaculty();
+    } catch (err) {
+      handleFirestoreError('fetching faculty once', err);
+      return getStoredFaculty();
     }
-    onUpdate(list);
-  }, (err) => {
-    console.error('Error subscribing to faculty collection:', err);
-    const cached = getStoredFaculty();
+  });
+};
+
+// Cursor-based Pagination for Faculty collection
+export const fetchFacultyPaginated = async (params: {
+  pageSize?: number;
+  lastDoc?: QueryDocumentSnapshot<DocumentData>;
+}): Promise<{ faculty: FacultyDoc[]; lastDoc: QueryDocumentSnapshot<DocumentData> | null; hasMore: boolean }> => {
+  const size = params.pageSize || 20;
+  try {
+    const constraints: QueryConstraint[] = [limit(size)];
+    if (params.lastDoc) {
+      constraints.push(startAfter(params.lastDoc));
+    }
+    const q = query(collection(db, FACULTY_COL), ...constraints);
+    const snapshot = await getDocs(q);
+    const faculty: FacultyDoc[] = snapshot.docs.map((d) => d.data() as FacultyDoc);
+    const nextLastDoc = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+    return {
+      faculty,
+      lastDoc: nextLastDoc,
+      hasMore: snapshot.docs.length === size,
+    };
+  } catch (err) {
+    handleFirestoreError('paginating faculty', err);
+    return { faculty: getStoredFaculty(), lastDoc: null, hasMore: false };
+  }
+};
+
+// Bounded Real-time Subscription with Quota Protection and clean unmount
+export const subscribeFaculty = (onUpdate: (facultyList: FacultyDoc[]) => void) => {
+  // Always serve local cache immediately to prevent wait/flicker
+  const cached = getStoredFaculty();
+  if (cached.length > 0) {
     onUpdate(cached);
+  }
+
+  // Stream all registered faculty in real-time
+  const q = collection(db, FACULTY_COL);
+  return onSnapshot(q, (snapshot) => {
+    const list: FacultyDoc[] = snapshot.docs.map((d) => d.data() as FacultyDoc);
+    const seenEmails = new Set<string>();
+    const seenIds = new Set<string>();
+    const uniqueFaculty: FacultyDoc[] = [];
+
+    for (const f of list) {
+      const emailLower = (f.email || '').toLowerCase().trim();
+      if (emailLower && seenEmails.has(emailLower)) continue;
+      if (emailLower) seenEmails.add(emailLower);
+
+      let uniqueId = f.id;
+      if (!uniqueId || seenIds.has(uniqueId)) {
+        uniqueId = emailLower ? `faculty-${emailToDocId(emailLower)}` : `faculty-${Math.random().toString(36).substring(2, 9)}`;
+      }
+      seenIds.add(uniqueId);
+
+      uniqueFaculty.push({
+        ...f,
+        id: uniqueId,
+      });
+    }
+
+    if (uniqueFaculty.length > 0) {
+      saveFacultyToLocalStorage(uniqueFaculty);
+    }
+    onUpdate(uniqueFaculty);
+  }, (err) => {
+    handleFirestoreError('subscribing to faculty collection', err);
+    onUpdate(getStoredFaculty());
   });
 };
 
 // 2. ADMIN DIRECTORY
 export const saveAdminsToFirestore = async (adminList: AdminDoc[]) => {
   try {
+    invalidateFirestoreQueryCache('admins');
     for (const a of adminList) {
       const docId = emailToDocId(a.email);
       await setDoc(doc(db, ADMINS_COL, docId), {
@@ -225,12 +429,13 @@ export const saveAdminsToFirestore = async (adminList: AdminDoc[]) => {
       }, { merge: true });
     }
   } catch (err) {
-    console.error('Error saving admins to Firestore:', err);
+    handleFirestoreError('saving admins to Firestore', err);
   }
 };
 
 export const deleteAdminFromFirestore = async (email: string) => {
   try {
+    invalidateFirestoreQueryCache('admins');
     const cleanEmail = (email || '').toLowerCase().trim();
     if (!cleanEmail) return;
     const docId = emailToDocId(cleanEmail);
@@ -246,9 +451,9 @@ export const deleteAdminFromFirestore = async (email: string) => {
       await deleteDoc(doc(db, ADMINS_COL, 'admin-coordinator'));
     }
 
-    // Query and delete any matching documents in ADMINS_COL by email or name
+    // Query and delete any matching documents in ADMINS_COL using bounded query
     try {
-      const snap = await getDocs(collection(db, ADMINS_COL));
+      const snap = await getDocs(query(collection(db, ADMINS_COL), limit(20)));
       for (const d of snap.docs) {
         const data = d.data();
         const dEmail = (data.email || '').toLowerCase().trim();
@@ -265,18 +470,83 @@ export const deleteAdminFromFirestore = async (email: string) => {
       // Continue if query fails
     }
   } catch (err) {
-    console.error('Error deleting admin from Firestore:', err);
+    handleFirestoreError('deleting admin from Firestore', err);
   }
 };
 
 export const ADMINS_STORAGE_KEY = 'svnhs_admins_cache_v1';
 
 export const getStoredAdmins = (): AdminDoc[] => {
-  return getOfflineDataSync<AdminDoc[]>(ADMINS_STORAGE_KEY, []);
+  const cached = getOfflineDataSync<AdminDoc[]>(ADMINS_STORAGE_KEY, []);
+  const seenIds = new Set<string>();
+  const seenEmails = new Set<string>();
+  const uniqueList: AdminDoc[] = [];
+
+  for (const admin of cached) {
+    const emailLower = (admin.email || '').toLowerCase().trim();
+    let uniqueId = admin.id;
+
+    if (emailLower && seenEmails.has(emailLower)) {
+      continue;
+    }
+
+    if (!uniqueId || seenIds.has(uniqueId)) {
+      uniqueId = emailLower ? `admin-${emailToDocId(emailLower)}` : `admin-${Math.random().toString(36).substring(2, 9)}`;
+    }
+
+    seenIds.add(uniqueId);
+    if (emailLower) seenEmails.add(emailLower);
+
+    uniqueList.push({
+      ...admin,
+      id: uniqueId,
+    });
+  }
+
+  return uniqueList;
 };
 
+// Server Aggregation: Count of administrators without fetching whole document array
+export const getAdminsCountFromServer = async (): Promise<number> => {
+  try {
+    const snapshot = await getCountFromServer(collection(db, ADMINS_COL));
+    return snapshot.data().count;
+  } catch (err) {
+    handleFirestoreError('counting admins from server', err);
+    return getStoredAdmins().length;
+  }
+};
+
+// One-Time Fetch: Avoids continuous onSnapshot reads, uses TTL cache deduplication
+export const fetchAdminsOnce = async (pageSize: number = 20): Promise<AdminDoc[]> => {
+  return fetchWithCacheDedupe('admins_once', async () => {
+    try {
+      const q = query(collection(db, ADMINS_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: AdminDoc[] = snapshot.docs.map((d) => d.data() as AdminDoc);
+      if (list.length > 0) {
+        saveOfflineData(ADMINS_STORAGE_KEY, list);
+        return list;
+      }
+      return getStoredAdmins();
+    } catch (err) {
+      handleFirestoreError('fetching admins once', err);
+      return getStoredAdmins();
+    }
+  });
+};
+
+// Bounded Real-time Subscription with Quota Protection and clean unmount
 export const subscribeAdmins = (onUpdate: (adminList: AdminDoc[]) => void) => {
-  return onSnapshot(collection(db, ADMINS_COL), (snapshot) => {
+  // Deliver cached admins immediately
+  const cached = getStoredAdmins();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  }
+
+  // Bound query to limit(20) to protect free read quota
+  const q = query(collection(db, ADMINS_COL), limit(20));
+  return onSnapshot(q, (snapshot) => {
     let list: AdminDoc[] = snapshot.docs.map((d) => d.data() as AdminDoc);
 
     // Explicitly filter out deleted admin accounts: SHS Department Coordinator & Marivic R. Villaluz
@@ -322,10 +592,38 @@ export const subscribeAdmins = (onUpdate: (adminList: AdminDoc[]) => void) => {
       });
     }
 
+    // Deduplicate admins by email and ID
+    const seenIds = new Set<string>();
+    const seenEmails = new Set<string>();
+    const deduplicatedList: AdminDoc[] = [];
+
+    for (const admin of list) {
+      const emailLower = (admin.email || '').toLowerCase().trim();
+      let uniqueId = admin.id;
+
+      if (emailLower && seenEmails.has(emailLower)) {
+        continue;
+      }
+
+      if (!uniqueId || seenIds.has(uniqueId)) {
+        uniqueId = emailLower ? `admin-${emailToDocId(emailLower)}` : `admin-${Math.random().toString(36).substring(2, 9)}`;
+      }
+
+      seenIds.add(uniqueId);
+      if (emailLower) seenEmails.add(emailLower);
+
+      deduplicatedList.push({
+        ...admin,
+        id: uniqueId,
+      });
+    }
+
+    list = deduplicatedList;
+
     saveOfflineData(ADMINS_STORAGE_KEY, list);
     onUpdate(list);
   }, (err) => {
-    console.error('Error subscribing to admins collection:', err);
+    handleFirestoreError('subscribing to admins collection', err);
     const cached = getStoredAdmins();
     if (cached && cached.length > 0) {
       onUpdate(cached);
@@ -342,6 +640,7 @@ export const getStoredFacultyRequests = (): RegistrationReqDoc[] => {
 
 export const saveFacultyRequestsToFirestore = async (requests: RegistrationReqDoc[]) => {
   try {
+    invalidateFirestoreQueryCache('faculty_reqs');
     for (const req of requests) {
       await setDoc(doc(db, FACULTY_REQ_COL, req.id), {
         ...req,
@@ -349,25 +648,60 @@ export const saveFacultyRequestsToFirestore = async (requests: RegistrationReqDo
       }, { merge: true });
     }
   } catch (err) {
-    console.error('Error saving faculty requests to Firestore:', err);
+    handleFirestoreError('saving faculty requests to Firestore', err);
   }
 };
 
 export const deleteFacultyRequestFromFirestore = async (requestId: string) => {
   try {
+    invalidateFirestoreQueryCache('faculty_reqs');
     await deleteDoc(doc(db, FACULTY_REQ_COL, requestId));
   } catch (err) {
-    console.error('Error deleting faculty request from Firestore:', err);
+    handleFirestoreError('deleting faculty request from Firestore', err);
   }
 };
 
+export const fetchFacultyRequestsOnce = async (pageSize: number = 20): Promise<RegistrationReqDoc[]> => {
+  return fetchWithCacheDedupe('faculty_reqs_once', async () => {
+    try {
+      const q = query(collection(db, FACULTY_REQ_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: RegistrationReqDoc[] = snapshot.docs.map((d) => d.data() as RegistrationReqDoc);
+      if (list.length > 0) {
+        saveOfflineData(FACULTY_REQ_STORAGE_KEY, list);
+        return list;
+      }
+      return getStoredFacultyRequests();
+    } catch (err) {
+      handleFirestoreError('fetching faculty requests once', err);
+      return getStoredFacultyRequests();
+    }
+  });
+};
+
 export const subscribeFacultyRequests = (onUpdate: (requests: RegistrationReqDoc[]) => void) => {
-  return onSnapshot(collection(db, FACULTY_REQ_COL), (snapshot) => {
+  const cached = getStoredFacultyRequests();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  }
+
+  const q = query(collection(db, FACULTY_REQ_COL), limit(20));
+  return onSnapshot(q, (snapshot) => {
     const list: RegistrationReqDoc[] = snapshot.docs.map((d) => d.data() as RegistrationReqDoc);
-    saveOfflineData(FACULTY_REQ_STORAGE_KEY, list);
-    onUpdate(list);
+    const seenIds = new Set<string>();
+    const uniqueList: RegistrationReqDoc[] = [];
+    for (const req of list) {
+      let uniqueId = req.id;
+      if (!uniqueId || seenIds.has(uniqueId)) {
+        uniqueId = `faculty-req-${Math.random().toString(36).substring(2, 9)}`;
+      }
+      seenIds.add(uniqueId);
+      uniqueList.push({ ...req, id: uniqueId });
+    }
+    saveOfflineData(FACULTY_REQ_STORAGE_KEY, uniqueList);
+    onUpdate(uniqueList);
   }, (err) => {
-    console.error('Error subscribing to faculty requests collection:', err);
+    handleFirestoreError('subscribing to faculty requests collection', err);
     onUpdate(getStoredFacultyRequests());
   });
 };
@@ -381,6 +715,7 @@ export const getStoredAdminRequests = (): RegistrationReqDoc[] => {
 
 export const saveAdminRequestsToFirestore = async (requests: RegistrationReqDoc[]) => {
   try {
+    invalidateFirestoreQueryCache('admin_reqs');
     for (const req of requests) {
       await setDoc(doc(db, ADMIN_REQ_COL, req.id), {
         ...req,
@@ -388,25 +723,60 @@ export const saveAdminRequestsToFirestore = async (requests: RegistrationReqDoc[
       }, { merge: true });
     }
   } catch (err) {
-    console.error('Error saving admin requests to Firestore:', err);
+    handleFirestoreError('saving admin requests to Firestore', err);
   }
 };
 
 export const deleteAdminRequestFromFirestore = async (requestId: string) => {
   try {
+    invalidateFirestoreQueryCache('admin_reqs');
     await deleteDoc(doc(db, ADMIN_REQ_COL, requestId));
   } catch (err) {
-    console.error('Error deleting admin request from Firestore:', err);
+    handleFirestoreError('deleting admin request from Firestore', err);
   }
 };
 
+export const fetchAdminRequestsOnce = async (pageSize: number = 20): Promise<RegistrationReqDoc[]> => {
+  return fetchWithCacheDedupe('admin_reqs_once', async () => {
+    try {
+      const q = query(collection(db, ADMIN_REQ_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: RegistrationReqDoc[] = snapshot.docs.map((d) => d.data() as RegistrationReqDoc);
+      if (list.length > 0) {
+        saveOfflineData(ADMIN_REQ_STORAGE_KEY, list);
+        return list;
+      }
+      return getStoredAdminRequests();
+    } catch (err) {
+      handleFirestoreError('fetching admin requests once', err);
+      return getStoredAdminRequests();
+    }
+  });
+};
+
 export const subscribeAdminRequests = (onUpdate: (requests: RegistrationReqDoc[]) => void) => {
-  return onSnapshot(collection(db, ADMIN_REQ_COL), (snapshot) => {
+  const cached = getStoredAdminRequests();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  }
+
+  const q = query(collection(db, ADMIN_REQ_COL), limit(20));
+  return onSnapshot(q, (snapshot) => {
     const list: RegistrationReqDoc[] = snapshot.docs.map((d) => d.data() as RegistrationReqDoc);
-    saveOfflineData(ADMIN_REQ_STORAGE_KEY, list);
-    onUpdate(list);
+    const seenIds = new Set<string>();
+    const uniqueList: RegistrationReqDoc[] = [];
+    for (const req of list) {
+      let uniqueId = req.id;
+      if (!uniqueId || seenIds.has(uniqueId)) {
+        uniqueId = `admin-req-${Math.random().toString(36).substring(2, 9)}`;
+      }
+      seenIds.add(uniqueId);
+      uniqueList.push({ ...req, id: uniqueId });
+    }
+    saveOfflineData(ADMIN_REQ_STORAGE_KEY, uniqueList);
+    onUpdate(uniqueList);
   }, (err) => {
-    console.error('Error subscribing to admin requests collection:', err);
+    handleFirestoreError('subscribing to admin requests collection', err);
     onUpdate(getStoredAdminRequests());
   });
 };
@@ -420,20 +790,22 @@ export const getStoredPasswordResetRequests = (): PasswordResetReqDoc[] => {
 
 export const savePasswordResetRequestToFirestore = async (request: PasswordResetReqDoc) => {
   try {
+    invalidateFirestoreQueryCache('pass_resets');
     await setDoc(doc(db, PASSWORD_RESET_REQ_COL, request.id), {
       ...request,
       email: request.email.toLowerCase(),
     }, { merge: true });
   } catch (err) {
-    console.error('Error saving password reset request to Firestore:', err);
+    handleFirestoreError('saving password reset request to Firestore', err);
   }
 };
 
 export const deletePasswordResetRequestFromFirestore = async (requestId: string) => {
   try {
+    invalidateFirestoreQueryCache('pass_resets');
     await deleteDoc(doc(db, PASSWORD_RESET_REQ_COL, requestId));
   } catch (err) {
-    console.error('Error deleting password reset request from Firestore:', err);
+    handleFirestoreError('deleting password reset request from Firestore', err);
   }
 };
 
@@ -443,23 +815,48 @@ export const updatePasswordResetRequestStatus = async (
   reviewedBy: string = 'Master Admin'
 ) => {
   try {
+    invalidateFirestoreQueryCache('pass_resets');
     await updateDoc(doc(db, PASSWORD_RESET_REQ_COL, requestId), {
       status,
       reviewedAt: new Date().toISOString(),
       reviewedBy,
     });
   } catch (err) {
-    console.error('Error updating password reset request status:', err);
+    handleFirestoreError('updating password reset request status', err);
   }
 };
 
+export const fetchPasswordResetRequestsOnce = async (pageSize: number = 20): Promise<PasswordResetReqDoc[]> => {
+  return fetchWithCacheDedupe('pass_resets_once', async () => {
+    try {
+      const q = query(collection(db, PASSWORD_RESET_REQ_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: PasswordResetReqDoc[] = snapshot.docs.map((d) => d.data() as PasswordResetReqDoc);
+      if (list.length > 0) {
+        saveOfflineData(PASSWORD_RESET_REQ_STORAGE_KEY, list);
+        return list;
+      }
+      return getStoredPasswordResetRequests();
+    } catch (err) {
+      handleFirestoreError('fetching password reset requests once', err);
+      return getStoredPasswordResetRequests();
+    }
+  });
+};
+
 export const subscribePasswordResetRequests = (onUpdate: (requests: PasswordResetReqDoc[]) => void) => {
-  return onSnapshot(collection(db, PASSWORD_RESET_REQ_COL), (snapshot) => {
+  const cached = getStoredPasswordResetRequests();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  }
+
+  const q = query(collection(db, PASSWORD_RESET_REQ_COL), limit(20));
+  return onSnapshot(q, (snapshot) => {
     const list: PasswordResetReqDoc[] = snapshot.docs.map((d) => d.data() as PasswordResetReqDoc);
     saveOfflineData(PASSWORD_RESET_REQ_STORAGE_KEY, list);
     onUpdate(list);
   }, (err) => {
-    console.error('Error subscribing to password reset requests collection:', err);
+    handleFirestoreError('subscribing to password reset requests collection', err);
     onUpdate(getStoredPasswordResetRequests());
   });
 };
@@ -707,18 +1104,40 @@ export const subscribeUserPasswords = (onUpdate: (passwords: { facultyMap: Recor
 // 6. MASTER SETTINGS (MASTER PASSWORDS)
 export const saveSettingToFirestore = async (key: string, value: string) => {
   try {
+    invalidateFirestoreQueryCache('settings');
     await setDoc(doc(db, SETTINGS_COL, key), {
       key: key,
       value: value,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
   } catch (err) {
-    console.error('Error saving setting to Firestore:', err);
+    handleFirestoreError('saving setting to Firestore', err);
   }
 };
 
+export const fetchSettingsOnce = async (): Promise<Record<string, string>> => {
+  return fetchWithCacheDedupe('settings_once', async () => {
+    try {
+      const q = query(collection(db, SETTINGS_COL), limit(20));
+      const snapshot = await getDocs(q);
+      const settingsMap: Record<string, string> = {};
+      snapshot.docs.forEach((d) => {
+        const data = d.data();
+        if (data.key && data.value) {
+          settingsMap[data.key] = data.value;
+        }
+      });
+      return settingsMap;
+    } catch (err) {
+      handleFirestoreError('fetching settings once', err);
+      return {};
+    }
+  });
+};
+
 export const subscribeSettings = (onUpdate: (settings: Record<string, string>) => void) => {
-  return onSnapshot(collection(db, SETTINGS_COL), (snapshot) => {
+  const q = query(collection(db, SETTINGS_COL), limit(20));
+  return onSnapshot(q, (snapshot) => {
     const settingsMap: Record<string, string> = {};
     snapshot.docs.forEach((d) => {
       const data = d.data();
@@ -728,7 +1147,7 @@ export const subscribeSettings = (onUpdate: (settings: Record<string, string>) =
     });
     onUpdate(settingsMap);
   }, (err) => {
-    console.error('Error subscribing to settings collection:', err);
+    handleFirestoreError('subscribing to settings collection', err);
   });
 };
 
@@ -766,25 +1185,97 @@ export const deleteAnnouncementFromLocalStorage = (id: string) => {
 
 export const saveAnnouncementToFirestore = async (announcement: Announcement) => {
   try {
+    invalidateFirestoreQueryCache('announcements');
     saveAnnouncementToLocalStorage(announcement);
     await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), announcement, { merge: true });
   } catch (err) {
-    console.error('Error saving announcement to Firestore:', err);
+    handleFirestoreError('saving announcement to Firestore', err);
   }
 };
 
 export const deleteAnnouncementFromFirestore = async (id: string) => {
   try {
+    invalidateFirestoreQueryCache('announcements');
     deleteAnnouncementFromLocalStorage(id);
     await deleteDoc(doc(db, ANNOUNCEMENTS_COL, id));
   } catch (err) {
-    console.error('Error deleting announcement from Firestore:', err);
+    handleFirestoreError('deleting announcement from Firestore', err);
   }
 };
 
+// Server Aggregation: Count announcements using getCountFromServer
+export const getAnnouncementsCountFromServer = async (): Promise<number> => {
+  try {
+    const snapshot = await getCountFromServer(collection(db, ANNOUNCEMENTS_COL));
+    return snapshot.data().count;
+  } catch (err) {
+    handleFirestoreError('counting announcements from server', err);
+    return getStoredAnnouncements().length;
+  }
+};
+
+// One-Time Fetch with Deduplication Cache
+export const fetchAnnouncementsOnce = async (pageSize: number = 20): Promise<Announcement[]> => {
+  return fetchWithCacheDedupe('announcements_once', async () => {
+    try {
+      const q = query(collection(db, ANNOUNCEMENTS_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: Announcement[] = snapshot.docs.map((d) => d.data() as Announcement);
+      list.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
+      if (list.length > 0) {
+        saveOfflineData(ANNOUNCEMENTS_STORAGE_KEY, list);
+        return list;
+      }
+      return getStoredAnnouncements();
+    } catch (err) {
+      handleFirestoreError('fetching announcements once', err);
+      return getStoredAnnouncements();
+    }
+  });
+};
+
+// Cursor-based pagination for announcements
+export const fetchAnnouncementsPaginated = async (params: {
+  pageSize?: number;
+  lastDoc?: QueryDocumentSnapshot<DocumentData>;
+}): Promise<{ announcements: Announcement[]; lastDoc: QueryDocumentSnapshot<DocumentData> | null; hasMore: boolean }> => {
+  const size = params.pageSize || 20;
+  try {
+    const constraints: QueryConstraint[] = [limit(size)];
+    if (params.lastDoc) {
+      constraints.push(startAfter(params.lastDoc));
+    }
+    const q = query(collection(db, ANNOUNCEMENTS_COL), ...constraints);
+    const snapshot = await getDocs(q);
+    const announcements: Announcement[] = snapshot.docs.map((d) => d.data() as Announcement);
+    const nextLastDoc = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+    return {
+      announcements,
+      lastDoc: nextLastDoc,
+      hasMore: snapshot.docs.length === size,
+    };
+  } catch (err) {
+    handleFirestoreError('paginating announcements', err);
+    return { announcements: getStoredAnnouncements(), lastDoc: null, hasMore: false };
+  }
+};
+
+// Bounded Real-time Subscription with Quota Protection and clean unmount
 export const subscribeAnnouncements = (onUpdate: (announcements: Announcement[]) => void) => {
+  // Deliver cached announcements immediately
+  const cached = getStoredAnnouncements();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  }
+
+  // Bound query to limit(20) to protect free read quota
+  const q = query(collection(db, ANNOUNCEMENTS_COL), limit(20));
   return onSnapshot(
-    collection(db, ANNOUNCEMENTS_COL),
+    q,
     (snapshot) => {
       const list: Announcement[] = snapshot.docs.map((d) => d.data() as Announcement);
 
@@ -801,10 +1292,8 @@ export const subscribeAnnouncements = (onUpdate: (announcements: Announcement[])
       onUpdate(list);
     },
     (err) => {
-      console.error('Error subscribing to announcements collection:', err);
-      // Fallback to offline store on network error
-      const cached = getStoredAnnouncements();
-      onUpdate(cached);
+      handleFirestoreError('subscribing to announcements collection', err);
+      onUpdate(getStoredAnnouncements());
     }
   );
 };
@@ -954,12 +1443,46 @@ export const deleteDriveFolderFromFirestore = async (id: string) => {
   }
 };
 
+// One-Time Fetch with Deduplication Cache
+export const fetchDriveFoldersOnce = async (pageSize: number = 25): Promise<DriveFolder[]> => {
+  return fetchWithCacheDedupe('drive_folders_once', async () => {
+    try {
+      const q = query(collection(db, DRIVE_FOLDERS_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) {
+        seedInitialDriveFoldersIfEmpty();
+        const cached = getStoredDriveFolders();
+        return cached.length > 0 ? cached : INITIAL_DRIVE_FOLDERS;
+      }
+      const list: DriveFolder[] = snapshot.docs.map((d) => d.data() as DriveFolder);
+      list.sort((a, b) => {
+        if (a.path === 'all') return -1;
+        if (b.path === 'all') return 1;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+      saveOfflineData(DRIVE_FOLDERS_STORAGE_KEY, list);
+      return list;
+    } catch (err) {
+      handleFirestoreError('fetching drive folders once', err);
+      const cached = getStoredDriveFolders();
+      return cached.length > 0 ? cached : INITIAL_DRIVE_FOLDERS;
+    }
+  });
+};
+
 export const subscribeDriveFolders = (onUpdate: (folders: DriveFolder[]) => void) => {
+  // Deliver cached drive folders immediately
+  const cached = getStoredDriveFolders();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  }
+
+  // Bound query to limit(25) to protect read quota
+  const q = query(collection(db, DRIVE_FOLDERS_COL), limit(25));
   return onSnapshot(
-    collection(db, DRIVE_FOLDERS_COL),
+    q,
     (snapshot) => {
       if (snapshot.empty) {
-        // If Firestore is empty, seed initial folders and fallback to defaults
         seedInitialDriveFoldersIfEmpty();
         const cached = getStoredDriveFolders();
         onUpdate(cached.length > 0 ? cached : INITIAL_DRIVE_FOLDERS);
@@ -968,7 +1491,6 @@ export const subscribeDriveFolders = (onUpdate: (folders: DriveFolder[]) => void
 
       const list: DriveFolder[] = snapshot.docs.map((d) => d.data() as DriveFolder);
 
-      // Order root first, then by name
       list.sort((a, b) => {
         if (a.path === 'all') return -1;
         if (b.path === 'all') return 1;
@@ -976,11 +1498,10 @@ export const subscribeDriveFolders = (onUpdate: (folders: DriveFolder[]) => void
       });
 
       saveOfflineData(DRIVE_FOLDERS_STORAGE_KEY, list);
-
       onUpdate(list);
     },
     (err) => {
-      console.error('Error subscribing to drive folders collection:', err);
+      handleFirestoreError('subscribing to drive folders collection', err);
       const cached = getStoredDriveFolders();
       onUpdate(cached.length > 0 ? cached : INITIAL_DRIVE_FOLDERS);
     }
@@ -1228,33 +1749,81 @@ export const deleteFacultyFolderFromFirestore = async (id: string) => {
   }
 };
 
+// Server Aggregation: Count of faculty folders without fetching whole document array
+export const getFacultyFoldersCountFromServer = async (): Promise<number> => {
+  try {
+    const snapshot = await getCountFromServer(collection(db, FACULTY_FOLDERS_COL));
+    return snapshot.data().count;
+  } catch (err) {
+    handleFirestoreError('counting faculty folders from server', err);
+    return getStoredFacultyFolders().length;
+  }
+};
+
+// One-Time Fetch with Deduplication Cache
+export const fetchFacultyFoldersOnce = async (pageSize: number = 30): Promise<FacultyFolder[]> => {
+  return fetchWithCacheDedupe('faculty_folders_once', async () => {
+    try {
+      const q = query(collection(db, FACULTY_FOLDERS_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: FacultyFolder[] = snapshot.docs.map((d) => d.data() as FacultyFolder);
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      if (list.length > 0) {
+        saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, list);
+        return list;
+      }
+      return getStoredFacultyFolders();
+    } catch (err) {
+      handleFirestoreError('fetching faculty folders once', err);
+      return getStoredFacultyFolders();
+    }
+  });
+};
+
 export const subscribeFacultyFolders = (onUpdate: (folders: FacultyFolder[]) => void) => {
+  // Deliver cached faculty folders immediately
+  const cached = getStoredFacultyFolders();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  }
+
+  // Stream all faculty folders in real-time
+  const q = collection(db, FACULTY_FOLDERS_COL);
   return onSnapshot(
-    collection(db, FACULTY_FOLDERS_COL),
+    q,
     (snapshot) => {
       const list: FacultyFolder[] = snapshot.docs.map((d) => d.data() as FacultyFolder);
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
       saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, list);
-
       onUpdate(list);
     },
     (err) => {
-      console.error('Error subscribing to faculty folders collection:', err);
-      const cached = getStoredFacultyFolders();
-      onUpdate(cached);
+      handleFirestoreError('subscribing to faculty folders collection', err);
+      onUpdate(getStoredFacultyFolders());
     }
   );
 };
 
 // 10. FACULTY PERSONAL FILES
 export const getStoredFacultyFiles = (): FacultyPersonalFile[] => {
-  return getOfflineDataSync<FacultyPersonalFile[]>(FACULTY_FILES_STORAGE_KEY, []);
+  const all = getOfflineDataSync<FacultyPersonalFile[]>(FACULTY_FILES_STORAGE_KEY, []);
+  // Enforce PDF-only policy for personal faculty folders (exclude permanent school repositories)
+  return all.filter((f) => {
+    const isPermanent =
+      f.folderId === 'school-forms' ||
+      f.folderId === 'school-documents' ||
+      f.folderId?.startsWith('school-');
+    if (isPermanent) return true;
+    const format = (f.format || '').toLowerCase();
+    const fileName = (f.fileName || '').toLowerCase();
+    return format === 'pdf' || fileName.endsWith('.pdf');
+  });
 };
 
 export const saveFacultyFileToLocalStorage = (file: FacultyPersonalFile) => {
   try {
-    const list = getStoredFacultyFiles();
+    const list = getOfflineDataSync<FacultyPersonalFile[]>(FACULTY_FILES_STORAGE_KEY, []);
     const existingIdx = list.findIndex((f) => f.id === file.id);
     if (existingIdx >= 0) {
       list[existingIdx] = file;
@@ -1269,7 +1838,7 @@ export const saveFacultyFileToLocalStorage = (file: FacultyPersonalFile) => {
 
 export const deleteFacultyFileFromLocalStorage = (id: string) => {
   try {
-    const list = getStoredFacultyFiles();
+    const list = getOfflineDataSync<FacultyPersonalFile[]>(FACULTY_FILES_STORAGE_KEY, []);
     const updated = list.filter((f) => f.id !== id);
     saveOfflineData(FACULTY_FILES_STORAGE_KEY, updated);
   } catch (err) {
@@ -1277,17 +1846,25 @@ export const deleteFacultyFileFromLocalStorage = (id: string) => {
   }
 };
 
-// Automatic cleanup of files older than 1 week (7 days)
+// Automatic cleanup of files older than 15 days
 export const cleanupExpiredFacultyFiles = async () => {
   try {
     const files = getStoredFacultyFiles();
     const now = Date.now();
     for (const file of files) {
+      // Never auto-delete permanent school files (e.g. School Forms, School Documents)
+      if (
+        file.folderId === 'school-forms' ||
+        file.folderId === 'school-documents' ||
+        file.folderId?.startsWith('school-')
+      ) {
+        continue;
+      }
       const expireTime = file.expiresAt
         ? new Date(file.expiresAt).getTime()
-        : new Date(file.uploadedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
+        : new Date(file.uploadedAt).getTime() + 15 * 24 * 60 * 60 * 1000;
       if (expireTime <= now) {
-        console.log(`[SVNHS Auto-Cleanup] Purging expired faculty file "${file.title}" (uploaded ${file.uploadedAt})`);
+        console.log(`[SVNHS Auto-Cleanup] Purging expired 15-day faculty file "${file.title}" (uploaded ${file.uploadedAt})`);
         await deleteFacultyFileFromFirestore(file.id);
       }
     }
@@ -1296,12 +1873,45 @@ export const cleanupExpiredFacultyFiles = async () => {
   }
 };
 
+// Automatic purge of all files in personal faculty folders that are not in PDF format
+export const purgeNonPdfFacultyFiles = async () => {
+  try {
+    const all = getOfflineDataSync<FacultyPersonalFile[]>(FACULTY_FILES_STORAGE_KEY, []);
+    for (const file of all) {
+      // Permanent school folders (school-forms, school-documents) allow spreadsheets and memos
+      const isPermanent =
+        file.folderId === 'school-forms' ||
+        file.folderId === 'school-documents' ||
+        file.folderId?.startsWith('school-');
+      if (isPermanent) continue;
+
+      const format = (file.format || '').toLowerCase();
+      const fileName = (file.fileName || '').toLowerCase();
+      const isPdf = format === 'pdf' || fileName.endsWith('.pdf');
+
+      if (!isPdf) {
+        console.log(`[SVNHS PDF-Only Policy] Purging non-PDF file "${file.title}" (${file.fileName}) from faculty folder "${file.folderId}"`);
+        await deleteFacultyFileFromFirestore(file.id);
+      }
+    }
+  } catch (err) {
+    console.warn('Error during non-PDF faculty files purge:', err);
+  }
+};
+
 export const saveFacultyFileToFirestore = async (file: FacultyPersonalFile) => {
   try {
-    // Enforce 1-week expiration timestamp if not set
+    const isPermanent =
+      file.folderId === 'school-forms' ||
+      file.folderId === 'school-documents' ||
+      file.folderId?.startsWith('school-');
+
+    // Enforce 15-day expiration timestamp only for temporary faculty personal files
     const preparedFile: FacultyPersonalFile = {
       ...file,
-      expiresAt: file.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: isPermanent
+        ? undefined
+        : file.expiresAt || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
     // Always cache full file (including fileData) in local offline store
@@ -1443,9 +2053,169 @@ export const deleteFacultyFileFromFirestore = async (id: string) => {
   }
 };
 
+/**
+ * Save or update Master Teacher evaluation comment on a faculty document in Firestore & local cache.
+ */
+export const saveMasterTeacherCommentToFile = async (
+  fileId: string,
+  comment: string,
+  authorName: string = 'Norma Jabagat',
+  authorDesignation: string = 'Master Teacher'
+): Promise<FacultyPersonalFile | null> => {
+  try {
+    const timestamp = new Date().toISOString();
+    const commentObj: MasterTeacherComment = {
+      id: `mtc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      comment: comment.trim(),
+      commentedBy: authorName,
+      designation: authorDesignation,
+      commentedAt: timestamp,
+    };
+
+    // Update local storage cache immediately
+    const files = getStoredFacultyFiles();
+    const fileIndex = files.findIndex((f) => f.id === fileId);
+    let updatedFile: FacultyPersonalFile | null = null;
+
+    if (fileIndex >= 0) {
+      const existingComments = files[fileIndex].masterTeacherComments || [];
+      const updatedComments = [commentObj, ...existingComments];
+      files[fileIndex] = {
+        ...files[fileIndex],
+        masterTeacherComment: comment.trim(),
+        masterTeacherCommentedAt: timestamp,
+        masterTeacherCommentedBy: authorName,
+        masterTeacherComments: updatedComments,
+      };
+      saveOfflineData(FACULTY_FILES_STORAGE_KEY, files);
+      updatedFile = files[fileIndex];
+    }
+
+    // Persist to Firestore
+    const fileDocRef = doc(db, FACULTY_FILES_COL, fileId);
+    let existingComments: MasterTeacherComment[] = [];
+    try {
+      const docSnap = await getDoc(fileDocRef);
+      if (docSnap.exists()) {
+        existingComments = docSnap.data().masterTeacherComments || [];
+      }
+    } catch (_) {}
+
+    const mergedComments = [commentObj, ...existingComments];
+
+    await updateDoc(fileDocRef, {
+      masterTeacherComment: comment.trim(),
+      masterTeacherCommentedAt: timestamp,
+      masterTeacherCommentedBy: authorName,
+      masterTeacherComments: mergedComments,
+    });
+
+    invalidateFirestoreQueryCache('faculty_files');
+
+    return updatedFile;
+  } catch (err) {
+    console.error('Error saving Master Teacher comment to file:', err);
+    throw err;
+  }
+};
+
+// Server Aggregation: Count of faculty files without fetching document arrays
+export const getFacultyFilesCountFromServer = async (): Promise<number> => {
+  try {
+    const snapshot = await getCountFromServer(collection(db, FACULTY_FILES_COL));
+    return snapshot.data().count;
+  } catch (err) {
+    handleFirestoreError('counting faculty files from server', err);
+    return getStoredFacultyFiles().length;
+  }
+};
+
+// One-Time Fetch with Deduplication Cache
+export const fetchFacultyFilesOnce = async (pageSize: number = 25): Promise<FacultyPersonalFile[]> => {
+  return fetchWithCacheDedupe('faculty_files_once', async () => {
+    try {
+      const q = query(collection(db, FACULTY_FILES_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
+      list.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+
+      // Clean up local list with fresh data
+      saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
+
+      // Return sanitized list where personal faculty files are strictly PDF format
+      const sanitized = list.filter((f) => {
+        const isPerm =
+          f.folderId === 'school-forms' ||
+          f.folderId === 'school-documents' ||
+          f.folderId?.startsWith('school-');
+        if (isPerm) return true;
+        const format = (f.format || '').toLowerCase();
+        const fileName = (f.fileName || '').toLowerCase();
+        return format === 'pdf' || fileName.endsWith('.pdf');
+      });
+
+      return sanitized;
+    } catch (err) {
+      handleFirestoreError('fetching faculty files once', err);
+      return getStoredFacultyFiles();
+    }
+  });
+};
+
+// Cursor-based Pagination for Faculty Personal Files
+export const fetchFacultyFilesPaginated = async (params: {
+  pageSize?: number;
+  folderId?: string;
+  lastDoc?: QueryDocumentSnapshot<DocumentData>;
+}): Promise<{ files: FacultyPersonalFile[]; lastDoc: QueryDocumentSnapshot<DocumentData> | null; hasMore: boolean }> => {
+  const size = params.pageSize || 20;
+  try {
+    const constraints: QueryConstraint[] = [limit(size)];
+    if (params.folderId && params.folderId !== 'all') {
+      constraints.unshift(where('folderId', '==', params.folderId));
+    }
+    if (params.lastDoc) {
+      constraints.push(startAfter(params.lastDoc));
+    }
+    const q = query(collection(db, FACULTY_FILES_COL), ...constraints);
+    const snapshot = await getDocs(q);
+    const files: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
+    const nextLastDoc = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+
+    const sanitized = files.filter((f) => {
+      const isPerm =
+        f.folderId === 'school-forms' ||
+        f.folderId === 'school-documents' ||
+        f.folderId?.startsWith('school-');
+      if (isPerm) return true;
+      const format = (f.format || '').toLowerCase();
+      const fileName = (f.fileName || '').toLowerCase();
+      return format === 'pdf' || fileName.endsWith('.pdf');
+    });
+
+    return {
+      files: sanitized,
+      lastDoc: nextLastDoc,
+      hasMore: snapshot.docs.length === size,
+    };
+  } catch (err) {
+    handleFirestoreError('paginating faculty files', err);
+    return { files: getStoredFacultyFiles(), lastDoc: null, hasMore: false };
+  }
+};
+
+// Bounded Real-time Subscription with Quota Protection and clean unmount
 export const subscribeFacultyFiles = (onUpdate: (files: FacultyPersonalFile[]) => void) => {
+  // Always serve local cache immediately to prevent wait/flicker
+  const cached = getStoredFacultyFiles();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  }
+
+  // Stream all faculty files in real-time
+  const q = collection(db, FACULTY_FILES_COL);
   return onSnapshot(
-    collection(db, FACULTY_FILES_COL),
+    q,
     (snapshot) => {
       const list: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
       list.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
@@ -1453,15 +2223,27 @@ export const subscribeFacultyFiles = (onUpdate: (files: FacultyPersonalFile[]) =
       // Clean up local list with fresh data
       saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
 
-      // Trigger asynchronous background cleanup of any expired 1-week files
+      // Trigger asynchronous background cleanup of any expired 15-day files and non-PDF files in faculty folders
       cleanupExpiredFacultyFiles();
+      purgeNonPdfFacultyFiles();
 
-      onUpdate(list);
+      // Return sanitized list where personal faculty files are strictly PDF format
+      const sanitized = list.filter((f) => {
+        const isPerm =
+          f.folderId === 'school-forms' ||
+          f.folderId === 'school-documents' ||
+          f.folderId?.startsWith('school-');
+        if (isPerm) return true;
+        const format = (f.format || '').toLowerCase();
+        const fileName = (f.fileName || '').toLowerCase();
+        return format === 'pdf' || fileName.endsWith('.pdf');
+      });
+
+      onUpdate(sanitized);
     },
     (err) => {
-      console.error('Error subscribing to faculty files collection:', err);
-      const cached = getStoredFacultyFiles();
-      onUpdate(cached);
+      handleFirestoreError('subscribing to faculty files collection', err);
+      onUpdate(getStoredFacultyFiles());
     }
   );
 };
@@ -1712,9 +2494,17 @@ export const subscribeFacultySubmissions = (
   ) => void
 ) => {
   const colName = getCategoryCollectionName(category);
+  const cached = getStoredFacultySubmissions(termId, category);
+  const cachedStatuses = getStoredFacultyStatuses(termId, category);
+  const cachedComments = getStoredFacultyComments(termId, category);
+  if (cached && Object.keys(cached).length > 0) {
+    onUpdate(cached, cachedStatuses, cachedComments);
+  }
 
+  // Real-time listener for all submissions in this category without limit(30) truncation
+  const q = collection(db, colName);
   return onSnapshot(
-    collection(db, colName),
+    q,
     (snapshot) => {
       const map: Record<string, boolean[]> = {};
       const statusMap: Record<string, ItemSubmissionStatus[]> = {};
@@ -1722,19 +2512,30 @@ export const subscribeFacultySubmissions = (
 
       snapshot.docs.forEach((d) => {
         const data = d.data();
-        if (data.termId === termId && data.facultyEmail) {
-          const emailKey = data.facultyEmail.toLowerCase().trim();
-          if (Array.isArray(data.weeks)) {
-            map[emailKey] = data.weeks;
-          }
-          if (Array.isArray(data.statuses)) {
-            statusMap[emailKey] = data.statuses;
-          } else if (Array.isArray(data.weeks)) {
-            // Derive statuses from weeks for backward compatibility
-            statusMap[emailKey] = data.weeks.map((w: boolean) => (w ? 'checked' : 'unchecked'));
-          }
-          if (data.comments && typeof data.comments === 'object') {
-            commentMap[emailKey] = data.comments;
+        const docTermId = data.termId || (d.id.includes('_') ? d.id.split('_')[0] : '');
+        const matchesTerm =
+          docTermId === termId ||
+          d.id.startsWith(`${termId}_`) ||
+          (termId === 'annual' && (!data.termId || data.termId === 'annual' || d.id.startsWith('annual_')));
+
+        if (matchesTerm) {
+          const emailRaw =
+            data.facultyEmail ||
+            (d.id.includes('_') ? d.id.substring(d.id.indexOf('_') + 1) : '');
+          if (emailRaw) {
+            const cleanEmail = emailRaw.toLowerCase().trim();
+            if (Array.isArray(data.weeks)) {
+              map[cleanEmail] = data.weeks;
+            }
+            if (Array.isArray(data.statuses)) {
+              statusMap[cleanEmail] = data.statuses;
+            } else if (Array.isArray(data.weeks)) {
+              // Derive statuses from weeks for backward compatibility
+              statusMap[cleanEmail] = data.weeks.map((w: boolean) => (w ? 'checked' : 'unchecked'));
+            }
+            if (data.comments && typeof data.comments === 'object') {
+              commentMap[cleanEmail] = data.comments;
+            }
           }
         }
       });
@@ -1745,8 +2546,10 @@ export const subscribeFacultySubmissions = (
         const merged = { ...localCached, ...map };
         const localStatuses = getStoredFacultyStatuses(termId, 'dll');
         const localComments = getStoredFacultyComments(termId, 'dll');
-        onUpdate(merged, localStatuses, localComments);
-        return;
+        if (Object.keys(merged).length > 0) {
+          onUpdate(merged, localStatuses, localComments);
+          return;
+        }
       }
 
       // Prioritize freshly fetched data from Firestore and update local cache
@@ -1757,11 +2560,11 @@ export const subscribeFacultySubmissions = (
       onUpdate(map, statusMap, commentMap);
     },
     (err) => {
-      console.error(`Error subscribing to faculty ${category} submissions:`, err);
-      const cached = getStoredFacultySubmissions(termId, category);
-      const cachedStatuses = getStoredFacultyStatuses(termId, category);
-      const cachedComments = getStoredFacultyComments(termId, category);
-      onUpdate(cached, cachedStatuses, cachedComments);
+      handleFirestoreError(`subscribing to faculty ${category} submissions`, err);
+      const fallback = getStoredFacultySubmissions(termId, category);
+      const fallbackStatuses = getStoredFacultyStatuses(termId, category);
+      const fallbackComments = getStoredFacultyComments(termId, category);
+      onUpdate(fallback, fallbackStatuses, fallbackComments);
     }
   );
 };
@@ -1838,8 +2641,14 @@ export const subscribeFacultyTosTq = (
   termId: string,
   onUpdate: (dataMap: Record<string, TosTqRecord>) => void
 ) => {
+  const cached = getStoredFacultyTosTq(termId);
+  if (cached && Object.keys(cached).length > 0) {
+    onUpdate(cached);
+  }
+
+  const q = collection(db, FACULTY_TOSTQ_COL);
   return onSnapshot(
-    collection(db, FACULTY_TOSTQ_COL),
+    q,
     (snapshot) => {
       const map: Record<string, TosTqRecord> = {};
       snapshot.docs.forEach((d) => {
@@ -1858,14 +2667,13 @@ export const subscribeFacultyTosTq = (
         }
       });
 
-      // Prioritize freshly fetched data from Firestore and update local cache
       saveFacultyTosTqToLocalStorage(termId, map);
       onUpdate(map);
     },
     (err) => {
-      console.error('Error subscribing to TOS/TQ submissions:', err);
-      const cached = getStoredFacultyTosTq(termId);
-      onUpdate(cached);
+      handleFirestoreError('subscribing to TOS/TQ submissions', err);
+      const fallback = getStoredFacultyTosTq(termId);
+      onUpdate(fallback);
     }
   );
 };
@@ -1936,7 +2744,7 @@ export const saveFacultySchoolFormsToFirestore = async (
       { merge: true }
     );
   } catch (err) {
-    console.error('Error saving School Forms submission to Firestore:', err);
+    handleFirestoreError('saving School Forms submission to Firestore', err);
   }
 };
 
@@ -1944,8 +2752,14 @@ export const subscribeFacultySchoolForms = (
   termId: string,
   onUpdate: (dataMap: Record<string, SchoolFormsRecord>) => void
 ) => {
+  const cached = getStoredFacultySchoolForms(termId);
+  if (cached && Object.keys(cached).length > 0) {
+    onUpdate(cached);
+  }
+
+  const q = collection(db, FACULTY_SCHOOL_FORMS_COL);
   return onSnapshot(
-    collection(db, FACULTY_SCHOOL_FORMS_COL),
+    q,
     (snapshot) => {
       const map: Record<string, SchoolFormsRecord> = {};
       snapshot.docs.forEach((d) => {
@@ -1965,14 +2779,13 @@ export const subscribeFacultySchoolForms = (
         }
       });
 
-      // Prioritize freshly fetched data from Firestore and update local cache
       saveFacultySchoolFormsToLocalStorage(termId, map);
       onUpdate(map);
     },
     (err) => {
-      console.error('Error subscribing to School Forms submissions:', err);
-      const cached = getStoredFacultySchoolForms(termId);
-      onUpdate(cached);
+      handleFirestoreError('subscribing to School Forms submissions', err);
+      const fallback = getStoredFacultySchoolForms(termId);
+      onUpdate(fallback);
     }
   );
 };
@@ -2237,12 +3050,17 @@ export const subscribeSchoolPermanentFolders = (onUpdate: (folders: SchoolPerman
           const loaded: SchoolPermanentFolder[] = data.folders.map((f: Partial<SchoolPermanentFolder>) => {
             const isForms = f.id === 'school-forms';
             const isDocs = f.id === 'school-documents';
+
+            // School forms and school documents use direct Firebase storage with 2MB upload limit
+            const finalDriveUrl = isForms || isDocs ? '' : (f.driveUrl && f.driveUrl.trim() !== '' ? f.driveUrl.trim() : '');
+            const finalDriveId = isForms || isDocs ? '' : (f.driveId || extractDriveId(finalDriveUrl) || '');
+
             return {
               id: f.id || `school-folder-${Date.now()}`,
               name: f.name || (isForms ? 'SCHOOL FORMS' : isDocs ? 'SCHOOL DOCUMENTS' : 'Untitled Folder'),
-              description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms.' : isDocs ? 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies.' : ''),
-              driveUrl: f.driveUrl || '',
-              driveId: extractDriveId(f.driveUrl || '') || f.driveId || '',
+              description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms. Stored directly in Firebase Cloud Storage (Max 2MB per file).' : isDocs ? 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies. Stored directly in Firebase Cloud Storage (Max 2MB per file).' : ''),
+              driveUrl: finalDriveUrl,
+              driveId: finalDriveId,
               category: f.category || (isForms ? 'DepEd Forms & Portfolio' : isDocs ? 'General Subject Materials' : 'School Documents'),
               color: f.color || (isForms ? 'Blue' : isDocs ? 'Emerald' : 'Indigo'),
               isPermanent: isForms || isDocs ? true : Boolean(f.isPermanent),
@@ -2250,6 +3068,7 @@ export const subscribeSchoolPermanentFolders = (onUpdate: (folders: SchoolPerman
               updatedAt: f.updatedAt || new Date().toISOString(),
               updatedBy: f.updatedBy || 'School Administration',
               createdBy: f.createdBy,
+              subfolders: undefined,
             };
           });
 
@@ -2283,14 +3102,37 @@ export const subscribeSchoolPermanentFolders = (onUpdate: (folders: SchoolPerman
 let isSeedingSchoolPermanentFolders = false;
 export const seedInitialSchoolPermanentFoldersIfEmpty = async () => {
   if (isSeedingSchoolPermanentFolders) return;
-  if (typeof window !== 'undefined' && localStorage.getItem('svnhs_school_permanent_folders_seeded') === 'true') {
-    return;
-  }
   isSeedingSchoolPermanentFolders = true;
   try {
     const snap = await getDoc(doc(db, SETTINGS_COL, SCHOOL_PERMANENT_FOLDERS_DOC_ID));
     if (!snap.exists()) {
       await saveSchoolPermanentFoldersToFirestore(INITIAL_SCHOOL_PERMANENT_FOLDERS);
+    } else {
+      const data = snap.data();
+      if (Array.isArray(data.folders)) {
+        let needsUpdate = false;
+        const updated = data.folders.map((f: SchoolPermanentFolder) => {
+          let folderUpdated = false;
+          const newF: SchoolPermanentFolder = { ...f };
+          if ((f.id === 'school-forms' || f.id === 'school-documents') && (f.driveUrl !== '' || f.driveId !== '')) {
+            newF.driveUrl = '';
+            newF.driveId = '';
+            folderUpdated = true;
+          }
+          if (f.id === 'school-forms' && (f.subfolders && f.subfolders.length > 0)) {
+            newF.subfolders = [];
+            folderUpdated = true;
+          }
+          if (folderUpdated) {
+            needsUpdate = true;
+            return newF;
+          }
+          return f;
+        });
+        if (needsUpdate) {
+          await saveSchoolPermanentFoldersToFirestore(updated);
+        }
+      }
     }
     if (typeof window !== 'undefined') {
       localStorage.setItem('svnhs_school_permanent_folders_seeded', 'true');
@@ -2446,11 +3288,65 @@ export const batchSaveClassAdviserSchoolFormsToFirestore = async (
   }
 };
 
+// One-Time Fetch with Deduplication Cache
+export const fetchClassAdviserSchoolFormsOnce = async (pageSize: number = 30): Promise<Record<string, ClassAdviserSchoolFormsRecord>> => {
+  return fetchWithCacheDedupe('class_adviser_forms_once', async () => {
+    try {
+      const q = query(collection(db, CLASS_ADVISER_FORMS_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const map: Record<string, ClassAdviserSchoolFormsRecord> = {};
+      snapshot.docs.forEach((d) => {
+        const data = d.data();
+        if (data.facultyEmail) {
+          const emailKey = data.facultyEmail.toLowerCase().trim();
+          map[emailKey] = {
+            facultyEmail: emailKey,
+            facultyName: data.facultyName || '',
+            department: data.department || '',
+            sf1: Boolean(data.sf1),
+            sf3: Boolean(data.sf3),
+            sf4: Boolean(data.sf4),
+            sf5: Boolean(data.sf5),
+            sf6: Boolean(data.sf6),
+            sf8: Boolean(data.sf8),
+            sf10: Boolean(data.sf10),
+            sf2_june: Boolean(data.sf2_june),
+            sf2_july: Boolean(data.sf2_july),
+            sf2_august: Boolean(data.sf2_august),
+            sf2_september: Boolean(data.sf2_september),
+            sf2_october: Boolean(data.sf2_october),
+            sf2_november: Boolean(data.sf2_november),
+            sf2_december: Boolean(data.sf2_december),
+            sf2_january: Boolean(data.sf2_january),
+            sf2_february: Boolean(data.sf2_february),
+            sf2_march: Boolean(data.sf2_march),
+            sf2_april: Boolean(data.sf2_april),
+            updatedAt: data.updatedAt || '',
+            updatedBy: data.updatedBy || '',
+          };
+        }
+      });
+      saveClassAdviserSchoolFormsToLocalStorage(map);
+      return map;
+    } catch (err) {
+      handleFirestoreError('fetching Class Adviser School Forms once', err);
+      return getStoredClassAdviserSchoolForms();
+    }
+  });
+};
+
 export const subscribeClassAdviserSchoolForms = (
   onUpdate: (dataMap: Record<string, ClassAdviserSchoolFormsRecord>) => void
 ) => {
+  const cached = getStoredClassAdviserSchoolForms();
+  if (cached && Object.keys(cached).length > 0) {
+    onUpdate(cached);
+  }
+
+  // Stream all class advisers compliance records in real-time
+  const q = collection(db, CLASS_ADVISER_FORMS_COL);
   return onSnapshot(
-    collection(db, CLASS_ADVISER_FORMS_COL),
+    q,
     (snapshot) => {
       const map: Record<string, ClassAdviserSchoolFormsRecord> = {};
       snapshot.docs.forEach((d) => {
@@ -2485,14 +3381,13 @@ export const subscribeClassAdviserSchoolForms = (
         }
       });
 
-      // Prioritize freshly fetched data from Firestore and update local cache
       saveClassAdviserSchoolFormsToLocalStorage(map);
       onUpdate(map);
     },
     (err) => {
-      console.error('Error subscribing to Class Adviser School Forms:', err);
-      const cached = getStoredClassAdviserSchoolForms();
-      onUpdate(cached);
+      handleFirestoreError('subscribing to Class Adviser School Forms', err);
+      const fallback = getStoredClassAdviserSchoolForms();
+      onUpdate(fallback);
     }
   );
 };
@@ -2580,7 +3475,7 @@ export const deleteGalleryPhotoFromFirestore = async (id: string): Promise<void>
 
 export const cleanPreloadGalleryPhotosFromFirestore = async (): Promise<void> => {
   try {
-    const snap = await getDocs(collection(db, GALLERY_COL));
+    const snap = await getDocs(query(collection(db, GALLERY_COL), limit(20)));
     if (!snap.empty) {
       for (const d of snap.docs) {
         const photo = d.data() as GalleryPhoto;
@@ -2590,15 +3485,56 @@ export const cleanPreloadGalleryPhotosFromFirestore = async (): Promise<void> =>
       }
     }
   } catch (err) {
-    console.warn('Note on cleaning preload photos:', err);
+    handleFirestoreError('cleaning preload photos', err);
   }
 };
 
-export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => void) => {
-  cleanPreloadGalleryPhotosFromFirestore();
+// One-Time Fetch with Deduplication Cache
+export const fetchGalleryPhotosOnce = async (pageSize: number = 20): Promise<GalleryPhoto[]> => {
+  return fetchWithCacheDedupe('gallery_photos_once', async () => {
+    try {
+      const q = query(collection(db, GALLERY_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: GalleryPhoto[] = snapshot.docs
+        .map((d) => d.data() as GalleryPhoto)
+        .filter((photo) => !isPreloadPhoto(photo));
 
+      list.sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : 999;
+        const orderB = typeof b.order === 'number' ? b.order : 999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (b.uploadedAt || '').localeCompare(a.uploadedAt || '');
+      });
+
+      if (list.length > 0) {
+        saveOfflineData(GALLERY_STORAGE_KEY, list);
+        return list;
+      }
+      return getStoredGalleryPhotos();
+    } catch (err) {
+      handleFirestoreError('fetching gallery photos once', err);
+      return getStoredGalleryPhotos();
+    }
+  });
+};
+
+export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => void) => {
+  // 1. Deliver cached photos immediately on first load so users can view contents without delay
+  const cached = getStoredGalleryPhotos();
+  if (cached && cached.length > 0) {
+    onUpdate(cached);
+  } else {
+    getOfflineData<GalleryPhoto[]>(GALLERY_STORAGE_KEY).then((idbPhotos) => {
+      if (idbPhotos && idbPhotos.length > 0) {
+        onUpdate(idbPhotos);
+      }
+    });
+  }
+
+  // 2. Bound query to limit(20) to protect free read quota
+  const q = query(collection(db, GALLERY_COL), limit(20));
   return onSnapshot(
-    collection(db, GALLERY_COL),
+    q,
     (snapshot) => {
       if (snapshot.empty) {
         saveOfflineData(GALLERY_STORAGE_KEY, []);
@@ -2623,7 +3559,7 @@ export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => voi
       onUpdate(list);
     },
     (err) => {
-      console.error('Error subscribing to gallery photos collection:', err);
+      handleFirestoreError('subscribing to gallery photos collection', err);
       const cached = getStoredGalleryPhotos();
       onUpdate(cached);
     }
@@ -2644,7 +3580,7 @@ export const reseedDefaultGalleryPhotos = async () => {
 // MASTER ADMIN EMBEDDED VIDEOS (LOGIN VIEW)
 // ==========================================
 export const EMBEDDED_VIDEOS_COL = 'embedded_videos';
-const VIDEOS_STORAGE_KEY = 'svnhs_embedded_videos_cache';
+export const VIDEOS_STORAGE_KEY = 'svnhs_embedded_videos_cache';
 
 // Specific IDs and markers for preloaded videos that should never be shown
 export const PRELOAD_VIDEO_IDS = new Set([
@@ -2667,7 +3603,7 @@ export const isPreloadVideo = (video: EmbeddedVideo | null | undefined): boolean
 
 export const cleanPreloadVideosFromFirestore = async (): Promise<void> => {
   try {
-    const snap = await getDocs(collection(db, EMBEDDED_VIDEOS_COL));
+    const snap = await getDocs(query(collection(db, EMBEDDED_VIDEOS_COL), limit(20)));
     for (const d of snap.docs) {
       const vid = d.data() as EmbeddedVideo;
       if (isPreloadVideo(vid) || PRELOAD_VIDEO_IDS.has(d.id) || d.id.startsWith('video-svnhs-')) {
@@ -2675,7 +3611,7 @@ export const cleanPreloadVideosFromFirestore = async (): Promise<void> => {
       }
     }
   } catch (err) {
-    console.warn('Note on cleaning preload videos from Firestore:', err);
+    handleFirestoreError('cleaning preload videos from Firestore', err);
   }
 
   // Also clean localStorage cache
@@ -2742,11 +3678,52 @@ export const deleteEmbeddedVideoFromFirestore = async (id: string): Promise<void
   deleteEmbeddedVideoFromLocalStorage(id);
 };
 
-export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => void) => {
-  cleanPreloadVideosFromFirestore();
+// One-Time Fetch with Deduplication Cache
+export const fetchEmbeddedVideosOnce = async (pageSize: number = 20): Promise<EmbeddedVideo[]> => {
+  return fetchWithCacheDedupe('embedded_videos_once', async () => {
+    try {
+      const q = query(collection(db, EMBEDDED_VIDEOS_COL), limit(pageSize));
+      const snapshot = await getDocs(q);
+      const list: EmbeddedVideo[] = snapshot.docs
+        .map((d) => d.data() as EmbeddedVideo)
+        .filter((vid) => !isPreloadVideo(vid));
 
+      list.sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : 999;
+        const orderB = typeof b.order === 'number' ? b.order : 999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
+
+      if (list.length > 0) {
+        saveOfflineData(VIDEOS_STORAGE_KEY, list);
+        return list;
+      }
+      return getStoredEmbeddedVideos();
+    } catch (err) {
+      handleFirestoreError('fetching embedded videos once', err);
+      return getStoredEmbeddedVideos();
+    }
+  });
+};
+
+export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => void) => {
+  // 1. Deliver cached videos immediately on first load so users can view contents without delay
+  const cached = getStoredEmbeddedVideos();
+  if (cached && cached.length > 0) {
+    onUpdate(cached);
+  } else {
+    getOfflineData<EmbeddedVideo[]>(VIDEOS_STORAGE_KEY).then((idbVideos) => {
+      if (idbVideos && idbVideos.length > 0) {
+        onUpdate(idbVideos);
+      }
+    });
+  }
+
+  // 2. Bound query to limit(20) to protect free read quota
+  const q = query(collection(db, EMBEDDED_VIDEOS_COL), limit(20));
   return onSnapshot(
-    collection(db, EMBEDDED_VIDEOS_COL),
+    q,
     (snapshot) => {
       if (snapshot.empty) {
         saveOfflineData(VIDEOS_STORAGE_KEY, []);
@@ -2771,7 +3748,7 @@ export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => v
       onUpdate(list);
     },
     (err) => {
-      console.error('Error subscribing to embedded videos collection:', err);
+      handleFirestoreError('subscribing to embedded videos collection', err);
       const cached = getStoredEmbeddedVideos();
       onUpdate(cached);
     }
@@ -2880,8 +3857,9 @@ export const setUserOffline = async (email: string): Promise<void> => {
  * Subscribe to all user presence records in real-time.
  */
 export const subscribeUserPresence = (onUpdate: (presences: UserPresence[]) => void): (() => void) => {
+  const q = query(collection(db, USER_PRESENCE_COL), limit(25));
   return onSnapshot(
-    collection(db, USER_PRESENCE_COL),
+    q,
     (snapshot) => {
       const list: UserPresence[] = snapshot.docs.map((d) => d.data() as UserPresence);
       // Sort by lastSeen descending
@@ -2889,7 +3867,7 @@ export const subscribeUserPresence = (onUpdate: (presences: UserPresence[]) => v
       onUpdate(list);
     },
     (err) => {
-      console.warn('Error subscribing to user presence:', err);
+      handleFirestoreError('subscribing to user presence', err);
       onUpdate([]);
     }
   );

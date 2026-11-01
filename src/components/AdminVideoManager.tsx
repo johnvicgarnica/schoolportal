@@ -169,7 +169,7 @@ export const AdminVideoManager: React.FC<AdminVideoManagerProps> = ({
     } else {
       setTitle((prev) => prev || 'Classroom Teaching & Learning Showcase');
       setEmbedCode(
-        `<video controls autoPlay muted playsinline webkit-playsinline="true" preload="auto" style="object-fit: contain;" class="w-full h-full object-contain"><source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4"></video>`
+        `<video controls autoPlay playsinline webkit-playsinline="true" preload="auto" style="object-fit: contain;" class="w-full h-full object-contain"><source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4"></video>`
       );
       setDescription((prev) => prev || 'Sample educational demonstration video.');
     }

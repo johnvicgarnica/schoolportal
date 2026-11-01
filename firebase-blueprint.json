@@ -135,6 +135,8 @@
         "driveUrl": { "type": "string" },
         "driveId": { "type": "string" },
         "itemCount": { "type": "number" },
+        "subjectTitle": { "type": "string" },
+        "gradeLevel": { "type": "string" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
@@ -158,7 +160,14 @@
         "driveUrl": { "type": "string" },
         "isGoogleDriveLink": { "type": "boolean" },
         "uploadedAt": { "type": "string" },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "masterTeacherComment": { "type": "string" },
+        "masterTeacherCommentedAt": { "type": "string" },
+        "masterTeacherCommentedBy": { "type": "string" },
+        "masterTeacherComments": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
       },
       "required": ["id", "folderId", "facultyEmail", "title", "fileName"]
     },

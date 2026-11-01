@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { FacultyPersonalFile } from '../types';
-import { getFacultyFileData } from '../lib/firebase';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as XLSX from 'xlsx';
+import { FacultyPersonalFile, UserProfile, MasterTeacherComment } from '../types';
+import { getFacultyFileData, saveMasterTeacherCommentToFile } from '../lib/firebase';
 import {
   X,
   Download,
@@ -24,7 +25,16 @@ import {
   Layers,
   Sparkles,
   HelpCircle,
-  FolderOpen
+  FolderOpen,
+  Edit2,
+  Search,
+  Table as TableIcon,
+  Send,
+  MessageSquare,
+  Award,
+  GraduationCap,
+  CheckCircle2,
+  MessageCircle,
 } from 'lucide-react';
 
 interface FacultyDocumentViewerModalProps {
@@ -33,6 +43,9 @@ interface FacultyDocumentViewerModalProps {
   onClose: () => void;
   onDeleteFile?: (fileId: string) => void;
   canDelete?: boolean;
+  onOpenSpreadsheetEditor?: (file: FacultyPersonalFile, fileDataUrl?: string) => void;
+  currentUser?: UserProfile | null;
+  onCommentSaved?: (updatedFile: FacultyPersonalFile) => void;
 }
 
 // Convert base64 data to blob URL for fast, crisp native browser rendering
@@ -55,17 +68,59 @@ function base64ToBlobUrl(base64Data: string, mimeType: string): string {
   }
 }
 
+// Helper to generate Excel column letters (A, B, ... Z, AA, AB, ...)
+function getColumnLetter(colIndex: number): string {
+  let temp = colIndex + 1;
+  let letter = '';
+  while (temp > 0) {
+    const rem = (temp - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    temp = Math.floor((temp - 1) / 26);
+  }
+  return letter;
+}
+
 export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProps> = ({
   isOpen,
   file,
   onClose,
   onDeleteFile,
   canDelete = true,
+  onOpenSpreadsheetEditor,
+  currentUser,
+  onCommentSaved,
 }) => {
   const [fileDataUrl, setFileDataUrl] = useState<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Master Teacher Comment States
+  const [commentsList, setCommentsList] = useState<MasterTeacherComment[]>([]);
+  const [newCommentText, setNewCommentText] = useState<string>('');
+  const [reviewerName, setReviewerName] = useState<string>('');
+  const [reviewerDesignation, setReviewerDesignation] = useState<string>('Master Teacher');
+  const [isSubmittingComment, setIsSubmittingComment] = useState<boolean>(false);
+  const [activeFeedbackPreset, setActiveFeedbackPreset] = useState<string | null>(null);
+
+  const MT_PRESETS = [
+    '✓ Checked & Approved compliant with DepEd standards and curriculum guide.',
+    '⭐ Commendation: Excellent pedagogical alignment with MELCs and student engagement.',
+    '📌 Ensure instructional materials, slide decks, and activity sheets for all days are attached.',
+    '🔍 Review cognitive dimension weighting on TOS to balance Bloom\'s taxonomy.',
+    '📝 Add formative assessment answer keys and grading rubric.',
+    '⚡ Complied. Ready for classroom execution and instructional delivery.',
+  ];
+
+  // Real Excel/Spreadsheet parsed workbook and sheet states
+  const [parsedWorkbook, setParsedWorkbook] = useState<XLSX.WorkBook | null>(null);
+  const [parsedSheetNames, setParsedSheetNames] = useState<string[]>([]);
+  const [activeSheetName, setActiveSheetName] = useState<string>('');
+  const [parsedSheetData, setParsedSheetData] = useState<(string | number)[][]>([]);
+  const [isParsingSpreadsheet, setIsParsingSpreadsheet] = useState<boolean>(false);
+  const [spreadsheetError, setSpreadsheetError] = useState<string | null>(null);
+  const [selectedCellInfo, setSelectedCellInfo] = useState<{ r: number; c: number; value: string } | null>(null);
+  const [spreadsheetSearchQuery, setSpreadsheetSearchQuery] = useState<string>('');
   
   // Checker view scale: Default to a generous, readable 115% scale
   const [zoomLevel, setZoomLevel] = useState<number>(115);
@@ -73,7 +128,6 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
   const [isFullscreen, setIsFullscreen] = useState<boolean>(true);
   const [viewMode, setViewMode] = useState<'standard' | 'expanded'>('expanded');
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState<boolean>(false);
-  const [activeSheetTab, setActiveSheetTab] = useState<'Sheet1' | 'Summary' | 'Records'>('Sheet1');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Checker evaluation checklist states
@@ -91,12 +145,121 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
 
   const blobUrlRef = useRef<string | null>(null);
 
+  // Master Teacher Admin Verification:
+  // Only an admin who has a master teacher role can post comments.
+  // Faculty can only view the comments and cannot type comments.
+  const isMasterTeacherAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    const isAdmin =
+      currentUser.role === 'Admin' ||
+      (currentUser as any).isAdmin === true ||
+      currentUser.role?.toLowerCase() === 'admin';
+    if (!isAdmin) return false;
+
+    const desig = (currentUser.designation || '').toLowerCase().trim();
+    const email = (currentUser.email || '').toLowerCase().trim();
+    const name = (currentUser.name || '').toLowerCase().trim();
+
+    return (
+      desig.includes('master teacher') ||
+      desig.includes('mt') ||
+      email.includes('norma') ||
+      email.includes('jabagat') ||
+      name.includes('norma')
+    );
+  }, [currentUser]);
+
+  // Compute maximum columns in current active sheet
+  const maxCols = useMemo(() => {
+    if (!parsedSheetData || parsedSheetData.length === 0) return 8;
+    const longestRow = Math.max(...parsedSheetData.map((row) => (Array.isArray(row) ? row.length : 0)));
+    return Math.max(8, Math.min(100, longestRow));
+  }, [parsedSheetData]);
+
+  // Compute search matches count
+  const searchFilteredRowCount = useMemo(() => {
+    if (!spreadsheetSearchQuery.trim()) return parsedSheetData.length;
+    const q = spreadsheetSearchQuery.toLowerCase();
+    return parsedSheetData.filter((row) =>
+      row.some((cell) => cell !== null && cell !== undefined && String(cell).toLowerCase().includes(q))
+    ).length;
+  }, [parsedSheetData, spreadsheetSearchQuery]);
+
   // Helper to show transient in-modal notification without window.alert
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
     }, 3500);
+  };
+
+  // Parse Excel workbook from Base64
+  const parseSpreadsheetData = (dataUrlOrBase64: string) => {
+    setIsParsingSpreadsheet(true);
+    setSpreadsheetError(null);
+    try {
+      const base64Data = dataUrlOrBase64.includes(',')
+        ? dataUrlOrBase64.split(',')[1]
+        : dataUrlOrBase64;
+
+      const wb = XLSX.read(base64Data, {
+        type: 'base64',
+        cellDates: true,
+        raw: false,
+      });
+
+      setParsedWorkbook(wb);
+      const sheets = wb.SheetNames || [];
+      setParsedSheetNames(sheets);
+
+      const firstSheet = sheets[0] || 'Sheet1';
+      setActiveSheetName(firstSheet);
+
+      if (wb.Sheets[firstSheet]) {
+        const data = XLSX.utils.sheet_to_json<(string | number)[]>(wb.Sheets[firstSheet], {
+          header: 1,
+          defval: '',
+          blankrows: true,
+        });
+        setParsedSheetData((data || []) as (string | number)[][]);
+        if (data && data.length > 0 && data[0]?.length > 0) {
+          setSelectedCellInfo({ r: 0, c: 0, value: String(data[0][0] ?? '') });
+        } else {
+          setSelectedCellInfo(null);
+        }
+      } else {
+        setParsedSheetData([]);
+        setSelectedCellInfo(null);
+      }
+    } catch (err: any) {
+      console.error('Failed to parse original spreadsheet file:', err);
+      setSpreadsheetError('Unable to parse the original Excel spreadsheet binary.');
+    } finally {
+      setIsParsingSpreadsheet(false);
+    }
+  };
+
+  // Switch sheet tab within parsed workbook
+  const handleSwitchSheet = (newSheetName: string) => {
+    if (!parsedWorkbook || newSheetName === activeSheetName) return;
+    setActiveSheetName(newSheetName);
+    const ws = parsedWorkbook.Sheets[newSheetName];
+    if (ws) {
+      const data = XLSX.utils.sheet_to_json<(string | number)[]>(ws, {
+        header: 1,
+        defval: '',
+        blankrows: true,
+      });
+      setParsedSheetData((data || []) as (string | number)[][]);
+      if (data && data.length > 0 && data[0]?.length > 0) {
+        setSelectedCellInfo({ r: 0, c: 0, value: String(data[0][0] ?? '') });
+      } else {
+        setSelectedCellInfo(null);
+      }
+    } else {
+      setParsedSheetData([]);
+      setSelectedCellInfo(null);
+    }
   };
 
   useEffect(() => {
@@ -111,8 +274,38 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
       setLoadError(null);
       setIsConfirmDeleteOpen(false);
       setZoomLevel(115);
+      setParsedWorkbook(null);
+      setParsedSheetNames([]);
+      setActiveSheetName('');
+      setParsedSheetData([]);
+      setSelectedCellInfo(null);
+      setSpreadsheetSearchQuery('');
+      setSpreadsheetError(null);
+      setCommentsList([]);
+      setNewCommentText('');
+      setActiveFeedbackPreset(null);
       return;
     }
+
+    // Initialize Master Teacher comments list from file
+    const initialComments: MasterTeacherComment[] =
+      file.masterTeacherComments && file.masterTeacherComments.length > 0
+        ? [...file.masterTeacherComments]
+        : file.masterTeacherComment
+        ? [
+            {
+              id: 'initial-comment',
+              comment: file.masterTeacherComment,
+              commentedBy: file.masterTeacherCommentedBy || 'Norma Jabagat',
+              designation: 'Master Teacher',
+              commentedAt: file.masterTeacherCommentedAt || file.uploadedAt || new Date().toISOString(),
+            },
+          ]
+        : [];
+    setCommentsList(initialComments);
+    setNewCommentText('');
+    setReviewerName(currentUser?.name || 'Norma Jabagat');
+    setReviewerDesignation(currentUser?.designation || 'Master Teacher');
 
     // Always ensure full screen is active when opened for checker review
     setIsFullscreen(true);
@@ -123,11 +316,12 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
     setLoadError(null);
 
     const fmt = (file.format || '').toLowerCase();
+    const isSpreadsheet = fmt.includes('xls') || fmt.includes('sheet');
     const mime = fmt === 'pdf'
       ? 'application/pdf'
       : fmt.includes('doc')
       ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      : fmt.includes('xls')
+      : isSpreadsheet
       ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       : fmt.includes('ppt')
       ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
@@ -139,6 +333,9 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
       const url = base64ToBlobUrl(file.fileData, mime);
       blobUrlRef.current = url;
       setBlobUrl(url);
+      if (isSpreadsheet) {
+        parseSpreadsheetData(file.fileData);
+      }
       setIsLoading(false);
       return;
     }
@@ -152,6 +349,9 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
           const url = base64ToBlobUrl(data, mime);
           blobUrlRef.current = url;
           setBlobUrl(url);
+          if (isSpreadsheet) {
+            parseSpreadsheetData(data);
+          }
         } else {
           setLoadError('File content preview could not be loaded from database.');
         }
@@ -173,6 +373,54 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
     };
   }, [isOpen, file]);
 
+  const handleSaveMasterTeacherComment = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!isMasterTeacherAdmin) {
+      showToast('⚠️ Access Denied: Only an Administrator with a Master Teacher role can post comments.');
+      return;
+    }
+    if (!file || !newCommentText.trim()) {
+      showToast('Please type a comment before posting.');
+      return;
+    }
+
+    setIsSubmittingComment(true);
+    try {
+      const author = reviewerName.trim() || currentUser?.name || 'Norma Jabagat';
+      const role = reviewerDesignation.trim() || 'Master Teacher';
+      const commentText = newCommentText.trim();
+
+      const updatedFile = await saveMasterTeacherCommentToFile(
+        file.id,
+        commentText,
+        author,
+        role
+      );
+
+      const newCommentObj: MasterTeacherComment = {
+        id: `mtc-${Date.now()}`,
+        comment: commentText,
+        commentedBy: author,
+        designation: role,
+        commentedAt: new Date().toISOString(),
+      };
+
+      setCommentsList((prev) => [newCommentObj, ...prev]);
+      setNewCommentText('');
+      setActiveFeedbackPreset(null);
+      showToast('✓ Master Teacher comment saved and synced to faculty workspace!');
+
+      if (onCommentSaved && updatedFile) {
+        onCommentSaved(updatedFile);
+      }
+    } catch (err) {
+      console.error('Error saving Master Teacher comment:', err);
+      showToast('⚠️ Could not save comment. Please retry.');
+    } finally {
+      setIsSubmittingComment(false);
+    }
+  };
+
   if (!isOpen || !file) return null;
 
   const format = (file.format || '').toLowerCase();
@@ -181,11 +429,11 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
   const isSheet = format.includes('xls') || format.includes('sheet');
   const isPpt = format.includes('ppt') || format.includes('pres');
 
-  // Compute remaining time until 1-week auto-delete
+  // Compute remaining time until 15-day auto-delete
   const now = Date.now();
   const expireTimestamp = file.expiresAt
     ? new Date(file.expiresAt).getTime()
-    : new Date(file.uploadedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
+    : new Date(file.uploadedAt).getTime() + 15 * 24 * 60 * 60 * 1000;
   const remainingMs = Math.max(0, expireTimestamp - now);
   const remainingDays = Math.floor(remainingMs / (24 * 60 * 60 * 1000));
   const remainingHours = Math.floor((remainingMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
@@ -412,18 +660,34 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
               </button>
             )}
 
-            {/* 1-Week Auto-Delete Timer */}
+            {/* 15-Day Auto-Delete Timer */}
             <div
               className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-xl text-xs font-mono border ${
                 remainingDays <= 1
                   ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                   : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
               }`}
-              title="Automatically deleted after 1 week (7 days) for storage hygiene"
+              title="Automatically deleted after 15 days for storage hygiene"
             >
               <Clock className="w-3.5 h-3.5 shrink-0" />
               <span className="font-bold">{remainingText}</span>
             </div>
+
+            {/* Interactive Spreadsheet Editor Button for Excel files */}
+            {isSheet && onOpenSpreadsheetEditor && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenSpreadsheetEditor(file, fileDataUrl || file.fileData);
+                  onClose();
+                }}
+                className="px-3 sm:px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer"
+                title="Edit in interactive Google Sheets / in-app spreadsheet editor"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Edit in Sheets</span>
+              </button>
+            )}
 
             {/* Download Button */}
             <button
@@ -541,36 +805,280 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
               </button>
             </div>
           ) : isPdf && (blobUrl || fileDataUrl) ? (
-            /* FULL-SCREEN PDF VIEWER FOR DOCUMENT CHECKER (NATIVE BLOB STREAM) */
-            <div className="w-full h-full flex flex-col flex-1 overflow-hidden">
-              <div className="w-full flex-1 overflow-hidden bg-[#0d1524] rounded-2xl border border-[#24334b] relative shadow-2xl">
+            /* FULL-SCREEN PDF VIEWER FOR DOCUMENT CHECKER (NATIVE BLOB STREAM) + MASTER TEACHER COMMENTS SECTION */
+            <div className="w-full h-full flex flex-col flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin">
+              {/* Native PDF Reader Frame */}
+              <div className="w-full h-[62vh] min-h-[460px] rounded-2xl border border-[#24334b] relative shadow-2xl overflow-hidden bg-[#0d1524] shrink-0">
                 <iframe
                   src={`${blobUrl || fileDataUrl}#toolbar=1&navpanes=1&scrollbar=1&view=FitH&zoom=${zoomLevel}`}
-                  className="w-full h-full border-0 rounded-2xl bg-white"
+                  className="w-full h-full border-0 bg-white"
                   title={file.title}
                 />
               </div>
 
               {/* Bottom Quick Scale & Checker Toolbar for PDF */}
-              <div className="mt-2.5 px-3 py-2 bg-[#0e1626] border border-[#24334b] rounded-xl flex items-center justify-between text-xs font-mono text-slate-400 shrink-0">
+              <div className="px-4 py-2.5 bg-[#0e1626] border border-[#24334b] rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-slate-400 shrink-0 shadow-sm">
                 <div className="flex items-center space-x-2">
                   <span className="text-emerald-400 font-bold flex items-center space-x-1">
                     <Check className="w-3.5 h-3.5" />
                     <span>Native High-DPI PDF Reader Active</span>
                   </span>
                   <span className="hidden sm:inline">•</span>
-                  <span className="hidden sm:inline">Use the embedded controls or top toolbar to check pages</span>
+                  <span className="text-slate-400 hidden sm:inline">{file.fileName} ({file.fileSizeFormatted})</span>
                 </div>
 
                 <div className="flex items-center space-x-2">
                   <button
                     type="button"
+                    onClick={() => {
+                      const el = document.getElementById('master-teacher-comments-section');
+                      el?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="text-amber-300 hover:text-amber-200 font-bold flex items-center space-x-1.5 px-3 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all cursor-pointer"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+                    <span>
+                      {commentsList.length > 0 ? `Master Teacher Comments (${commentsList.length})` : 'Write MT Comment'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleDownload}
-                    className="text-blue-400 hover:text-blue-300 font-bold flex items-center space-x-1 cursor-pointer"
+                    className="text-blue-400 hover:text-blue-300 font-bold flex items-center space-x-1.5 px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-xl transition-all cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download PDF ({file.fileSizeFormatted})</span>
+                    <span>Download PDF</span>
                   </button>
+                </div>
+              </div>
+
+              {/* SECTION BELOW THE PDF VIEWER: MASTER TEACHER EVALUATION & COMMENTS */}
+              <div
+                id="master-teacher-comments-section"
+                className="w-full bg-[#0c1322] border-2 border-indigo-500/40 rounded-3xl p-5 sm:p-7 space-y-6 shadow-2xl shrink-0 font-sans text-left"
+              >
+                {/* Header Section */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#202f48] pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-3 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded-2xl shrink-0 shadow-inner">
+                      <GraduationCap className="w-6 h-6 text-indigo-400" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                        <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                          Master Teacher Document Evaluation & Comments
+                        </h3>
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded-md uppercase">
+                          Official Review
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 font-sans mt-0.5">
+                        Supervisory notes and feedback on instructional delivery for teacher <span className="text-indigo-200 font-semibold">{file.facultyName}</span>. Comments are synced directly to the faculty's personal workspace.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 flex items-center space-x-2">
+                    {commentsList.length > 0 ? (
+                      <span className="px-3 py-1.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-mono font-bold rounded-xl flex items-center space-x-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>{commentsList.length} Comment{commentsList.length === 1 ? '' : 's'} Logged</span>
+                      </span>
+                    ) : (
+                      <span className="px-3 py-1.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-mono font-bold rounded-xl flex items-center space-x-1.5">
+                        <Clock className="w-4 h-4 text-amber-400" />
+                        <span>Pending Review</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Writer Box: Master Teacher Comments Composer (ONLY for Admin with Master Teacher role) */}
+                {isMasterTeacherAdmin ? (
+                  <div className="bg-[#121c30] border border-[#24334b] rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-sm text-left">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                      <label className="text-xs font-mono font-bold text-slate-200 uppercase tracking-wider flex items-center space-x-2">
+                        <MessageSquare className="w-4 h-4 text-indigo-400" />
+                        <span>Write Master Teacher Comment & Recommendations</span>
+                      </label>
+
+                      <div className="text-[11px] font-mono text-slate-400 flex items-center space-x-1.5">
+                        <span className="text-slate-500">Reviewer:</span>
+                        <span className="font-bold text-slate-200">{currentUser?.name || reviewerName || 'Norma Jabagat'}</span>
+                        <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px]">
+                          {currentUser?.designation || reviewerDesignation || 'Master Teacher'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Preset Feedback Templates */}
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-mono uppercase text-slate-400 font-semibold block">
+                        Quick Feedback Templates (Click to insert):
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {MT_PRESETS.map((preset, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setNewCommentText((prev) => (prev ? `${prev}\n${preset}` : preset));
+                              setActiveFeedbackPreset(preset);
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-sans transition-all cursor-pointer text-left border ${
+                              activeFeedbackPreset === preset
+                                ? 'bg-indigo-600/40 border-indigo-400 text-white'
+                                : 'bg-[#182438] hover:bg-indigo-600/30 hover:border-indigo-400/50 border-[#273852] text-slate-300 hover:text-white'
+                            }`}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Textarea */}
+                    <div className="space-y-2">
+                      <textarea
+                        rows={3}
+                        value={newCommentText}
+                        onChange={(e) => setNewCommentText(e.target.value)}
+                        placeholder="Type your official supervisory comment, instructional suggestions, or compliance notes for the faculty member..."
+                        className="w-full bg-[#0a101d] border border-[#24334b] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl p-3.5 text-xs text-slate-100 placeholder:text-slate-500 font-sans transition-all leading-relaxed"
+                      />
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 font-mono text-xs">
+                        <span className="text-[11px] text-slate-500">
+                          {newCommentText.length} characters • Once posted, the faculty will immediately see this comment on this document.
+                        </span>
+
+                        <div className="flex items-center space-x-2">
+                          {newCommentText && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewCommentText('');
+                                setActiveFeedbackPreset(null);
+                              }}
+                              className="px-3 py-1.5 bg-[#182438] hover:bg-[#20304a] text-slate-400 hover:text-slate-200 rounded-xl transition-all cursor-pointer text-[11px]"
+                            >
+                              Clear
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={handleSaveMasterTeacherComment}
+                            disabled={isSubmittingComment || !newCommentText.trim()}
+                            className={`px-4 py-2 rounded-xl font-bold flex items-center space-x-2 transition-all cursor-pointer text-xs ${
+                              isSubmittingComment || !newCommentText.trim()
+                                ? 'bg-indigo-900/50 text-indigo-300/50 cursor-not-allowed border border-indigo-800/30'
+                                : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md hover:scale-105 active:scale-95'
+                            }`}
+                          >
+                            {isSubmittingComment ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span>Posting Comment...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send className="w-3.5 h-3.5" />
+                                <span>Post Master Teacher Comment</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Read-Only Notice: Faculty and non-Master-Teacher users can only view feedback */
+                  <div className="bg-[#121c30] border border-[#24334b] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left">
+                    <div className="flex items-start space-x-3.5">
+                      <div className="p-2.5 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 shrink-0 mt-0.5">
+                        <Award className="w-5 h-5 text-indigo-400" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center space-x-2">
+                          <h4 className="text-xs font-bold text-slate-100 font-sans">
+                            Master Teacher Evaluation & Feedback
+                          </h4>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-800 text-indigo-300 border border-slate-700 font-bold">
+                            Faculty View (Read-Only)
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 font-sans leading-relaxed">
+                          Only an Administrator who holds a Master Teacher role can write and post supervisory evaluation comments. Faculty members can only review all evaluation remarks and instructional recommendations below.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl shrink-0 font-bold flex items-center space-x-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Viewing Mode</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Existing Comments History (Visible to both Master Teacher and Faculty) */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-[#202f48] pb-2">
+                    <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-2">
+                      <Award className="w-4 h-4 text-amber-400" />
+                      <span>Document Evaluation & Feedback History ({commentsList.length})</span>
+                    </h4>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      Visible to Faculty & School Administrators
+                    </span>
+                  </div>
+
+                  {commentsList.length === 0 ? (
+                    <div className="p-6 bg-[#0a101d] rounded-2xl border border-dashed border-[#24334b] text-center space-y-2">
+                      <MessageSquare className="w-8 h-8 text-slate-500 mx-auto opacity-70" />
+                      <h5 className="text-xs font-bold text-slate-300 font-mono">No Comments on this Document Yet</h5>
+                      <p className="text-xs text-slate-400 max-w-lg mx-auto font-sans leading-relaxed">
+                        When the Master Teacher inspects this PDF, evaluative feedback, remarks, and recommendations will appear here so the faculty can view them and ensure curriculum alignment.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {commentsList.map((c, i) => (
+                        <div
+                          key={c.id || i}
+                          className="bg-[#121c30] border border-[#24334b] hover:border-indigo-500/40 rounded-2xl p-4 sm:p-5 space-y-2.5 transition-all shadow-sm"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1c2940] pb-2.5">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white font-bold text-xs flex items-center justify-center font-mono shadow-xs">
+                                {(c.commentedBy || 'MT').substring(0, 2).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-xs font-bold text-white font-sans">{c.commentedBy || 'Master Teacher'}</span>
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
+                                    {c.designation || 'Master Teacher'}
+                                  </span>
+                                  <span className="text-[10px] font-mono text-emerald-400 flex items-center space-x-1">
+                                    <ShieldCheck className="w-3 h-3" />
+                                    <span className="hidden sm:inline">Verified Reviewer</span>
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-[11px] font-mono text-slate-400 flex items-center space-x-1">
+                              <Clock className="w-3 h-3 text-slate-500" />
+                              <span>{c.commentedAt ? new Date(c.commentedAt).toLocaleString() : 'Just now'}</span>
+                            </div>
+                          </div>
+
+                          <div className="text-xs sm:text-sm text-slate-200 font-sans leading-relaxed whitespace-pre-line pl-1">
+                            {c.comment}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -775,136 +1283,253 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
               </div>
             </div>
           ) : isSheet ? (
-            /* FULL-SCALE EXCEL SPREADSHEET WORKBOOK FOR DOCUMENT CHECKER */
+            /* FULL-SCALE ORIGINAL EXCEL SPREADSHEET WORKBOOK VIEWER */
             <div className="w-full h-full flex flex-col flex-1 overflow-hidden space-y-2">
-              {/* Formula Bar Simulation */}
-              <div className="bg-[#121c30] border border-[#24334b] rounded-xl px-4 py-2.5 flex items-center space-x-3 font-mono text-xs shrink-0 shadow-sm">
-                <span className="text-emerald-400 font-bold px-2.5 py-0.5 bg-[#0a0f1a] rounded-md border border-[#24334b]">
-                  fx
-                </span>
-                <span className="text-slate-200 truncate">
-                  ={file.title} • {file.category} • San Vicente National High School SHS • Checked by Admin
-                </span>
+              {/* Formula Bar & Search Filter Controller */}
+              <div className="bg-[#121c30] border border-[#24334b] rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 font-mono text-xs shrink-0 shadow-sm">
+                <div className="flex items-center space-x-2 flex-1 min-w-[280px]">
+                  {/* Active Cell Address */}
+                  <span className="text-emerald-400 font-bold px-2.5 py-1 bg-[#0a0f1a] rounded-lg border border-[#24334b] shrink-0">
+                    {selectedCellInfo
+                      ? `${getColumnLetter(selectedCellInfo.c)}${selectedCellInfo.r + 1}`
+                      : 'A1'}
+                  </span>
+                  
+                  {/* Formula / Cell Content Display */}
+                  <div className="flex-1 bg-[#09111e] px-3 py-1 rounded-lg border border-[#24334b] text-slate-100 truncate min-h-[30px] flex items-center shadow-inner">
+                    <span className="text-emerald-400 font-bold mr-2 select-none">fx</span>
+                    <span className="truncate text-slate-200">
+                      {selectedCellInfo?.value !== undefined
+                        ? selectedCellInfo.value
+                        : parsedSheetData[0]?.[0] !== undefined
+                        ? String(parsedSheetData[0][0])
+                        : ''}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Search / Filter within Sheet */}
+                <div className="flex items-center space-x-2 shrink-0">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={spreadsheetSearchQuery}
+                      onChange={(e) => setSpreadsheetSearchQuery(e.target.value)}
+                      placeholder="Search cells (e.g. learner name)..."
+                      className="pl-8 pr-3 py-1 bg-[#09111e] border border-[#24334b] rounded-lg text-slate-200 placeholder-slate-500 text-xs focus:outline-none focus:border-emerald-500 w-44 sm:w-56"
+                    />
+                    {spreadsheetSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSpreadsheetSearchQuery('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {onOpenSpreadsheetEditor && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onOpenSpreadsheetEditor(file, fileDataUrl || file.fileData);
+                        onClose();
+                      }}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center space-x-1.5 shadow-xs cursor-pointer transition-all"
+                      title="Open in interactive spreadsheet editor to edit and save changes"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Edit Live in App</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {/* Massive Full-Screen Table Grid */}
+              {/* Real Spreadsheet Grid */}
               <div
-                className="flex-1 bg-white rounded-2xl border border-slate-300 shadow-2xl overflow-auto text-xs text-slate-800"
+                className="flex-1 bg-white rounded-2xl border border-slate-300 shadow-2xl overflow-auto text-xs text-slate-800 relative"
                 style={{
                   fontSize: `${(zoomLevel / 100) * 12}px`,
                 }}
               >
-                <table className="w-full border-collapse font-sans min-w-[1000px]">
-                  <thead>
-                    <tr className="bg-slate-200 text-slate-700 border-b-2 border-slate-300 font-mono text-xs sticky top-0 z-10 shadow-xs">
-                      <th className="w-16 p-3 border-r border-slate-300 bg-slate-300 text-center font-bold">#</th>
-                      <th className="p-3 border-r border-slate-300 text-left w-1/4">A (Item / Week / Module)</th>
-                      <th className="p-3 border-r border-slate-300 text-left w-1/3">B (Target Learning Competencies)</th>
-                      <th className="p-3 border-r border-slate-300 text-center w-28">C (Target Score)</th>
-                      <th className="p-3 border-r border-slate-300 text-center w-28">D (Mastery %)</th>
-                      <th className="p-3 text-left">E (Checker Remarks / Status)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    <tr className="hover:bg-blue-50/60 font-semibold bg-slate-50/50">
-                      <td className="p-3 text-center font-mono text-slate-500 bg-slate-100 border-r border-slate-300">1</td>
-                      <td className="p-3 font-bold text-slate-900 border-r border-slate-200">{file.title}</td>
-                      <td className="p-3 text-slate-800 border-r border-slate-200">{file.category}</td>
-                      <td className="p-3 text-center font-mono border-r border-slate-200">100</td>
-                      <td className="p-3 text-center font-mono text-emerald-700 font-bold border-r border-slate-200">100%</td>
-                      <td className="p-3 text-emerald-800 font-bold flex items-center space-x-1.5">
-                        <Check className="w-4 h-4 text-emerald-600" />
-                        <span>Verified Active Document</span>
-                      </td>
-                    </tr>
-                    <tr className="hover:bg-blue-50/60">
-                      <td className="p-3 text-center font-mono text-slate-500 bg-slate-100 border-r border-slate-300">2</td>
-                      <td className="p-3 font-semibold text-slate-800 border-r border-slate-200">Faculty Uploader</td>
-                      <td className="p-3 text-slate-700 border-r border-slate-200">{file.facultyName} ({file.facultyEmail})</td>
-                      <td className="p-3 text-center font-mono border-r border-slate-200">—</td>
-                      <td className="p-3 text-center font-mono border-r border-slate-200">—</td>
-                      <td className="p-3 text-slate-600 font-medium">Registered Faculty Account</td>
-                    </tr>
-                    <tr className="hover:bg-blue-50/60">
-                      <td className="p-3 text-center font-mono text-slate-500 bg-slate-100 border-r border-slate-300">3</td>
-                      <td className="p-3 font-semibold text-slate-800 border-r border-slate-200">File Storage Size</td>
-                      <td className="p-3 text-slate-700 border-r border-slate-200">{file.fileSizeFormatted} ({file.fileSizeBytes} bytes)</td>
-                      <td className="p-3 text-center font-mono border-r border-slate-200">VALID</td>
-                      <td className="p-3 text-center font-mono text-emerald-700 font-bold border-r border-slate-200">&lt; 2 MB</td>
-                      <td className="p-3 text-emerald-700 font-bold">Within 2MB Storage Quota</td>
-                    </tr>
-                    <tr className="hover:bg-blue-50/60">
-                      <td className="p-3 text-center font-mono text-slate-500 bg-slate-100 border-r border-slate-300">4</td>
-                      <td className="p-3 font-semibold text-slate-800 border-r border-slate-200">Upload Date</td>
-                      <td className="p-3 text-slate-700 border-r border-slate-200">{file.uploadedAt}</td>
-                      <td className="p-3 text-center font-mono border-r border-slate-200">—</td>
-                      <td className="p-3 text-center font-mono border-r border-slate-200">—</td>
-                      <td className="p-3 text-slate-600 font-medium">Verified Timestamp</td>
-                    </tr>
-                    <tr className="hover:bg-blue-50/60">
-                      <td className="p-3 text-center font-mono text-slate-500 bg-slate-100 border-r border-slate-300">5</td>
-                      <td className="p-3 font-semibold text-slate-800 border-r border-slate-200">1-Week Deletion Schedule</td>
-                      <td className="p-3 text-slate-700 border-r border-slate-200">Automatic Storage Cleanup Cycle</td>
-                      <td className="p-3 text-center font-mono text-amber-700 font-bold border-r border-slate-200">
-                        {remainingDays}d
-                      </td>
-                      <td className="p-3 text-center font-mono text-amber-700 font-bold border-r border-slate-200">
-                        {remainingText}
-                      </td>
-                      <td className="p-3 text-amber-700 font-bold">Auto-Purge Pending</td>
-                    </tr>
-                    {file.description && (
-                      <tr className="hover:bg-blue-50/60">
-                        <td className="p-3 text-center font-mono text-slate-500 bg-slate-100 border-r border-slate-300">6</td>
-                        <td className="p-3 font-semibold text-slate-800 border-r border-slate-200">Teacher Notes</td>
-                        <td className="p-3 text-slate-700 border-r border-slate-200" colSpan={4}>
-                          {file.description}
-                        </td>
-                      </tr>
+                {isParsingSpreadsheet ? (
+                  <div className="flex flex-col items-center justify-center py-24 space-y-3 font-mono text-xs text-slate-500">
+                    <RefreshCw className="w-8 h-8 text-emerald-500 animate-spin" />
+                    <p className="font-bold text-slate-700">Reading original spreadsheet data...</p>
+                    <p className="text-[11px] text-slate-400">Extracting worksheets, columns, and records</p>
+                  </div>
+                ) : spreadsheetError ? (
+                  <div className="flex flex-col items-center justify-center py-20 space-y-3 font-mono text-xs text-center p-6">
+                    <div className="p-3 bg-amber-100 text-amber-700 rounded-2xl border border-amber-300">
+                      <AlertTriangle className="w-8 h-8" />
+                    </div>
+                    <p className="font-bold text-slate-800">{spreadsheetError}</p>
+                    <p className="text-slate-500 max-w-md">
+                      You can download the original file to view it in Microsoft Excel or Google Sheets desktop.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleDownload}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold cursor-pointer"
+                    >
+                      Download File
+                    </button>
+                  </div>
+                ) : parsedSheetData.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-24 space-y-2 font-mono text-xs text-slate-400 text-center">
+                    <FileSpreadsheet className="w-10 h-10 text-slate-300" />
+                    <p className="font-bold text-slate-600">This worksheet is currently empty.</p>
+                    {onOpenSpreadsheetEditor && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onOpenSpreadsheetEditor(file, fileDataUrl || file.fileData);
+                          onClose();
+                        }}
+                        className="mt-2 px-3.5 py-1.5 bg-emerald-600 text-white rounded-xl font-bold cursor-pointer"
+                      >
+                        Open Editor to Add Data
+                      </button>
                     )}
-                    {Array.from({ length: 15 }).map((_, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 text-slate-400">
-                        <td className="p-2.5 text-center font-mono text-slate-400 bg-slate-50 border-r border-slate-300">
-                          {idx + 7}
-                        </td>
-                        <td className="p-2.5 border-r border-slate-200 text-slate-300">—</td>
-                        <td className="p-2.5 border-r border-slate-200 text-slate-300">—</td>
-                        <td className="p-2.5 text-center border-r border-slate-200 text-slate-300">—</td>
-                        <td className="p-2.5 text-center border-r border-slate-200 text-slate-300">—</td>
-                        <td className="p-2.5 text-slate-300">—</td>
+                  </div>
+                ) : (
+                  <table className="w-full border-collapse font-sans min-w-max select-text">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 border-b border-slate-300 font-mono text-xs sticky top-0 z-20 shadow-xs">
+                        {/* Top-left corner cell */}
+                        <th className="w-14 min-w-[56px] p-2 border-r border-b border-slate-300 bg-slate-200 text-center font-bold text-[11px] text-slate-600 sticky left-0 z-30 select-none">
+                          #
+                        </th>
+                        {/* Dynamic Column Headers (A, B, C...) based on maxCols */}
+                        {Array.from({ length: maxCols }).map((_, c) => (
+                          <th
+                            key={c}
+                            className="p-2 border-r border-b border-slate-300 text-center font-bold text-[11px] min-w-[120px] bg-slate-100 select-none tracking-wider text-slate-600"
+                          >
+                            {getColumnLetter(c)}
+                          </th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {parsedSheetData.map((row, r) => {
+                        const rowMatchesSearch =
+                          !spreadsheetSearchQuery.trim() ||
+                          row.some(
+                            (cell) =>
+                              cell !== null &&
+                              cell !== undefined &&
+                              String(cell)
+                                .toLowerCase()
+                                .includes(spreadsheetSearchQuery.toLowerCase())
+                          );
+
+                        // If user is searching and this row doesn't match, fade slightly
+                        const isDimmed = spreadsheetSearchQuery.trim() && !rowMatchesSearch;
+
+                        return (
+                          <tr
+                            key={r}
+                            className={`transition-colors ${
+                              isDimmed
+                                ? 'opacity-30 bg-slate-50'
+                                : r % 2 === 0
+                                ? 'bg-white hover:bg-emerald-50/40'
+                                : 'bg-slate-50/60 hover:bg-emerald-50/40'
+                            }`}
+                          >
+                            {/* Sticky Row Number Index */}
+                            <td className="w-14 min-w-[56px] p-2 text-center font-mono text-slate-500 bg-slate-100 border-r border-slate-300 sticky left-0 z-10 select-none font-semibold text-[11px]">
+                              {r + 1}
+                            </td>
+
+                            {/* Real Cells from the uploaded file */}
+                            {Array.from({ length: maxCols }).map((_, c) => {
+                              const cellValue = row[c] !== undefined && row[c] !== null ? String(row[c]) : '';
+                              const isSelected = selectedCellInfo?.r === r && selectedCellInfo?.c === c;
+                              const isCellSearchMatch =
+                                spreadsheetSearchQuery.trim() &&
+                                cellValue
+                                  .toLowerCase()
+                                  .includes(spreadsheetSearchQuery.toLowerCase());
+
+                              return (
+                                <td
+                                  key={c}
+                                  onClick={() => setSelectedCellInfo({ r, c, value: cellValue })}
+                                  className={`p-2 border-r border-slate-200 text-slate-800 transition-all cursor-cell whitespace-nowrap min-w-[120px] max-w-[340px] truncate ${
+                                    isSelected
+                                      ? 'ring-2 ring-emerald-500 bg-emerald-50 font-bold z-10'
+                                      : isCellSearchMatch
+                                      ? 'bg-amber-100 font-bold text-amber-950 ring-1 ring-amber-400'
+                                      : ''
+                                  }`}
+                                  title={cellValue || undefined}
+                                >
+                                  {cellValue}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
 
-              {/* Sheet Tabs and Download Bar */}
-              <div className="flex items-center justify-between bg-[#121c30] p-3 rounded-2xl border border-[#24334b] text-xs font-mono shrink-0">
-                <div className="flex items-center space-x-2">
-                  {(['Sheet1', 'Summary', 'Records'] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => setActiveSheetTab(tab)}
-                      className={`px-4 py-2 rounded-xl transition-all cursor-pointer font-bold ${
-                        activeSheetTab === tab
-                          ? 'bg-emerald-600 text-white shadow-2xs'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-[#1a273e]'
-                      }`}
-                    >
-                      {tab}
-                    </button>
-                  ))}
+              {/* Sheet Tabs & Information Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[#121c30] p-3 rounded-2xl border border-[#24334b] text-xs font-mono shrink-0 shadow-sm">
+                {/* Real Workbook Sheet Tabs */}
+                <div className="flex items-center space-x-1.5 overflow-x-auto max-w-[65vw] scrollbar-thin py-0.5">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold mr-1 flex items-center space-x-1 shrink-0">
+                    <TableIcon className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Sheets:</span>
+                  </span>
+                  {parsedSheetNames.length > 0 ? (
+                    parsedSheetNames.map((sheetName) => (
+                      <button
+                        key={sheetName}
+                        type="button"
+                        onClick={() => handleSwitchSheet(sheetName)}
+                        className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer font-bold whitespace-nowrap flex items-center space-x-1.5 text-xs ${
+                          activeSheetName === sheetName
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-[#182338] text-slate-300 hover:text-white hover:bg-[#20304a] border border-[#24334b]'
+                        }`}
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 opacity-80" />
+                        <span>{sheetName}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <span className="text-slate-500 italic text-[11px]">Sheet1</span>
+                  )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center space-x-2 shadow-2xs cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Excel Workbook</span>
-                </button>
+                {/* Right Summary & Download */}
+                <div className="flex items-center space-x-3 shrink-0">
+                  <span className="text-[11px] text-slate-400 hidden lg:inline">
+                    {parsedSheetData.length} Rows • {maxCols} Cols
+                    {spreadsheetSearchQuery.trim() && (
+                      <span className="text-amber-400 ml-1">
+                        ({searchFilteredRowCount} matching)
+                      </span>
+                    )}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center space-x-1.5 shadow-xs cursor-pointer transition-all"
+                    title="Download original file"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Original Excel</span>
+                  </button>
+                </div>
               </div>
             </div>
           ) : isPpt ? (

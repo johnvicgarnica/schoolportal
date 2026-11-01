@@ -71,33 +71,47 @@ function sanitizeForOfflineStorage(data: any): any {
 }
 
 /**
- * Save fresh database data into IndexedDB and memory cache.
+ * Save fresh database data into IndexedDB, localStorage, and memory cache.
  * Strips any sensitive credentials before storage.
+ * Broadcasts update event so mounted components immediately reflect changes.
  */
 export async function saveOfflineData<T>(key: string, rawData: T): Promise<void> {
   const sanitized = sanitizeForOfflineStorage(rawData);
   memoryCache[key] = sanitized;
 
-  // Also maintain localStorage mirror for small datasets (with quota safety)
+  // Maintain fast synchronous localStorage mirror for immediate startup hydration
   try {
     const serialized = JSON.stringify(sanitized);
-    // Only mirror to localStorage if reasonable size (< 500KB) to prevent quota issues
-    if (serialized.length < 500000) {
+    // Allow up to 3.5MB in localStorage; if it exceeds quota or fails, IndexedDB handles it
+    if (serialized.length < 3500000) {
       localStorage.setItem(key, serialized);
     }
-  } catch {
-    // localStorage full or disabled, IndexedDB handles large records
+  } catch (err) {
+    // localStorage full or private browsing quota restriction; IndexedDB handles large records safely
+    console.warn(`localStorage quota limit for "${key}" (IndexedDB will maintain persistence):`, err);
   }
 
+  // Persist to IndexedDB
   const db = await openDB();
-  if (!db) return;
+  if (db) {
+    try {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      store.put(sanitized, key);
+    } catch (e) {
+      console.warn(`IndexedDB put failed for key "${key}":`, e);
+    }
+  }
 
-  try {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    store.put(sanitized, key);
-  } catch (e) {
-    console.warn(`IndexedDB put failed for key "${key}":`, e);
+  // Notify active components and views in this tab of fresh cache data
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('svnhs-offline-cache-update', {
+          detail: { key, data: sanitized },
+        })
+      );
+    } catch {}
   }
 }
 
@@ -145,7 +159,7 @@ export async function getOfflineData<T>(key: string, fallbackDefault?: T): Promi
 }
 
 /**
- * Synchronous get for immediate React component state initialization.
+ * Synchronous get for immediate React component state initialization on first load.
  */
 export function getOfflineDataSync<T>(key: string, fallbackDefault: T): T {
   if (memoryCache[key] !== undefined) {
@@ -162,6 +176,41 @@ export function getOfflineDataSync<T>(key: string, fallbackDefault: T): T {
   } catch {}
 
   return fallbackDefault;
+}
+
+/**
+ * Subscribe to local cache updates for a given key across tabs and within the current session.
+ */
+export function subscribeOfflineCache<T>(
+  key: string,
+  callback: (data: T) => void
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const handleCustomEvent = (e: Event) => {
+    const customEvent = e as CustomEvent<{ key: string; data: T }>;
+    if (customEvent.detail && customEvent.detail.key === key) {
+      callback(customEvent.detail.data);
+    }
+  };
+
+  const handleStorageEvent = (e: StorageEvent) => {
+    if (e.key === key && e.newValue) {
+      try {
+        const parsed = JSON.parse(e.newValue);
+        memoryCache[key] = parsed;
+        callback(parsed);
+      } catch {}
+    }
+  };
+
+  window.addEventListener('svnhs-offline-cache-update', handleCustomEvent);
+  window.addEventListener('storage', handleStorageEvent);
+
+  return () => {
+    window.removeEventListener('svnhs-offline-cache-update', handleCustomEvent);
+    window.removeEventListener('storage', handleStorageEvent);
+  };
 }
 
 /**
@@ -201,7 +250,18 @@ export async function initializeOfflineDatabase(): Promise<void> {
     cursorReq.onsuccess = (e) => {
       const cursor = (e.target as IDBRequest).result;
       if (cursor) {
-        memoryCache[cursor.key as string] = cursor.value;
+        const k = cursor.key as string;
+        memoryCache[k] = cursor.value;
+        // Broadcast to notify components if they mounted before IndexedDB finished opening
+        if (typeof window !== 'undefined') {
+          try {
+            window.dispatchEvent(
+              new CustomEvent('svnhs-offline-cache-update', {
+                detail: { key: k, data: cursor.value },
+              })
+            );
+          } catch {}
+        }
         cursor.continue();
       }
     };

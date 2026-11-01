@@ -13,7 +13,9 @@ import {
 } from 'lucide-react';
 
 interface GoogleDriveWebviewProps {
-  url: string;
+  url?: string;
+  driveUrl?: string;
+  height?: string | number;
   title?: string;
   subtitle?: string;
   initialHeight?: number;
@@ -115,6 +117,8 @@ export function getDriveEmbedUrl(rawUrl: string, mode: 'grid' | 'list' = 'grid')
 
 export const GoogleDriveWebview: React.FC<GoogleDriveWebviewProps> = ({
   url,
+  driveUrl,
+  height,
   title = 'Google Drive Embedded Webview',
   subtitle,
   initialHeight = 420,
@@ -123,6 +127,7 @@ export const GoogleDriveWebview: React.FC<GoogleDriveWebviewProps> = ({
   showControls = true,
   compact = false,
 }) => {
+  const targetUrl = (url || driveUrl || '').trim();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
@@ -130,23 +135,25 @@ export const GoogleDriveWebview: React.FC<GoogleDriveWebviewProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const uniqueIframeId = useId();
 
-  if (!url || !url.trim()) {
+  if (!targetUrl) {
     return (
-      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center text-slate-500 font-mono text-xs">
-        <AlertCircle className="w-6 h-6 text-slate-400 mx-auto mb-2" />
-        <p className="font-bold text-slate-700">No Google Drive Link Provided</p>
-        <p className="text-[11px] text-slate-500 mt-0.5">
+      <div className="bg-[#141c2c] border border-[#24334b] rounded-2xl p-6 text-center text-slate-400 font-mono text-xs">
+        <AlertCircle className="w-6 h-6 text-slate-500 mx-auto mb-2" />
+        <p className="font-bold text-slate-300">No Google Drive Link Provided</p>
+        <p className="text-[11px] text-slate-400 mt-0.5">
           Edit this folder to embed a valid Google Drive folder or document link.
         </p>
       </div>
     );
   }
 
-  const { embedUrl, type, id: extractedId } = getDriveEmbedUrl(url, viewMode);
-  const effectiveHeight = isExpanded ? 650 : initialHeight;
+  const { embedUrl, type, id: extractedId } = getDriveEmbedUrl(targetUrl, viewMode);
+  const parsedHeight = typeof height === 'number' ? height : typeof height === 'string' ? parseInt(height, 10) : NaN;
+  const baseHeight = !isNaN(parsedHeight) && parsedHeight > 0 ? parsedHeight : initialHeight;
+  const effectiveHeight = isExpanded ? 680 : baseHeight;
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(url);
+    navigator.clipboard.writeText(targetUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

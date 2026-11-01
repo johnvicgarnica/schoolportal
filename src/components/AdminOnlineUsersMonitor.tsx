@@ -86,9 +86,13 @@ export const AdminOnlineUsersMonitor: React.FC<AdminOnlineUsersMonitorProps> = (
       isOnline: boolean;
     }> = [];
 
+    const seenEmails = new Set<string>();
+
     // Admins
     adminList.forEach((a) => {
       const cleanEmail = (a.email || '').toLowerCase().trim();
+      if (!cleanEmail || seenEmails.has(cleanEmail)) return;
+      seenEmails.add(cleanEmail);
       const p = presenceMap.get(cleanEmail);
       list.push({
         id: a.id || `admin-${cleanEmail}`,
@@ -105,6 +109,8 @@ export const AdminOnlineUsersMonitor: React.FC<AdminOnlineUsersMonitorProps> = (
     // Faculty
     facultyList.forEach((f) => {
       const cleanEmail = (f.email || '').toLowerCase().trim();
+      if (!cleanEmail || seenEmails.has(cleanEmail)) return;
+      seenEmails.add(cleanEmail);
       const p = presenceMap.get(cleanEmail);
       list.push({
         id: f.id || `faculty-${cleanEmail}`,
@@ -480,7 +486,7 @@ export const AdminOnlineUsersMonitor: React.FC<AdminOnlineUsersMonitorProps> = (
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e293b]">
-                {displayedItems.map((item: any) => {
+                {displayedItems.map((item: any, idx: number) => {
                   const isUserActive =
                     viewScope === 'online-only' ? true : Boolean(item.isOnline);
                   const isCurrentMasterAdmin =
@@ -497,7 +503,7 @@ export const AdminOnlineUsersMonitor: React.FC<AdminOnlineUsersMonitorProps> = (
 
                   return (
                     <tr
-                      key={item.id || item.email}
+                      key={`${item.role || 'user'}-${item.email || item.id || 'usr'}-${idx}`}
                       className={`hover:bg-[#1a2436] transition-colors ${
                         isCurrentMasterAdmin ? 'bg-emerald-950/20' : ''
                       }`}

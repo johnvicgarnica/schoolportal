@@ -86,11 +86,26 @@ export const normalizeFacebookUrl = (url: string): string => {
   return clean;
 };
 
+// In-memory cache for fast repeated video embed parsing and rendering
+const embedOptimizationCache = new Map<string, OptimizedEmbedResult>();
+
 /**
  * Parses and fully optimizes any video embed snippet or direct URL.
  * Automatically resolves aspect ratio, dimensions, permissions, and prevents conflicts.
  */
 export const parseAndOptimizeEmbed = (rawInput: string): OptimizedEmbedResult => {
+  const cacheKey = (rawInput || '').trim();
+  if (embedOptimizationCache.has(cacheKey)) {
+    return embedOptimizationCache.get(cacheKey)!;
+  }
+  const result = computeParseAndOptimizeEmbed(rawInput);
+  if (cacheKey) {
+    embedOptimizationCache.set(cacheKey, result);
+  }
+  return result;
+};
+
+const computeParseAndOptimizeEmbed = (rawInput: string): OptimizedEmbedResult => {
   const stripped = stripUnsafeAndConflictingTags(rawInput || '');
 
   // 1. Direct video file (.mp4, .webm, .ogg, .mov)
@@ -125,7 +140,7 @@ export const parseAndOptimizeEmbed = (rawInput: string): OptimizedEmbedResult =>
     const aspectRatioValue = w > 0 && h > 0 ? `${w} / ${h}` : isPortrait ? '9 / 16' : '16 / 9';
     const aspectRatioNum = w > 0 && h > 0 ? w / h : isPortrait ? 9 / 16 : 16 / 9;
 
-    const optimizedCode = `<video controls playsinline webkit-playsinline="true" autoPlay muted loop preload="auto" style="object-fit: contain;" class="w-full h-full object-contain object-center bg-black mx-auto"><source src="${src}" type="video/mp4">Your browser does not support the video tag.</video>`;
+    const optimizedCode = `<video controls playsinline webkit-playsinline="true" autoPlay loop preload="auto" style="object-fit: contain;" class="w-full h-full object-contain object-center bg-black mx-auto"><source src="${src}" type="video/mp4">Your browser does not support the video tag.</video>`;
 
     return {
       optimizedCode,
@@ -404,7 +419,7 @@ export const parseAndOptimizeEmbed = (rawInput: string): OptimizedEmbedResult =>
     const vimeoMatch = stripped.match(/(?:https?:\/\/)?(?:www\.)?(?:player\.)?vimeo\.com\/(?:video\/)?([0-9]+)/i);
     const vimeoId = vimeoMatch?.[1] || '';
     const cleanSrc = vimeoId
-      ? `https://player.vimeo.com/video/${vimeoId}?autoplay=1&muted=1&playsinline=1`
+      ? `https://player.vimeo.com/video/${vimeoId}?autoplay=1&muted=0&playsinline=1`
       : extractedIframeSrc || stripped;
 
     const optimizedCode = `<iframe src="${cleanSrc}" width="560" height="315" title="Vimeo Presentation" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen class="w-full h-full border-0 block mx-auto"></iframe>`;

@@ -45,6 +45,46 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
   const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
   const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  const [isSectionInViewport, setIsSectionInViewport] = useState<boolean>(false);
+  const [isDocumentVisible, setIsDocumentVisible] = useState<boolean>(
+    typeof document !== 'undefined' ? !document.hidden : true
+  );
+
+  // Pause playback when tab is in background (visibilitychange)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsDocumentVisible(typeof document !== 'undefined' ? !document.hidden : true);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // IntersectionObserver on the section itself: only autoplay when video section appears on screen
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setIsSectionInViewport(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          setIsSectionInViewport(entry.isIntersecting);
+        }
+      },
+      {
+        threshold: [0, 0.05, 0.2, 0.5, 0.8],
+      }
+    );
+
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   // Synchronize rendered section height with sibling components
   useEffect(() => {
@@ -223,7 +263,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
       </div>
 
       {/* Main Content Area */}
-      {isLoading ? (
+      {isLoading && !hasVideos ? (
         <div className="py-8 px-4 border border-slate-200 rounded-2xl bg-slate-50/60 text-center space-y-3">
           <div className="w-8 h-8 rounded-full border-2 border-emerald-500/30 border-t-emerald-600 animate-spin mx-auto" />
           <p className="text-xs font-mono text-slate-500">Fetching live campus video broadcasts from database...</p>
@@ -253,7 +293,7 @@ export const ScrollableVideoSection: React.FC<ScrollableVideoSectionProps> = ({
                     <FineTunedVideoPlayer
                       embedCode={video.embedCode}
                       title={video.title}
-                      isActive={index === activeIndex}
+                      isActive={index === activeIndex && isSectionInViewport && isDocumentVisible}
                     />
                   </div>
 

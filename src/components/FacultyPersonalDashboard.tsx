@@ -7,12 +7,12 @@ import {
 } from '../types';
 import {
   getStoredSchoolPermanentFolders,
-  subscribeSchoolPermanentFolders,
   getStoredFaculty,
-  subscribeFaculty,
+  saveFacultyFileToFirestore,
+  getFacultyFileData,
 } from '../lib/firebase';
 import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
-import { GoogleDriveWebview } from './GoogleDriveWebview';
+import { GoogleDocsSpreadsheetEditor } from './GoogleDocsSpreadsheetEditor';
 import {
   Folder,
   FolderPlus,
@@ -44,6 +44,9 @@ import {
   HardDrive,
   AlertCircle,
   FileCheck2,
+  Sparkles,
+  BookOpen,
+  Award,
 } from 'lucide-react';
 
 interface FacultyPersonalDashboardProps {
@@ -61,7 +64,15 @@ interface FacultyPersonalDashboardProps {
   onNavigateToSubmissionReport?: () => void;
 }
 
+export const FACULTY_FOLDER_CATEGORIES = ['DLL', 'TOS&TQ'] as const;
+export type FacultyFolderCategory = (typeof FACULTY_FOLDER_CATEGORIES)[number];
+
+export const GRADE_LEVEL_OPTIONS = ['7', '8', '9', '10', '11', '12'] as const;
+export type GradeLevelOption = (typeof GRADE_LEVEL_OPTIONS)[number];
+
 const CATEGORY_OPTIONS = [
+  'DLL',
+  'TOS&TQ',
   'Daily Lesson Log (DLL)',
   'Table of Specifications (TOS)',
   'Test Questions & Answer Keys',
@@ -82,7 +93,7 @@ const COLOR_THEMES = [
   { name: 'Rose', bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', icon: 'text-rose-600', ring: 'ring-rose-500' },
 ];
 
-const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls'];
+const ALLOWED_EXTENSIONS = ['pdf'];
 const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
 
 export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> = ({
@@ -110,14 +121,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     }
   }, [schoolPermanentFolders]);
 
-  useEffect(() => {
-    const unsub = subscribeSchoolPermanentFolders((folders) => {
-      if (folders && folders.length > 0) {
-        setLivePermanentFolders(folders);
-      }
-    });
-    return () => unsub();
-  }, []);
+  // Permanent folders are kept in sync via props from App.tsx without opening duplicate Firestore listeners.
 
   // Filter STRICTLY for current logged in faculty member
   const userEmail = (currentUser.email || '').toLowerCase().trim();
@@ -133,7 +137,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     );
   }, [facultyFiles, userEmail]);
 
-  // Live Faculty Directory to resolve real-time advisoryRole
+  // Resolve advisoryRole from current user profile with fallback to stored cache
   const [liveAdvisoryRole, setLiveAdvisoryRole] = useState<'Class Adviser' | 'Non-Adviser'>(() => {
     const roleClean = (currentUser.advisoryRole || '').toLowerCase().trim();
     if (roleClean === 'class adviser' || roleClean === 'class-adviser' || roleClean === 'adviser') return 'Class Adviser';
@@ -152,14 +156,11 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   });
 
   useEffect(() => {
-    const unsub = subscribeFaculty((list) => {
-      const match = list.find((f) => (f.email || '').toLowerCase().trim() === userEmail);
-      if (match && match.advisoryRole) {
-        setLiveAdvisoryRole(match.advisoryRole);
-      }
-    });
-    return () => unsub();
-  }, [userEmail]);
+    const roleClean = (currentUser.advisoryRole || '').toLowerCase().trim();
+    if (roleClean === 'class adviser' || roleClean === 'class-adviser' || roleClean === 'adviser') {
+      setLiveAdvisoryRole('Class Adviser');
+    }
+  }, [currentUser.advisoryRole]);
 
   // Dynamically resolve whether current faculty user is a Class Adviser
   const isClassAdviser = useMemo(() => {
@@ -244,10 +245,15 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       const matchesSearch =
         searchTerm === '' ||
         folder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (folder.description && folder.description.toLowerCase().includes(searchTerm.toLowerCase()));
-      const matchesCategory =
-        selectedCategoryFilter === 'all' || folder.category === selectedCategoryFilter;
-      return matchesSearch && matchesCategory;
+        (folder.description && folder.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (folder.subjectTitle && folder.subjectTitle.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (folder.category && folder.category.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchCategory =
+        selectedCategoryFilter === 'all' ||
+        folder.category === selectedCategoryFilter ||
+        (selectedCategoryFilter === 'DLL' && (folder.category === 'DLL' || folder.name.startsWith('DLL') || folder.category?.includes('DLL'))) ||
+        (selectedCategoryFilter === 'TOS&TQ' && (folder.category === 'TOS&TQ' || folder.name.startsWith('TOS&TQ') || folder.category?.includes('TOS')));
+      return matchesSearch && matchCategory;
     });
   }, [myFolders, searchTerm, selectedCategoryFilter]);
 
@@ -258,17 +264,33 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   const [selectedPreviewFile, setSelectedPreviewFile] = useState<FacultyPersonalFile | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Spreadsheet Editor state
+  const [editingSpreadsheetFile, setEditingSpreadsheetFile] = useState<FacultyPersonalFile | null>(null);
+  const [editingSpreadsheetDataUrl, setEditingSpreadsheetDataUrl] = useState<string | null>(null);
+  const [isLoadingSpreadsheet, setIsLoadingSpreadsheet] = useState<boolean>(false);
+
   // In-App Confirmation Modal States (Replacing window.confirm)
   const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
   const [fileToDelete, setFileToDelete] = useState<{ id: string; title: string; fileName: string } | null>(null);
 
-  // Form States - Folder Creation / Editing (NO GOOGLE DRIVE URL)
+  // Form States - Folder Creation / Editing (FolderCategory + SubjectTitle + Grade Level)
+  const [folderCategory, setFolderCategory] = useState<string>('DLL');
+  const [subjectTitle, setSubjectTitle] = useState<string>('');
+  const [gradeLevel, setGradeLevel] = useState<string>('7');
   const [folderName, setFolderName] = useState('');
   const [folderDescription, setFolderDescription] = useState('');
-  const [folderCategory, setFolderCategory] = useState(CATEGORY_OPTIONS[0]);
   const [folderColor, setFolderColor] = useState('Emerald');
 
-  // Form States - Upload File to Folder (Max 2MB, PDF/DOCX/DOC/PPTX/XLSX)
+  // Computed Auto-Generated Folder Name in format FolderCategory+SubjectTitle+Grade Level
+  const autoFolderName = useMemo(() => {
+    const cat = folderCategory || 'DLL';
+    const sub = subjectTitle.trim();
+    const gr = gradeLevel || '7';
+    if (!sub) return `${cat} [Subject Title] ${gr}`;
+    return `${cat} ${sub} ${gr}`;
+  }, [folderCategory, subjectTitle, gradeLevel]);
+
+  // Form States - Upload File to Folder (Max 2MB)
   const [fileTitle, setFileTitle] = useState('');
   const [fileDescription, setFileDescription] = useState('');
   const [fileCategory, setFileCategory] = useState(CATEGORY_OPTIONS[0]);
@@ -281,15 +303,21 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  // Files in Active Folder (filtering by folderId)
   const filesInActiveFolder = useMemo(() => {
     if (!activeFolderId) return [];
+    if (isPermanentActive) {
+      return facultyFiles.filter((f) => f.folderId === activeFolderId);
+    }
     return myFiles.filter((f) => f.folderId === activeFolderId);
-  }, [myFiles, activeFolderId]);
+  }, [facultyFiles, myFiles, activeFolderId, isPermanentActive]);
 
   const handleOpenNewFolderModal = () => {
+    setFolderCategory('DLL');
+    setSubjectTitle('');
+    setGradeLevel('7');
     setFolderName('');
     setFolderDescription('');
-    setFolderCategory(CATEGORY_OPTIONS[0]);
     setFolderColor('Emerald');
     setEditingFolder(null);
     setIsNewFolderModalOpen(true);
@@ -302,9 +330,31 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       return;
     }
     setEditingFolder(folder);
+    const cat = folder.category === 'TOS&TQ' || folder.name.startsWith('TOS&TQ') ? 'TOS&TQ' : 'DLL';
+    setFolderCategory(cat);
+
+    let parsedSubject = folder.subjectTitle || '';
+    let parsedGrade = folder.gradeLevel || '7';
+
+    if (!parsedSubject) {
+      const parts = folder.name.split(' ');
+      if (parts.length >= 3 && (parts[0] === 'DLL' || parts[0] === 'TOS&TQ')) {
+        const lastPart = parts[parts.length - 1];
+        if (GRADE_LEVEL_OPTIONS.includes(lastPart as any)) {
+          parsedGrade = lastPart;
+          parsedSubject = parts.slice(1, -1).join(' ');
+        } else {
+          parsedSubject = parts.slice(1).join(' ');
+        }
+      } else {
+        parsedSubject = folder.name;
+      }
+    }
+
+    setSubjectTitle(parsedSubject);
+    setGradeLevel(parsedGrade);
     setFolderName(folder.name);
     setFolderDescription(folder.description || '');
-    setFolderCategory(folder.category || CATEGORY_OPTIONS[0]);
     setFolderColor(folder.color || 'Emerald');
     setIsNewFolderModalOpen(true);
   };
@@ -312,10 +362,14 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   // Create or Update Folder
   const handleSaveFolder = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!folderName.trim()) {
-      showToast('Please enter a folder title.');
+    const cleanSubject = subjectTitle.trim();
+    if (!cleanSubject) {
+      showToast('Please type the Subject Title (e.g. Mathematics, Science, English).');
       return;
     }
+
+    // Automatically create folder name with format of FolderCategory+SubjectTitle+Grade Level
+    const finalFolderName = `${folderCategory} ${cleanSubject} ${gradeLevel}`;
 
     if (editingFolder) {
       if (editingFolder.id === 'school-forms' || editingFolder.id === 'school-documents') {
@@ -324,23 +378,27 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         return;
       }
       onEditFolder(editingFolder.id, {
-        name: folderName.trim(),
+        name: finalFolderName,
         description: folderDescription.trim(),
         category: folderCategory,
         color: folderColor,
+        subjectTitle: cleanSubject,
+        gradeLevel: gradeLevel,
       });
-      showToast(`Folder "${folderName.trim()}" updated successfully.`);
+      showToast(`Folder "${finalFolderName}" updated successfully.`);
     } else {
       onAddFolder({
         facultyEmail: currentUser.email,
         facultyName: currentUser.name,
         facultySurname: '', // Handled in lib/firebase.ts
-        name: folderName.trim(),
+        name: finalFolderName,
         description: folderDescription.trim(),
         category: folderCategory,
         color: folderColor,
+        subjectTitle: cleanSubject,
+        gradeLevel: gradeLevel,
       });
-      showToast(`Personal folder "${folderName.trim()}" created successfully!`);
+      showToast(`Personal folder "${finalFolderName}" created successfully!`);
     }
 
     setIsNewFolderModalOpen(false);
@@ -372,32 +430,69 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   const handleOpenAddFileModal = (folderId: string) => {
     setActiveFolderId(folderId);
     setFileTitle('');
-    setFileDescription('');
     setFileCategory(activeFolder?.category || CATEGORY_OPTIONS[0]);
+    setFileDescription('');
     setAttachedFile(null);
     setUploadError(null);
     setIsAddFileModalOpen(true);
   };
 
-  // Validate File Selection
+  // Open spreadsheet in interactive Google Docs / Sheets editor
+  const handleOpenSpreadsheetEditor = async (file: FacultyPersonalFile) => {
+    setIsLoadingSpreadsheet(true);
+    try {
+      let data = file.fileData;
+      if (!data) {
+        data = await getFacultyFileData(file);
+      }
+      setEditingSpreadsheetFile(file);
+      setEditingSpreadsheetDataUrl(data || '');
+    } catch (err) {
+      console.error('Error opening spreadsheet editor:', err);
+      showToast('Could not open spreadsheet data.');
+    } finally {
+      setIsLoadingSpreadsheet(false);
+    }
+  };
+
+  // Save updated spreadsheet to Firebase
+  const handleSaveSpreadsheet = async (updatedFileDoc: FacultyPersonalFile) => {
+    try {
+      await saveFacultyFileToFirestore(updatedFileDoc);
+      showToast(`Spreadsheet "${updatedFileDoc.title}" updated and saved directly to Firebase!`);
+    } catch (err) {
+      console.error('Error updating spreadsheet in Firebase:', err);
+      showToast('Error saving changes to Firebase.');
+    }
+  };
+
+  // Validate File Selection (Strictly Max 2MB, PDF/XLS/XLSX/DOC/DOCX)
   const handleFileSelection = (selectedFile: File) => {
     setUploadError(null);
 
-    // 1. Validate file extension
     const ext = (selectedFile.name.split('.').pop() || '').toLowerCase();
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    const isPermanent = activeFolderId === 'school-forms' || activeFolderId === 'school-documents';
+
+    // Allowed extensions based on folder context: strictly PDF only for personal faculty folders
+    const validExts = isPermanent
+      ? ['xlsx', 'xls', 'pdf', 'docx', 'doc']
+      : ['pdf'];
+
+    if (!validExts.includes(ext)) {
       setUploadError(
-        `Invalid file type ".${ext}". Only PDF, DOCX, DOC, PPTX, and XLSX files are permitted.`
+        isPermanent
+          ? `Invalid file type ".${ext || 'unknown'}". Allowed formats: ${validExts.map((e) => `.${e}`).join(', ')}`
+          : 'Only PDF documents (.pdf) are allowed in faculty folders. Please select a PDF file.'
       );
       setAttachedFile(null);
       return;
     }
 
-    // 2. Validate file size (maximum 2MB)
+    // 2. Strict file size validation (maximum 2MB)
     if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
       const sizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2);
       setUploadError(
-        `File exceeds maximum limit of 2MB (Selected file is ${sizeMb} MB). Please choose a file under 2MB.`
+        `File exceeds strict maximum limit of 2MB (Selected file is ${sizeMb} MB). Please choose a file under 2MB.`
       );
       setAttachedFile(null);
       return;
@@ -409,7 +504,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     }
   };
 
-  // Submit File Upload with Base64 Conversion and 1-Week Expiration
+  // Submit File Upload with Base64 Conversion and direct Firebase storage
   const handleFileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeFolderId || !attachedFile) {
@@ -430,24 +525,29 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       const reader = new FileReader();
       reader.onload = () => {
         const fileDataUrl = reader.result as string;
-        const fileName = attachedFile.name;
         const fileSizeBytes = attachedFile.size;
         const sizeMb = fileSizeBytes / (1024 * 1024);
         const fileSizeFormatted =
           sizeMb >= 1
             ? `${sizeMb.toFixed(2)} MB`
             : `${(fileSizeBytes / 1024).toFixed(0)} KB`;
-        const ext = (fileName.split('.').pop() || 'pdf').toLowerCase();
+        const ext = (attachedFile.name.split('.').pop() || 'pdf').toLowerCase();
 
-        // 1-week auto-delete expiration timestamp
-        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const finalTitle = fileTitle.trim();
+        const finalFileName = attachedFile.name;
+
+        const isPermanent = activeFolderId === 'school-forms' || activeFolderId === 'school-documents';
+        // Permanent folders DO NOT auto-expire, personal folders auto-delete after 15 days
+        const expiresAt = isPermanent
+          ? undefined
+          : new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
 
         onAddFile({
           folderId: activeFolderId,
           facultyEmail: currentUser.email,
           facultyName: currentUser.name,
-          title: fileTitle.trim(),
-          fileName,
+          title: finalTitle,
+          fileName: finalFileName,
           fileSizeBytes,
           fileSizeFormatted,
           format: ext,
@@ -459,7 +559,11 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
         setIsUploading(false);
         setIsAddFileModalOpen(false);
-        showToast(`Document "${fileTitle.trim()}" uploaded to folder! Auto-deletes after 1 week.`);
+        showToast(
+          isPermanent
+            ? `File "${finalTitle}" successfully saved to School Firebase Repository!`
+            : `Document "${finalTitle}" uploaded to folder! Auto-deletes after 15 days.`
+        );
       };
 
       reader.onerror = () => {
@@ -501,36 +605,36 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       )}
 
       {/* Top Banner & Faculty Header */}
-      <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 rounded-3xl p-6 sm:p-8 text-white shadow-md relative overflow-hidden">
+      <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 rounded-2xl px-5 py-3.5 sm:px-6 sm:py-4 text-white shadow-md relative overflow-hidden">
         <div className="absolute -right-10 -bottom-10 opacity-10 pointer-events-none">
-          <Layers className="w-72 h-72 text-white" />
+          <Layers className="w-56 h-56 text-white" />
         </div>
 
-        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div className="space-y-2">
+        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="space-y-1">
             <div className="flex items-center space-x-2.5">
-              <span className="bg-white/15 backdrop-blur-md text-blue-100 text-[11px] font-mono font-bold px-3 py-1 rounded-full uppercase tracking-wider border border-white/20 flex items-center space-x-1.5">
+              <span className="bg-white/15 backdrop-blur-md text-blue-100 text-[10px] sm:text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border border-white/20 flex items-center space-x-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
                 <span>Personal Faculty Workspace</span>
               </span>
-              <span className="text-blue-200 text-xs font-mono font-semibold">
+              <span className="text-blue-200 text-[11px] sm:text-xs font-mono font-semibold">
                 Unique Firebase Storage
               </span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight font-sans text-white">
+            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight font-sans text-white">
               Welcome, {currentUser.name}
             </h1>
-            <p className="text-blue-100 text-xs sm:text-sm font-medium max-w-2xl leading-relaxed">
-              Your personalized repository for Daily Lesson Logs (DLL), Table of Specifications (TOS), Test Questions, and class instructional materials. Upload PDF, Word, Excel, and PowerPoint documents (up to 2MB).
+            <p className="text-blue-100 text-xs font-medium max-w-2xl leading-normal">
+              Your personalized repository for Daily Lesson Logs (DLL), Table of Specifications (TOS), Test Questions, and class instructional materials. Upload PDF documents (.pdf up to 2MB).
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             <button
               type="button"
               onClick={handleOpenNewFolderModal}
-              className="px-5 py-3 bg-emerald-500 hover:bg-emerald-600 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl transition-all shadow-md flex items-center space-x-2 cursor-pointer hover:scale-[1.02] active:scale-95 border border-emerald-400/50"
+              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-mono font-bold rounded-xl transition-all shadow-md flex items-center space-x-1.5 cursor-pointer hover:scale-[1.02] active:scale-95 border border-emerald-400/50"
             >
               <FolderPlus className="w-4 h-4 text-white" />
               <span>+ Create Personal Folder</span>
@@ -556,7 +660,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             <div className="text-blue-200 text-[11px]">Retention Policy</div>
             <div className="text-xs font-bold text-amber-300 mt-1 flex items-center space-x-1">
               <Clock className="w-3.5 h-3.5 text-amber-300" />
-              <span>1-Week Auto-Delete</span>
+              <span>15-Day Auto-Delete</span>
             </div>
           </div>
         </div>
@@ -589,7 +693,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             <div className="flex items-center space-x-3">
               <button
                 type="button"
-                onClick={() => setActiveFolderId(null)}
+                onClick={() => {
+                  setActiveFolderId(null);
+                  setActiveSubfolderId(null);
+                }}
                 className="p-2.5 bg-[#172236] hover:bg-[#20304c] text-slate-200 rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold font-mono cursor-pointer border border-[#2d3e57]"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -611,6 +718,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     <h2 className="text-base sm:text-lg font-bold text-slate-100 leading-tight">
                       {activeFolder.name}
                     </h2>
+
                     {isPermanentActive && (
                       <span className="bg-indigo-600 text-white text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase flex items-center space-x-1">
                         <Lock className="w-3 h-3" />
@@ -624,17 +732,35 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     </span>
                     <span>•</span>
                     {isPermanentActive ? (
-                      <span className="text-indigo-400 font-bold">Admin Managed Central Folder</span>
+                      <span className="text-emerald-400 font-bold flex items-center space-x-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Firebase Cloud Storage (Permanent Repository • Max 2MB)</span>
+                      </span>
                     ) : (
-                      <span>{filesInActiveFolder.length} documents uploaded</span>
+                      <span className="text-emerald-400 font-bold">Firebase Cloud Storage (Max 2MB)</span>
                     )}
+                    <span>•</span>
+                    <span>{filesInActiveFolder.length} documents uploaded</span>
                   </div>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center space-x-2">
-              {!isPermanentActive && (
+              {isPermanentActive ? (
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddFileModal(activeFolder.id)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-md flex items-center space-x-1.5 cursor-pointer"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>
+                    {activeFolder.id === 'school-forms'
+                      ? '+ Upload School Form (Max 2MB)'
+                      : '+ Upload School Document (Max 2MB)'}
+                  </span>
+                </button>
+              ) : (
                 <>
                   <button
                     type="button"
@@ -677,7 +803,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             </p>
           )}
 
-          {/* 1-WEEK RETENTION INFO BANNER FOR FACULTY WORKSPACE */}
+          {/* 1-WEEK RETENTION INFO BANNER FOR PERSONAL WORKSPACE ONLY */}
           {!isPermanentActive && (
             <div className="bg-[#141c2c] border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono">
               <div className="flex items-center space-x-3">
@@ -686,10 +812,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 </div>
                 <div>
                   <div className="font-bold text-amber-300">
-                    Automatic 1-Week File Deletion Policy
+                    Automatic 15-Day File Deletion Policy
                   </div>
                   <div className="text-slate-400 text-[11px] mt-0.5">
-                    Uploaded documents (PDF, DOCX, DOC, PPTX, XLSX up to 2MB) are automatically cleaned up 7 days after upload to preserve storage space.
+                    Uploaded personal files are automatically cleaned up 15 days after upload to preserve storage space. School permanent forms and documents remain permanently.
                   </div>
                 </div>
               </div>
@@ -700,166 +826,242 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             </div>
           )}
 
-          {/* PERMANENT SCHOOL FOLDER WEBVIEW IF CENTRAL */}
-          {isPermanentActive && activeFolder.driveUrl ? (
-            <div className="space-y-3">
-              <GoogleDriveWebview
-                url={activeFolder.driveUrl}
-                title={`${activeFolder.name} - Central DepEd Forms`}
-                subtitle="School-wide official repository"
-                initialHeight={460}
-                allowToggleViewMode={true}
-              />
-            </div>
-          ) : (
-            /* UNIQUE FILE STORAGE SECTION: DOCUMENT PREVIEWS & LIST */
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-2">
-                  <span>Documents Inside "{activeFolder.name}"</span>
-                  <span className="bg-[#172236] text-blue-300 border border-[#2d3e57] px-2 py-0.5 rounded-full text-[10px]">
-                    {filesInActiveFolder.length} files
-                  </span>
-                </h3>
+          {/* FIREBASE CLOUD STORAGE PERMANENT REPOSITORY BANNER */}
+          {isPermanentActive && (
+            <div className="bg-[#111928] border border-emerald-500/30 rounded-2xl p-4 sm:p-5 shadow-sm space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl shrink-0">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center space-x-2">
+                      <span>Firebase Cloud Storage Central Repository</span>
+                      <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px] normal-case font-bold">
+                        Permanent • Max 2MB
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-300 font-mono mt-0.5">
+                      All files and forms in this folder are stored permanently in Firebase Cloud Storage. No external Google Drive links.
+                    </p>
+                  </div>
+                </div>
 
                 <button
                   type="button"
                   onClick={() => handleOpenAddFileModal(activeFolder.id)}
-                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer shrink-0"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Document</span>
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload to Firebase (Max 2MB)</span>
                 </button>
               </div>
+            </div>
+          )}
 
-              {filesInActiveFolder.length === 0 ? (
-                /* Empty State in Folder */
-                <div className="bg-[#141c2c] border-2 border-dashed border-[#24334b] rounded-3xl p-8 sm:p-12 text-center space-y-4">
-                  <div className="w-14 h-14 rounded-2xl bg-blue-500/20 border border-blue-500/40 text-blue-300 mx-auto flex items-center justify-center shadow-inner">
-                    <Upload className="w-7 h-7" />
-                  </div>
-                  <div className="space-y-1">
-                    <h4 className="text-base font-bold text-slate-100">
-                      No Files in this Folder Yet
-                    </h4>
-                    <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
-                      Upload your PDF, Word (.docx, .doc), Excel (.xlsx), or PowerPoint (.pptx) documents with a maximum size of 2MB. Files are automatically previewed inside the folder and stored in the Firebase database.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAddFileModal(activeFolder.id)}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl transition-all shadow-sm inline-flex items-center space-x-2 cursor-pointer hover:scale-105 active:scale-95"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span>Upload Document (Max 2MB)</span>
-                  </button>
+          {/* FIREBASE FILE STORAGE SECTION: DOCUMENT PREVIEWS & LIST */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center space-x-2">
+                <span>
+                  Documents Inside "{activeFolder.name}"
+                </span>
+                <span className="bg-[#172236] text-blue-300 border border-[#2d3e57] px-2 py-0.5 rounded-full text-[10px]">
+                  {filesInActiveFolder.length} files
+                </span>
+              </h3>
+
+              <button
+                type="button"
+                onClick={() => handleOpenAddFileModal(activeFolder.id)}
+                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Document</span>
+              </button>
+            </div>
+
+            {filesInActiveFolder.length === 0 ? (
+              /* Empty State in Folder */
+              <div className="bg-[#141c2c] border-2 border-dashed border-[#24334b] rounded-3xl p-8 sm:p-12 text-center space-y-4">
+                <div className="w-14 h-14 rounded-2xl bg-blue-500/20 border border-blue-500/40 text-blue-300 mx-auto flex items-center justify-center shadow-inner">
+                  <Upload className="w-7 h-7" />
                 </div>
-              ) : (
-                /* GRID OF FILE PREVIEW CARDS */
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filesInActiveFolder.map((file) => {
-                    const fmt = (file.format || '').toLowerCase();
-                    const isPdf = fmt === 'pdf';
-                    const isDoc = fmt.includes('doc');
-                    const isSheet = fmt.includes('xls') || fmt.includes('sheet');
-                    const isPpt = fmt.includes('ppt') || fmt.includes('pres');
+                <div className="space-y-1">
+                  <h4 className="text-base font-bold text-slate-100">
+                    No Files in this Folder Yet
+                  </h4>
+                  <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+                    Upload your documents and forms with a maximum size of 2MB. Files are saved directly to the Firebase database with no external Google Drive links required.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddFileModal(activeFolder.id)}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl transition-all shadow-sm inline-flex items-center space-x-2 cursor-pointer hover:scale-105 active:scale-95"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>Upload Document (Max 2MB)</span>
+                </button>
+              </div>
+            ) : (
+              /* GRID OF FILE PREVIEW CARDS */
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filesInActiveFolder.map((file) => {
+                  const fmt = (file.format || '').toLowerCase();
+                  const isPdf = fmt === 'pdf';
+                  const isDoc = fmt.includes('doc');
+                  const isSheet = fmt.includes('xls') || fmt.includes('sheet');
+                  const isPpt = fmt.includes('ppt') || fmt.includes('pres');
 
-                    let themeBorder = 'border-slate-700 hover:border-slate-500';
-                    let badgeBg = 'bg-slate-700/50 text-slate-300 border-slate-600';
-                    let typeLabel = fmt.toUpperCase();
-                    let iconComp = <File className="w-5 h-5 text-slate-300" />;
+                  let themeBorder = 'border-slate-700 hover:border-slate-500';
+                  let badgeBg = 'bg-slate-700/50 text-slate-300 border-slate-600';
+                  let typeLabel = fmt.toUpperCase();
+                  let iconComp = <File className="w-5 h-5 text-slate-300" />;
 
-                    if (isPdf) {
-                      themeBorder = 'border-rose-500/30 hover:border-rose-500/70';
-                      badgeBg = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
-                      typeLabel = 'PDF';
-                      iconComp = <FileText className="w-5 h-5 text-rose-400" />;
-                    } else if (isDoc) {
-                      themeBorder = 'border-blue-500/30 hover:border-blue-500/70';
-                      badgeBg = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
-                      typeLabel = 'WORD';
-                      iconComp = <FileText className="w-5 h-5 text-blue-400" />;
-                    } else if (isSheet) {
-                      themeBorder = 'border-emerald-500/30 hover:border-emerald-500/70';
-                      badgeBg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-                      typeLabel = 'EXCEL';
-                      iconComp = <FileSpreadsheet className="w-5 h-5 text-emerald-400" />;
-                    } else if (isPpt) {
-                      themeBorder = 'border-amber-500/30 hover:border-amber-500/70';
-                      badgeBg = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-                      typeLabel = 'POWERPOINT';
-                      iconComp = <FileText className="w-5 h-5 text-amber-400" />;
-                    }
+                  if (isPdf) {
+                    themeBorder = 'border-rose-500/30 hover:border-rose-500/70';
+                    badgeBg = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+                    typeLabel = 'PDF';
+                    iconComp = <FileText className="w-5 h-5 text-rose-400" />;
+                  } else if (isDoc) {
+                    themeBorder = 'border-blue-500/30 hover:border-blue-500/70';
+                    badgeBg = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
+                    typeLabel = 'WORD';
+                    iconComp = <FileText className="w-5 h-5 text-blue-400" />;
+                  } else if (isSheet) {
+                    themeBorder = 'border-emerald-500/40 hover:border-emerald-500/80 bg-emerald-950/20';
+                    badgeBg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                    typeLabel = 'EXCEL';
+                    iconComp = <FileSpreadsheet className="w-5 h-5 text-emerald-400" />;
+                  } else if (isPpt) {
+                    themeBorder = 'border-amber-500/30 hover:border-amber-500/70';
+                    badgeBg = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                    typeLabel = 'POWERPOINT';
+                    iconComp = <FileText className="w-5 h-5 text-amber-400" />;
+                  }
 
-                    // Remaining days before auto delete
-                    const now = Date.now();
-                    const expireMs = file.expiresAt
-                      ? new Date(file.expiresAt).getTime()
-                      : new Date(file.uploadedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
-                    const diffDays = Math.max(0, Math.ceil((expireMs - now) / (24 * 60 * 60 * 1000)));
+                  // Auto delete diff calculation
+                  const now = Date.now();
+                  const expireMs = file.expiresAt
+                    ? new Date(file.expiresAt).getTime()
+                    : new Date(file.uploadedAt).getTime() + 15 * 24 * 60 * 60 * 1000;
+                  const diffDays = Math.max(0, Math.ceil((expireMs - now) / (24 * 60 * 60 * 1000)));
 
-                    return (
-                      <div
-                        key={file.id}
-                        onClick={() => setSelectedPreviewFile(file)}
-                        className={`bg-[#141c2c] border-2 ${themeBorder} rounded-3xl p-4 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-3 group hover:-translate-y-0.5 relative overflow-hidden`}
-                      >
-                        {/* AUTOMATIC VISUAL PREVIEW THUMBNAIL BOX */}
-                        <div className="w-full h-36 bg-[#0a0f1a] rounded-2xl border border-[#24334b] flex flex-col justify-between p-3 relative overflow-hidden group-hover:border-blue-500/40 transition-colors">
-                          <div className="flex items-center justify-between">
-                            <span
-                              className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${badgeBg}`}
-                            >
-                              {typeLabel}
-                            </span>
-                            <span className="text-[10px] font-mono text-slate-400 bg-[#141c2c] px-2 py-0.5 rounded-md border border-[#24334b]">
-                              {file.fileSizeFormatted}
-                            </span>
+                  return (
+                    <div
+                      key={file.id}
+                      onClick={() => {
+                        if (isSheet) {
+                          handleOpenSpreadsheetEditor(file);
+                        } else {
+                          setSelectedPreviewFile(file);
+                        }
+                      }}
+                      className={`bg-[#141c2c] border-2 ${themeBorder} rounded-3xl p-4 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between space-y-3 group hover:-translate-y-0.5 relative overflow-hidden`}
+                    >
+                      {/* AUTOMATIC VISUAL PREVIEW THUMBNAIL BOX */}
+                      <div className="w-full h-36 bg-[#0a0f1a] rounded-2xl border border-[#24334b] flex flex-col justify-between p-3 relative overflow-hidden group-hover:border-blue-500/40 transition-colors">
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${badgeBg}`}
+                          >
+                            {typeLabel}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400 bg-[#141c2c] px-2 py-0.5 rounded-md border border-[#24334b]">
+                            {file.fileSizeFormatted}
+                          </span>
+                        </div>
+
+                        {/* Visual Representation of Document Content Inside Thumbnail */}
+                        <div className="flex-1 flex flex-col justify-center items-center py-2 space-y-1 text-center">
+                          <div className="p-2 rounded-xl bg-[#141c2c] border border-[#24334b] shadow-inner group-hover:scale-110 transition-transform">
+                            {iconComp}
                           </div>
-
-                          {/* Visual Representation of Document Content Inside Thumbnail */}
-                          <div className="flex-1 flex flex-col justify-center items-center py-2 space-y-1.5 text-center">
-                            <div className="p-2 rounded-xl bg-[#141c2c] border border-[#24334b] shadow-inner group-hover:scale-110 transition-transform">
-                              {iconComp}
-                            </div>
-                            <div className="text-xs font-bold text-slate-200 line-clamp-1 px-2 font-sans">
-                              {file.title}
-                            </div>
-                            <div className="text-[10px] font-mono text-slate-500 truncate max-w-[180px]">
-                              {file.fileName}
-                            </div>
+                          <div className="text-xs font-bold text-slate-200 line-clamp-1 px-2 font-sans">
+                            {file.title}
                           </div>
+                          <div className="text-[10px] font-mono text-slate-500 truncate max-w-[200px]">
+                            {file.fileName}
+                          </div>
+                        </div>
 
-                          {/* Quick Click-to-View Overlay Hint */}
-                          <div className="flex items-center justify-between pt-1 border-t border-[#1c273a] text-[10px] font-mono text-slate-400">
+                        {/* Quick Click-to-View Overlay Hint */}
+                        <div className="flex items-center justify-between pt-1 border-t border-[#1c273a] text-[10px] font-mono text-slate-400">
+                          {isSheet ? (
+                            <span className="flex items-center space-x-1 text-emerald-400 font-bold group-hover:text-emerald-300">
+                              <Edit2 className="w-3 h-3" />
+                              <span>Click to Edit Spreadsheet</span>
+                            </span>
+                          ) : (
                             <span className="flex items-center space-x-1 text-blue-400 font-bold group-hover:text-blue-300">
                               <Eye className="w-3 h-3" />
                               <span>Click to Preview</span>
                             </span>
-                            <span className="text-slate-500">{file.uploadedAt ? file.uploadedAt.substring(0, 10) : ''}</span>
-                          </div>
+                          )}
+                          <span className="text-slate-500">{file.uploadedAt ? file.uploadedAt.substring(0, 10) : ''}</span>
+                        </div>
+                      </div>
+
+                      {/* File Details & Badges */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-start justify-between gap-1">
+                          <h4 className="font-bold text-xs sm:text-sm text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
+                            {file.title}
+                          </h4>
                         </div>
 
-                        {/* File Details & Auto-Delete Timer */}
-                        <div className="space-y-1">
-                          <div className="flex items-start justify-between gap-1">
-                            <h4 className="font-bold text-xs sm:text-sm text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
-                              {file.title}
-                            </h4>
+                        {/* SF 2 Grade Level & Section Badge */}
+                        {(file.gradeLevel || file.section) && (
+                          <div className="flex items-center space-x-1.5">
+                            <span className="text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-md">
+                              🎓 {file.gradeLevel || 'Grade'} - {file.section || 'General'}
+                            </span>
                           </div>
+                        )}
 
+                        {/* Master Teacher Comment Indicator for Faculty */}
+                        {(file.masterTeacherComment || (file.masterTeacherComments && file.masterTeacherComments.length > 0)) && (
+                          <div className="bg-indigo-950/70 border border-indigo-500/40 rounded-xl p-2 space-y-1">
+                            <div className="flex items-center space-x-1.5 text-indigo-300 font-bold text-[10px] font-mono">
+                              <Award className="w-3 h-3 text-amber-400 shrink-0" />
+                              <span>Master Teacher Feedback Attached</span>
+                            </div>
+                            <p className="text-[11px] text-slate-200 line-clamp-1 italic font-sans pl-1">
+                              "{file.masterTeacherComment || file.masterTeacherComments?.[0]?.comment}"
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Author info for school permanent folders */}
+                        {isPermanentActive ? (
+                          <div className="text-[10px] font-mono text-slate-400 flex items-center space-x-1 pt-0.5">
+                            <User className="w-3 h-3 text-slate-400 shrink-0" />
+                            <span className="truncate">Uploaded by: {file.facultyName || 'School Faculty'}</span>
+                          </div>
+                        ) : (
                           <div className="flex items-center space-x-1.5 text-[11px] font-mono text-amber-300/90 pt-0.5">
                             <Clock className="w-3 h-3 shrink-0 text-amber-400" />
                             <span>Auto-deletes in {diffDays} {diffDays === 1 ? 'day' : 'days'}</span>
                           </div>
-                        </div>
+                        )}
+                      </div>
 
-                        {/* Card Footer Actions */}
-                        <div
-                          className="pt-2 border-t border-[#24334b] flex items-center justify-between text-xs font-mono"
-                          onClick={(e) => e.stopPropagation()}
-                        >
+                      {/* Card Footer Actions */}
+                      <div
+                        className="pt-2 border-t border-[#24334b] flex items-center justify-between text-xs font-mono"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {isSheet ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSpreadsheetEditor(file)}
+                            className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center space-x-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1 rounded-lg transition-all border border-emerald-500/30"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Edit in App</span>
+                          </button>
+                        ) : (
                           <button
                             type="button"
                             onClick={() => setSelectedPreviewFile(file)}
@@ -868,36 +1070,36 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                             <Eye className="w-3.5 h-3.5" />
                             <span>Preview</span>
                           </button>
+                        )}
 
-                          <div className="flex items-center space-x-1">
-                            <button
-                              type="button"
-                              onClick={(e) => handleDirectDownload(file, e)}
-                              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
-                              title="Download document"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </button>
+                        <div className="flex items-center space-x-1">
+                          <button
+                            type="button"
+                            onClick={(e) => handleDirectDownload(file, e)}
+                            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#1c273a] rounded-lg transition-all"
+                            title="Download file"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
 
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setFileToDelete({ id: file.id, title: file.title, fileName: file.fileName })
-                              }
-                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
-                              title="Delete file"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFileToDelete({ id: file.id, title: file.title, fileName: file.fileName })
+                            }
+                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-all"
+                            title="Delete file"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         /* FOLDERS OVERVIEW LIST & GRID */
@@ -922,7 +1124,9 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 className="bg-[#0d1524] border border-[#24334b] rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer"
               >
                 <option value="all">All Categories ({myFolders.length})</option>
-                {CATEGORY_OPTIONS.map((cat) => (
+                <option value="DLL">DLL (Daily Lesson Log)</option>
+                <option value="TOS&TQ">TOS&TQ (Table of Specifications & Exam)</option>
+                {CATEGORY_OPTIONS.filter((c) => c !== 'DLL' && c !== 'TOS&TQ').map((cat) => (
                   <option key={cat} value={cat}>
                     {cat}
                   </option>
@@ -1018,9 +1222,14 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                           <span>Official Central Folder</span>
                         </span>
 
-                        <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-400 group-hover:text-blue-300 group-hover:translate-x-1 transition-transform">
-                          <span>Open Folder</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 px-1.5 py-0.5 rounded font-mono font-medium">
+                            Firebase Storage • 2MB Max
+                          </span>
+                          <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-400 group-hover:text-blue-300 group-hover:translate-x-1 transition-transform">
+                            <span>Open Folder</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1042,7 +1251,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     Personal Faculty Folders ({myFolders.length})
                   </h2>
                   <p className="text-[11px] text-slate-400 font-mono">
-                    Unique Firebase file storage for DLL, TOS, TQ, and instructional materials (Max 2MB per document, 1-week auto-delete).
+                    Unique Firebase file storage for DLL, TOS, TQ, and instructional materials (PDF only, Max 2MB per document, 15-day auto-delete).
                   </p>
                 </div>
               </div>
@@ -1203,37 +1412,137 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
             <form onSubmit={handleSaveFolder} className="flex-1 min-h-0 flex flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6 space-y-4 text-xs font-mono scrollbar-thin scrollbar-thumb-slate-700">
-                {/* Folder Name */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Folder Name / Subject Title *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., Grade 11 21st Century Lit DLL or Q1 TOS & Exam Bank"
-                    value={folderName}
-                    onChange={(e) => setFolderName(e.target.value)}
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
-                  />
+                {/* 1. FIRST OPTION: FOLDER CATEGORY (options: "DLL" or "TOS&TQ") */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-200 uppercase tracking-wider block flex items-center space-x-1.5">
+                      <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">1</span>
+                      <span>Folder Category *</span>
+                    </label>
+                    <span className="text-[10px] text-blue-400 font-mono">Options: DLL or TOS&TQ</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setFolderCategory('DLL')}
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        folderCategory === 'DLL'
+                          ? 'bg-blue-600/25 border-blue-500 text-white ring-2 ring-blue-500/50 shadow-md'
+                          : 'bg-[#0d1524] border-[#24334b] text-slate-400 hover:text-white hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold font-mono tracking-wide">DLL</span>
+                        {folderCategory === 'DLL' && (
+                          <div className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-sans mt-1">Daily Lesson Log</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFolderCategory('TOS&TQ')}
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        folderCategory === 'TOS&TQ'
+                          ? 'bg-indigo-600/25 border-indigo-500 text-white ring-2 ring-indigo-500/50 shadow-md'
+                          : 'bg-[#0d1524] border-[#24334b] text-slate-400 hover:text-white hover:border-slate-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold font-mono tracking-wide">TOS&TQ</span>
+                        {folderCategory === 'TOS&TQ' && (
+                          <div className="w-5 h-5 rounded-full bg-indigo-500 text-white flex items-center justify-center">
+                            <Check className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-sans mt-1">Table of Specs & Exam</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Category */}
+                {/* 2. NEXT OPTION: SUBJECT TITLE */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Folder Category
-                  </label>
-                  <select
-                    value={folderCategory}
-                    onChange={(e) => setFolderCategory(e.target.value)}
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer font-sans"
-                  >
-                    {CATEGORY_OPTIONS.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-200 uppercase tracking-wider block flex items-center space-x-1.5">
+                      <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">2</span>
+                      <span>Subject Title *</span>
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-mono">Type Subject</span>
+                  </div>
+                  <div className="relative">
+                    <BookOpen className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g., Mathematics, English, Science, General Mathematics..."
+                      value={subjectTitle}
+                      onChange={(e) => setSubjectTitle(e.target.value)}
+                      className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 transition-all font-sans"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. NEXT OPTION: GRADE LEVEL (options: 7, 8, 9, 10, 11, 12) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-200 uppercase tracking-wider block flex items-center space-x-1.5">
+                      <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">3</span>
+                      <span>Grade Level *</span>
+                    </label>
+                    <span className="text-[10px] text-emerald-400 font-mono">Select: 7 to 12</span>
+                  </div>
+
+                  <div className="grid grid-cols-6 gap-2">
+                    {GRADE_LEVEL_OPTIONS.map((g) => {
+                      const isSelected = gradeLevel === g;
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => setGradeLevel(g)}
+                          className={`py-2 px-1 rounded-xl border text-center transition-all cursor-pointer font-mono font-bold text-xs flex flex-col items-center justify-center ${
+                            isSelected
+                              ? 'bg-emerald-600 text-white border-emerald-500 ring-2 ring-emerald-500/50 shadow-md scale-105'
+                              : 'bg-[#0d1524] border-[#24334b] text-slate-400 hover:text-white hover:border-slate-600'
+                          }`}
+                        >
+                          <span className="text-[10px] uppercase font-sans opacity-70">Grade</span>
+                          <span className="text-sm font-extrabold">{g}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 4. AUTOMATICALLY CREATED FOLDER NAME (FolderCategory + SubjectTitle + Grade Level) */}
+                <div className="bg-[#0b121e] border-2 border-blue-500/40 rounded-2xl p-4 space-y-2 shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-300 font-bold flex items-center space-x-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Automatically Created Folder Name</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-md font-bold">
+                      Format: Category + Subject + Grade
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2.5 bg-[#090e18] border border-[#24334b] rounded-xl px-3.5 py-2.5">
+                    <Folder className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span className="text-sm font-bold font-mono text-white tracking-wide truncate">
+                      {subjectTitle.trim()
+                        ? `${folderCategory} ${subjectTitle.trim()} ${gradeLevel}`
+                        : `${folderCategory} [Type Subject Title Above] ${gradeLevel}`}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] font-sans text-slate-400 leading-normal">
+                    The folder will be saved directly to your workspace with this automatically structured name.
+                  </p>
                 </div>
 
                 {/* Description */}
@@ -1294,7 +1603,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         </div>
       )}
 
-      {/* UPLOAD FILE MODAL (MAX 2MB, PDF/DOCX/DOC/PPTX/XLSX) - SMOOTHLY SCROLLABLE DIALOG */}
+      {/* UPLOAD FILE MODAL (MAX 2MB, PDF/XLS/XLSX) - SMOOTHLY SCROLLABLE DIALOG */}
       {isAddFileModalOpen && activeFolder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm animate-fadeIn overflow-y-auto">
           <div className="bg-[#111927] rounded-3xl border border-[#24334b] shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden my-auto animate-scaleUp text-slate-100">
@@ -1309,7 +1618,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     Upload to "{activeFolder.name}"
                   </h3>
                   <p className="text-xs text-slate-400 font-mono">
-                    Unique Firebase File Storage • Max 2MB Limit
+                    Firebase Cloud Storage • Max 2MB Limit • Direct App Editing
                   </p>
                 </div>
               </div>
@@ -1334,7 +1643,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   </div>
                 )}
 
-                {/* Document Title */}
+                {/* Standard Document Title */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
                     Document Title *
@@ -1342,7 +1651,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   <input
                     type="text"
                     required
-                    placeholder="e.g., Week 1 DLL - Introduction to Literature"
+                    placeholder="e.g., Q1 Learner Portfolio or School Form Report"
                     value={fileTitle}
                     onChange={(e) => setFileTitle(e.target.value)}
                     className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
@@ -1352,14 +1661,22 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 {/* File Picker with 2MB validation and drag & drop */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block flex items-center justify-between">
-                    <span>Select File (PDF, DOCX, DOC, PPTX, XLSX) *</span>
-                    <span className="text-emerald-400 font-bold">Max 2MB</span>
+                    <span>
+                      {isPermanentActive
+                        ? 'Select File (.xlsx, .xls, .pdf, .docx, .doc) *'
+                        : 'Select PDF Document (.pdf only) *'}
+                    </span>
+                    <span className="text-emerald-400 font-bold">Strict 2MB Limit</span>
                   </label>
-                  <div className="border-2 border-dashed border-[#24334b] hover:border-blue-500/60 rounded-2xl p-5 text-center bg-[#0d1524] transition-all relative">
+                  <div className="border-2 border-dashed border-[#24334b] hover:border-emerald-500/60 rounded-2xl p-5 text-center bg-[#0d1524] transition-all relative">
                     <input
                       type="file"
                       required
-                      accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls"
+                      accept={
+                        isPermanentActive
+                          ? '.xlsx,.xls,.pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel'
+                          : '.pdf,application/pdf'
+                      }
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
                           handleFileSelection(e.target.files[0]);
@@ -1368,25 +1685,29 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                       className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                     />
                     <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
-                      <div className="p-2.5 bg-blue-500/15 rounded-xl text-blue-400 border border-blue-500/30">
+                      <div className="p-2.5 bg-emerald-500/15 rounded-xl text-emerald-400 border border-emerald-500/30">
                         <Upload className="w-5 h-5" />
                       </div>
                       {attachedFile ? (
                         <div className="space-y-1">
                           <p className="font-bold text-emerald-400 text-xs">
-                            ✓ Selected: {attachedFile.name}
+                            ✓ Selected File: {attachedFile.name}
                           </p>
                           <p className="text-[10px] text-slate-400">
-                            Size: {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB • Ready to upload
+                            Size: {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB • Strictly under 2MB limit
                           </p>
                         </div>
                       ) : (
                         <div className="space-y-1">
                           <p className="text-slate-300 font-bold text-xs">
-                            Click to select or drag and drop document
+                            {isPermanentActive
+                              ? 'Click to select or drag and drop spreadsheet / document'
+                              : 'Click to select or drag and drop PDF document'}
                           </p>
                           <p className="text-[10px] text-slate-500">
-                            Supports PDF, DOCX, DOC, PPTX, XLSX up to 2MB
+                            {isPermanentActive
+                              ? 'Allowed: .xlsx, .xls, .pdf, .docx, .doc • Maximum size 2.0 MB'
+                              : 'Allowed: PDF (.pdf) only • Maximum size 2.0 MB'}
                           </p>
                         </div>
                       )}
@@ -1394,10 +1715,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   </div>
                 </div>
 
-                {/* Category */}
+                {/* Material Category */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Material Classification
+                    Classification
                   </label>
                   <select
                     value={fileCategory}
@@ -1415,22 +1736,29 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 {/* Description */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Notes / Competencies Covered (Optional)
+                    Notes / Remarks (Optional)
                   </label>
                   <textarea
-                    rows={3}
-                    placeholder="Optional notes or lesson competencies..."
+                    rows={2}
+                    placeholder="Optional notes or remarks regarding this upload..."
                     value={fileDescription}
                     onChange={(e) => setFileDescription(e.target.value)}
                     className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
                   />
                 </div>
 
-                {/* 1-Week Notice in Modal */}
-                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] text-amber-300/90 flex items-center space-x-2">
-                  <Clock className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Notice: Document will be automatically deleted after 1 week (7 days).</span>
-                </div>
+                {/* Storage & Expiration Information Notice */}
+                {isPermanentActive ? (
+                  <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-[11px] text-indigo-300/90 flex items-center space-x-2">
+                    <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span>Permanent School Repository: Files uploaded here remain permanently in Firebase and do not auto-delete.</span>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] text-amber-300/90 flex items-center space-x-2">
+                    <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Personal Workspace Retention: Document will be automatically cleaned up after 15 days.</span>
+                  </div>
+                )}
               </div>
 
               {/* Fixed Action Footer */}
@@ -1438,10 +1766,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 <div className="text-[11px] text-slate-400 font-mono">
                   {attachedFile ? (
                     <span className="text-emerald-400 font-bold">
-                      {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB / 2 MB Limit
+                      {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB / 2.0 MB Max
                     </span>
                   ) : (
-                    <span>Max file size: 2.0 MB</span>
+                    <span>Max limit: 2.0 MB • Firebase Direct Storage</span>
                   )}
                 </div>
 
@@ -1466,7 +1794,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     ) : (
                       <>
                         <Upload className="w-4 h-4" />
-                        <span>Upload Document</span>
+                        <span>Upload to Firebase</span>
                       </>
                     )}
                   </button>
@@ -1565,7 +1893,30 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
           showToast('Document deleted.');
         }}
         canDelete={true}
+        currentUser={currentUser}
+        onCommentSaved={(updated) => {
+          setSelectedPreviewFile(updated);
+        }}
+        onOpenSpreadsheetEditor={(file, dataUrl) => {
+          setSelectedPreviewFile(null);
+          setEditingSpreadsheetFile(file);
+          setEditingSpreadsheetDataUrl(dataUrl || file.fileData || '');
+        }}
       />
+
+      {/* FULL IN-APP GOOGLE DOCS / SHEETS SPREADSHEET EDITOR */}
+      {editingSpreadsheetFile && (
+        <GoogleDocsSpreadsheetEditor
+          file={editingSpreadsheetFile}
+          fileDataUrl={editingSpreadsheetDataUrl || ''}
+          onClose={() => {
+            setEditingSpreadsheetFile(null);
+            setEditingSpreadsheetDataUrl(null);
+          }}
+          onSaveFile={handleSaveSpreadsheet}
+          readOnly={false}
+        />
+      )}
     </div>
   );
 };

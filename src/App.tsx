@@ -52,6 +52,7 @@ import {
   saveFacultyFileToFirestore,
   deleteFacultyFileFromFirestore,
   getStoredFacultyFiles,
+  purgeNonPdfFacultyFiles,
   seedInitialAdminIfEmpty,
   subscribeSchoolPermanentFolders,
   getStoredSchoolPermanentFolders,
@@ -137,44 +138,49 @@ export function App() {
     return () => unsub();
   }, []);
 
-  // Subscribe to Google Drive Folders in Firebase
+  // Subscribe to Google Drive Folders in Firebase (only when logged in)
   useEffect(() => {
+    if (!currentUser) return;
     seedInitialAdminIfEmpty();
     const unsub = subscribeDriveFolders((list) => {
       setDriveFolders(list || []);
     });
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Subscribe to Faculty Personal Folders in Firebase
+  // Subscribe to Faculty Personal Folders in Firebase (only when logged in)
   useEffect(() => {
+    if (!currentUser) return;
     const unsub = subscribeFacultyFolders((list) => {
       setFacultyFolders(list || []);
     });
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // Subscribe to Faculty Personal Files in Firebase
+  // Subscribe to Faculty Personal Files in Firebase (only when logged in)
   useEffect(() => {
+    if (!currentUser) return;
+    purgeNonPdfFacultyFiles();
     const unsub = subscribeFacultyFiles((list) => {
       setFacultyFiles(list || []);
     });
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
-  // School Permanent Folders (SCHOOL FORMS, SCHOOL DOCUMENTS & Coordinator Folders)
+  // School Permanent Folders (only when logged in)
   const [schoolPermanentFolders, setSchoolPermanentFolders] = useState<SchoolPermanentFolder[]>(() => {
     return getStoredSchoolPermanentFolders();
   });
 
   useEffect(() => {
+    if (!currentUser) return;
     const unsub = subscribeSchoolPermanentFolders((list) => {
       if (list && list.length > 0) {
         setSchoolPermanentFolders(list);
       }
     });
     return () => unsub();
-  }, []);
+  }, [currentUser]);
 
   const handleUpdateSchoolPermanentFolder = async (
     id: string,
@@ -507,7 +513,7 @@ export function App() {
       ...fileData,
       id: `ffile-${Date.now()}`,
       uploadedAt: today,
-      expiresAt: fileData.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: fileData.expiresAt || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
     };
     setFacultyFiles((prev) => [newFile, ...prev]);
     saveFacultyFileToFirestore(newFile);

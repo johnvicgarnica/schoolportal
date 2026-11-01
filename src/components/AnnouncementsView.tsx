@@ -812,17 +812,17 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
   return (
     <div className="space-y-6 pb-16 w-full font-sans">
       {/* Header Banner */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="space-y-1.5 relative z-10">
+      <div className="bg-white px-4 py-3 sm:px-5 sm:py-3.5 rounded-2xl border border-slate-200 shadow-xs relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div className="space-y-0.5 relative z-10">
           <div className="flex items-center space-x-2.5">
-            <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-600 shadow-2xs">
+            <div className="p-2 bg-blue-50 border border-blue-200 rounded-xl text-blue-600 shadow-2xs shrink-0">
               <Megaphone className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl font-bold font-mono text-slate-900 tracking-tight">
+              <h1 className="text-base sm:text-lg font-bold font-mono text-slate-900 tracking-tight">
                 Important Announcements
               </h1>
-              <p className="text-xs text-slate-500 font-medium">
+              <p className="text-[11px] sm:text-xs text-slate-500 font-medium">
                 San Vicente National High School • Directives & Bulletins
               </p>
             </div>
@@ -830,7 +830,7 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
         </div>
 
         {/* Header Banner Right Actions / Count Indicator */}
-        <div className="flex items-center space-x-3 w-full md:w-auto justify-between md:justify-end relative z-10">
+        <div className="flex items-center space-x-2 w-full md:w-auto justify-between md:justify-end relative z-10 shrink-0">
           {isAdmin && onGoToAdminDashboard ? (
             <button
               onClick={onGoToAdminDashboard}
@@ -1153,8 +1153,8 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {facultyRequests.map((req) => (
-                          <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                        {facultyRequests.map((req, idx) => (
+                          <tr key={`${req.id || 'faculty-req'}-${req.email}-${idx}`} className="hover:bg-slate-50 transition-colors">
                             <td className="p-3">
                               <div className="font-bold text-slate-900 flex items-center space-x-1.5">
                                 <User className="w-3.5 h-3.5 text-amber-600" />
@@ -1247,8 +1247,8 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {adminRequests.map((req) => (
-                          <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                        {adminRequests.map((req, idx) => (
+                          <tr key={`${req.id || 'admin-req'}-${req.email}-${idx}`} className="hover:bg-slate-50 transition-colors">
                             <td className="p-3">
                               <div className="font-bold text-slate-900 flex items-center space-x-1.5">
                                 <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
@@ -1636,8 +1636,8 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                             className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 font-mono"
                           >
                             <option value="">-- Select or type faculty email --</option>
-                            {facultyList.map((f) => (
-                              <option key={f.id} value={f.email}>
+                            {facultyList.map((f, idx) => (
+                              <option key={`${f.id || 'fac'}-${f.email}-${idx}`} value={f.email}>
                                 {f.name} ({f.email})
                               </option>
                             ))}
@@ -1801,7 +1801,7 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                             }
                             return true;
                           })
-                          .map((f) => {
+                          .map((f, idx) => {
                           const emailKey = f.email.toLowerCase();
                           const customPass = customFacultyPasswords[emailKey];
                           const isCustom = Boolean(customPass);
@@ -1809,7 +1809,7 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                           const roleValue = f.advisoryRole || 'Non-Adviser';
 
                           return (
-                            <tr key={f.id} className="hover:bg-slate-50 transition-colors">
+                            <tr key={`${f.id || 'faculty'}-${emailKey}-${idx}`} className="hover:bg-slate-50 transition-colors">
                               <td className="p-3 font-bold text-slate-900">{f.name}</td>
 
                               <td className="p-3 text-blue-600 font-bold">{f.email}</td>
@@ -1977,13 +1977,13 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {adminList.map((a) => {
+                      {adminList.map((a, idx) => {
                         const emailKey = a.email.toLowerCase();
                         const isMaster = emailKey === masterAdminEmail.toLowerCase() || emailKey === 'johnvic.garnica@deped.gov.ph';
                         const customPass = adminPasswords[emailKey];
 
                         return (
-                          <tr key={a.id} className="hover:bg-slate-50 transition-colors">
+                          <tr key={`${a.id || 'admin'}-${emailKey}-${idx}`} className="hover:bg-slate-50 transition-colors">
                             <td className="p-3">
                               <div className="font-bold text-slate-900 flex items-center space-x-1.5">
                                 <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
