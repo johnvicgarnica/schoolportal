@@ -100,6 +100,21 @@ export interface FacultyPersonalFile {
   masterTeacherCommentedAt?: string;
   masterTeacherCommentedBy?: string;
   masterTeacherComments?: MasterTeacherComment[];
+  week?: number;
+  specifiedWeek?: number;
+}
+
+export interface DllReviewConfirmation {
+  id?: string;
+  facultyEmail: string;
+  facultyName: string;
+  weekIndex: number; // 0-indexed week (0 for Week 1)
+  termId: string;
+  confirmedStatus: 'checked' | 'with-comments' | 'incomplete';
+  feedback?: string;
+  reviewedBy: string;
+  reviewedByDesignation?: string;
+  reviewedAt: string;
 }
 
 export interface MasterTeacherComment {

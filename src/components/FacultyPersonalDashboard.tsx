@@ -10,6 +10,12 @@ import {
   getStoredFaculty,
   saveFacultyFileToFirestore,
   getFacultyFileData,
+  getStoredTermWeeksConfig,
+  getStoredActiveTermId,
+  subscribeTermWeeksConfig,
+  subscribeActiveTermId,
+  TermWeeksConfig,
+  syncFacultyDllSubmissionReportOnUpload,
 } from '../lib/firebase';
 import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
 import { GoogleDocsSpreadsheetEditor } from './GoogleDocsSpreadsheetEditor';
@@ -221,6 +227,60 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     return activePersonalFolder;
   }, [activePermanentFolder, activePersonalFolder]);
 
+  // Check if current active folder is a DLL folder
+  const isDllFolder = useMemo(() => {
+    if (!activeFolder) return false;
+    const cat = (activeFolder.category || '').toLowerCase();
+    const name = (activeFolder.name || '').toLowerCase();
+    return cat === 'dll' || cat.includes('daily lesson log') || name.startsWith('dll') || name.includes('dll');
+  }, [activeFolder]);
+
+  // Current academic term and weeks count for DLL submissions
+  const [activeTermId, setActiveTermId] = useState<string>(() => getStoredActiveTermId());
+  const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => getStoredTermWeeksConfig());
+  const [specifiedWeek, setSpecifiedWeek] = useState<number>(1);
+
+  useEffect(() => {
+    const unsubTerm = subscribeActiveTermId((term) => setActiveTermId(term));
+    const unsubWeeks = subscribeTermWeeksConfig((cfg) => setTermWeeksConfig(cfg));
+    return () => {
+      unsubTerm();
+      unsubWeeks();
+    };
+  }, []);
+
+  const currentTermWeeksCount = useMemo(() => {
+    const count = (termWeeksConfig as any)?.[activeTermId];
+    return typeof count === 'number' && count >= 1 && count <= 12 ? count : 11;
+  }, [termWeeksConfig, activeTermId]);
+
+  // Auto-renamed Document Title for DLL Folders in format: Subject+Grade Level+Week
+  const autoDllDocTitle = useMemo(() => {
+    if (!activeFolder || !isDllFolder) return '';
+    let dllSub = activeFolder.subjectTitle || '';
+    let dllGr = activeFolder.gradeLevel || '';
+
+    if (!dllSub || !dllGr) {
+      const parts = (activeFolder.name || '').trim().split(' ');
+      if (parts.length >= 3 && (parts[0] === 'DLL' || parts[0] === 'TOS&TQ')) {
+        const lastPart = parts[parts.length - 1];
+        if (GRADE_LEVEL_OPTIONS.includes(lastPart as any)) {
+          if (!dllGr) dllGr = lastPart;
+          if (!dllSub) dllSub = parts.slice(1, -1).join(' ');
+        } else {
+          if (!dllSub) dllSub = parts.slice(1).join(' ');
+        }
+      } else if (parts.length === 2 && parts[0] === 'DLL') {
+        if (!dllSub) dllSub = parts[1];
+      } else {
+        if (!dllSub) dllSub = activeFolder.name;
+      }
+    }
+
+    const titleCore = `${dllSub} ${dllGr}`.replace(/\s+/g, ' ').trim() || activeFolder.name;
+    return `${titleCore} Week ${specifiedWeek}`.replace(/\s+/g, ' ').trim();
+  }, [activeFolder, isDllFolder, specifiedWeek]);
+
   // Search and Filter State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
@@ -429,9 +489,46 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   // Open File Upload Modal
   const handleOpenAddFileModal = (folderId: string) => {
     setActiveFolderId(folderId);
-    setFileTitle('');
-    setFileCategory(activeFolder?.category || CATEGORY_OPTIONS[0]);
+    const targetFolder =
+      livePermanentFolders.find((f) => f.id === folderId) ||
+      myFolders.find((f) => f.id === folderId) ||
+      activeFolder;
+
+    const cat = (targetFolder?.category || '').toLowerCase();
+    const name = (targetFolder?.name || '').toLowerCase();
+    const isTargetDll = cat === 'dll' || cat.includes('daily lesson log') || name.startsWith('dll') || name.includes('dll');
+
+    if (isTargetDll && targetFolder) {
+      const dllCat = targetFolder.category || 'DLL';
+      let dllSub = targetFolder.subjectTitle || '';
+      let dllGr = targetFolder.gradeLevel || '';
+
+      if (!dllSub || !dllGr) {
+        const parts = (targetFolder.name || '').trim().split(' ');
+        if (parts.length >= 3 && (parts[0] === 'DLL' || parts[0] === 'TOS&TQ')) {
+          const lastPart = parts[parts.length - 1];
+          if (GRADE_LEVEL_OPTIONS.includes(lastPart as any)) {
+            if (!dllGr) dllGr = lastPart;
+            if (!dllSub) dllSub = parts.slice(1, -1).join(' ');
+          } else {
+            if (!dllSub) dllSub = parts.slice(1).join(' ');
+          }
+        } else if (parts.length === 2 && parts[0] === 'DLL') {
+          if (!dllSub) dllSub = parts[1];
+        } else {
+          if (!dllSub) dllSub = targetFolder.name;
+        }
+      }
+
+      const titleCore = `${dllSub} ${dllGr}`.replace(/\s+/g, ' ').trim() || targetFolder.name;
+      const autoTitle = `${titleCore} Week 1`.replace(/\s+/g, ' ').trim();
+      setFileTitle(autoTitle);
+    } else {
+      setFileTitle('');
+    }
+    setFileCategory(targetFolder?.category || CATEGORY_OPTIONS[0]);
     setFileDescription('');
+    setSpecifiedWeek(1);
     setAttachedFile(null);
     setUploadError(null);
     setIsAddFileModalOpen(true);
@@ -499,7 +596,9 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     }
 
     setAttachedFile(selectedFile);
-    if (!fileTitle.trim()) {
+    if (isDllFolder) {
+      setFileTitle(autoDllDocTitle);
+    } else if (!fileTitle.trim()) {
       setFileTitle(selectedFile.name.replace(/\.[^/.]+$/, ''));
     }
   };
@@ -512,7 +611,8 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       return;
     }
 
-    if (!fileTitle.trim()) {
+    const finalTitle = isDllFolder ? autoDllDocTitle : fileTitle.trim();
+    if (!finalTitle) {
       setUploadError('Please enter a document title.');
       return;
     }
@@ -533,7 +633,6 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
             : `${(fileSizeBytes / 1024).toFixed(0)} KB`;
         const ext = (attachedFile.name.split('.').pop() || 'pdf').toLowerCase();
 
-        const finalTitle = fileTitle.trim();
         const finalFileName = attachedFile.name;
 
         const isPermanent = activeFolderId === 'school-forms' || activeFolderId === 'school-documents';
@@ -542,7 +641,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
           ? undefined
           : new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
 
-        onAddFile({
+        const filePayload: Omit<FacultyPersonalFile, 'id' | 'uploadedAt'> = {
           folderId: activeFolderId,
           facultyEmail: currentUser.email,
           facultyName: currentUser.name,
@@ -554,14 +653,37 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
           category: fileCategory,
           expiresAt,
           fileData: fileDataUrl,
-          description: fileDescription.trim(),
-        });
+          description: isDllFolder ? `Week ${specifiedWeek}` : fileDescription.trim(),
+          week: isDllFolder ? specifiedWeek : undefined,
+          specifiedWeek: isDllFolder ? specifiedWeek : undefined,
+        };
+
+        onAddFile(filePayload);
+
+        // If uploading to a DLL folder, immediately evaluate and sync DLL submission status
+        if (isDllFolder) {
+          const tempFile: FacultyPersonalFile = {
+            ...filePayload,
+            id: `ffile-temp-${Date.now()}`,
+            uploadedAt: new Date().toISOString(),
+          };
+          syncFacultyDllSubmissionReportOnUpload(
+            currentUser.email,
+            [tempFile, ...facultyFiles],
+            facultyFolders,
+            activeTermId,
+            currentUser.name,
+            currentUser.department
+          ).catch((e) => console.warn('Background DLL submission report sync error:', e));
+        }
 
         setIsUploading(false);
         setIsAddFileModalOpen(false);
         showToast(
           isPermanent
             ? `File "${finalTitle}" successfully saved to School Firebase Repository!`
+            : isDllFolder
+            ? `DLL Document "${finalTitle}" recorded for Week ${specifiedWeek}! Submission report updated.`
             : `Document "${finalTitle}" uploaded to folder! Auto-deletes after 15 days.`
         );
       };
@@ -695,7 +817,6 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 type="button"
                 onClick={() => {
                   setActiveFolderId(null);
-                  setActiveSubfolderId(null);
                 }}
                 className="p-2.5 bg-[#172236] hover:bg-[#20304c] text-slate-200 rounded-xl transition-all flex items-center space-x-1.5 text-xs font-bold font-mono cursor-pointer border border-[#2d3e57]"
               >
@@ -1643,20 +1764,51 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   </div>
                 )}
 
-                {/* Standard Document Title */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Document Title *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., Q1 Learner Portfolio or School Form Report"
-                    value={fileTitle}
-                    onChange={(e) => setFileTitle(e.target.value)}
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
-                  />
-                </div>
+                {/* Document Title (Auto-renamed to "Subject+Grade Level+Week" & uneditable for DLL folders) */}
+                {isDllFolder ? (
+                  <div className="space-y-1.5 bg-[#090f1a] border-2 border-emerald-500/40 p-4 rounded-2xl shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider flex items-center space-x-1.5">
+                        <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Document Title (Auto-Renamed)</span>
+                      </label>
+                      <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-400/40 flex items-center space-x-1">
+                        <Lock className="w-2.5 h-2.5" />
+                        <span>Uneditable by Faculty</span>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-2 bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5">
+                      <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <input
+                        type="text"
+                        readOnly
+                        value={autoDllDocTitle}
+                        className="w-full bg-transparent text-xs text-emerald-200 font-mono font-bold focus:outline-none cursor-not-allowed select-all"
+                        title="Document title is auto-renamed to 'Subject+Grade Level+Week' and uneditable by faculty."
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-0.5">
+                      <span className="text-emerald-400 font-bold">Format: Subject+Grade Level+Week</span>
+                      <span className="text-slate-300 font-semibold">{autoDllDocTitle}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                      Document Title *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g., Q1 Learner Portfolio or School Form Report"
+                      value={fileTitle}
+                      onChange={(e) => setFileTitle(e.target.value)}
+                      className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
+                    />
+                  </div>
+                )}
 
                 {/* File Picker with 2MB validation and drag & drop */}
                 <div className="space-y-1.5">
@@ -1733,19 +1885,49 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   </select>
                 </div>
 
-                {/* Description */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Notes / Remarks (Optional)
-                  </label>
-                  <textarea
-                    rows={2}
-                    placeholder="Optional notes or remarks regarding this upload..."
-                    value={fileDescription}
-                    onChange={(e) => setFileDescription(e.target.value)}
-                    className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
-                  />
-                </div>
+                {/* Specify Week for DLL folders, or Notes / Remarks for other folders */}
+                {isDllFolder ? (
+                  <div className="space-y-2 bg-[#0a1120] border border-blue-500/40 p-3.5 rounded-2xl shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-blue-300 uppercase tracking-wider flex items-center space-x-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Specify Week</span>
+                      </label>
+                      <span className="text-[10px] font-mono font-bold text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full border border-blue-400/40">
+                        {activeTermId === 'term-1' ? '1st Term' : activeTermId === 'term-2' ? '2nd Term' : '3rd Term'} ({currentTermWeeksCount} Weeks)
+                      </span>
+                    </div>
+
+                    <select
+                      value={specifiedWeek}
+                      onChange={(e) => setSpecifiedWeek(Number(e.target.value))}
+                      className="w-full bg-[#111b2e] border border-blue-500/50 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer font-sans font-bold"
+                    >
+                      {Array.from({ length: currentTermWeeksCount }, (_, i) => i + 1).map((w) => (
+                        <option key={w} value={w} className="bg-[#0d1524] text-white">
+                          Week {w}
+                        </option>
+                      ))}
+                    </select>
+
+                    <p className="text-[10px] text-slate-300 font-mono leading-relaxed">
+                      💡 When all your workspace DLL folders have an uploaded document for <strong>Week {specifiedWeek}</strong>, your status will be marked as <strong className="text-emerald-400">"Submitted"</strong> in the submission report. If one or more DLL folders are not uploaded, it will be marked <strong className="text-rose-400">"Incomplete"</strong>.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                      Notes / Remarks (Optional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Optional notes or remarks regarding this upload..."
+                      value={fileDescription}
+                      onChange={(e) => setFileDescription(e.target.value)}
+                      className="w-full bg-[#0d1524] border border-[#24334b] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-all font-sans"
+                    />
+                  </div>
+                )}
 
                 {/* Storage & Expiration Information Notice */}
                 {isPermanentActive ? (

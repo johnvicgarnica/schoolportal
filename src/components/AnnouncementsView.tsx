@@ -6,7 +6,6 @@ import {
   AnnouncementStatus,
   UserProfile,
 } from '../types';
-import { AdminOnlineUsersMonitor } from './AdminOnlineUsersMonitor';
 import {
   saveFacultyToFirestore,
   updateFacultyAdvisoryRoleInFirestore,
@@ -28,10 +27,6 @@ import {
   subscribeUserPasswords,
   saveSettingToFirestore,
   subscribeSettings,
-  UserPresence,
-  subscribeUserPresence,
-  isPresenceOnline,
-  setUserOffline,
   getStoredFaculty,
   getStoredAdmins,
   getStoredFacultyRequests,
@@ -110,20 +105,8 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
 
-  // Admin Sub-Section Tab ('announcements', 'passwords', or 'online-users')
-  const [adminSubTab, setAdminSubTab] = useState<'announcements' | 'passwords' | 'online-users'>('announcements');
-
-  // Real-time user presence & online logged-in users tracking (Master Admin)
-  const [presences, setPresences] = useState<UserPresence[]>([]);
-
-  useEffect(() => {
-    const unsubPresence = subscribeUserPresence((list) => {
-      setPresences(list || []);
-    });
-    return () => unsubPresence();
-  }, []);
-
-  const onlineUsersCount = presences.filter((p) => isPresenceOnline(p)).length;
+  // Admin Sub-Section Tab ('announcements' or 'passwords')
+  const [adminSubTab, setAdminSubTab] = useState<'announcements' | 'passwords'>('announcements');
 
   // Master Faculty Password State
   const [masterPassword, setMasterPassword] = useState<string>('shs304868');
@@ -909,24 +892,6 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                       Master Admin
                     </span>
                   )}
-                </button>
-              )}
-              {isMasterAdmin && (
-                <button
-                  type="button"
-                  onClick={() => setAdminSubTab('online-users')}
-                  className={`flex-1 sm:flex-none px-4 py-2 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
-                    adminSubTab === 'online-users'
-                      ? 'bg-teal-600 text-white shadow-2xs'
-                      : 'text-teal-800 hover:text-teal-950 hover:bg-teal-100/60'
-                  }`}
-                >
-                  <Activity className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Online Users</span>
-                  <span className="bg-emerald-500/20 text-emerald-800 border border-emerald-400/50 text-[10px] px-1.5 py-0.2 rounded-full font-bold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    {onlineUsersCount}
-                  </span>
                 </button>
               )}
             </div>
@@ -2037,20 +2002,6 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
             </div>
           )}
 
-          {/* SUB-TAB 3: MASTER ADMIN LIVE ONLINE USERS MONITOR */}
-          {adminSubTab === 'online-users' && isMasterAdmin && (
-            <div className="space-y-6">
-              <AdminOnlineUsersMonitor
-                currentUser={currentUser}
-                presences={presences}
-                facultyList={facultyList}
-                adminList={adminList}
-                onForceLogoutUser={async (targetEmail) => {
-                  await setUserOffline(targetEmail);
-                }}
-              />
-            </div>
-          )}
         </div>
       )}
 

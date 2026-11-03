@@ -33,7 +33,13 @@ import {
   getStoredClassAdviserSchoolForms,
   subscribeFacultyFolders,
   getStoredFacultyFolders,
+  subscribeFacultyFiles,
+  getStoredFacultyFiles,
+  confirmDllReviewStatusInFirestore,
+  getStoredFacultyConfirmedWeeks,
 } from '../lib/firebase';
+import { FacultyPersonalFile } from '../types';
+import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
 import {
   BarChart,
   Bar,
@@ -89,11 +95,13 @@ import {
   Info,
   GraduationCap,
   CheckCheck,
+  Bell,
 } from 'lucide-react';
 
 interface SubmissionReportViewProps {
   currentUser: UserProfile;
   facultyFolders?: FacultyFolder[];
+  facultyFiles?: FacultyPersonalFile[];
   initialCategory?: SubmissionCategoryTab;
 }
 
@@ -200,6 +208,7 @@ export const CATEGORIES: CategoryDefinition[] = [
 export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   currentUser,
   facultyFolders = [],
+  facultyFiles = [],
   initialCategory,
 }) => {
   // Check if current user has coordinator or administrator role
@@ -229,7 +238,13 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const isPrincipal =
     designationLower.includes('school principal') ||
     designationLower.includes('principal');
-  const isMasterTeacher = designationLower.includes('master teacher');
+  const isMasterTeacher =
+    designationLower.includes('master teacher') ||
+    (currentUser.role === 'Admin' && (
+      userEmailClean.includes('norma') ||
+      userEmailClean.includes('jabagat') ||
+      designationLower.includes('master teacher')
+    ));
   const canEditDllTosTq = isMasterAdmin || isPrincipal || isMasterTeacher;
 
   const isAdmin =
@@ -425,6 +440,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     return getStoredFacultyComments(getStoredActiveTermId(), 'dll');
   });
 
+  // Master Teacher DLL confirmed & approved weeks map
+  const [confirmedWeeks, setConfirmedWeeks] = useState<Record<string, Record<string, boolean>>>(() => {
+    return getStoredFacultyConfirmedWeeks(getStoredActiveTermId(), 'dll');
+  });
+
   // Admin Box Click Modal: allows admin to select 'Checked' (No Comments) vs 'With Comments'
   const [activeCellAction, setActiveCellAction] = useState<{
     facultyEmail: string;
@@ -462,16 +482,19 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     const cachedSub = getStoredFacultySubmissions(effectiveTermId, cat);
     const cachedStat = getStoredFacultyStatuses(effectiveTermId, cat);
     const cachedComm = getStoredFacultyComments(effectiveTermId, cat);
+    const cachedConf = getStoredFacultyConfirmedWeeks(effectiveTermId, cat);
 
     setSubmissions(cachedSub || {});
     setItemStatuses(cachedStat || {});
     setItemComments(cachedComm || {});
+    setConfirmedWeeks(cachedConf || {});
     setIsLoading(true);
 
-    const unsub = subscribeFacultySubmissions(effectiveTermId, cat, (subs, stats, comms) => {
+    const unsub = subscribeFacultySubmissions(effectiveTermId, cat, (subs, stats, comms, confs) => {
       setSubmissions(subs || {});
       if (stats) setItemStatuses(stats);
       if (comms) setItemComments(comms);
+      if (confs) setConfirmedWeeks(confs);
       setIsLoading(false);
     });
 
@@ -489,6 +512,166 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     });
     return () => unsub();
   }, []);
+
+  // Synchronized Faculty Files state to evaluate uploaded DLL files in real time
+  const [liveFacultyFiles, setLiveFacultyFiles] = useState<FacultyPersonalFile[]>(() => {
+    return facultyFiles && facultyFiles.length > 0 ? facultyFiles : getStoredFacultyFiles();
+  });
+
+  useEffect(() => {
+    if (facultyFiles && facultyFiles.length > 0) {
+      setLiveFacultyFiles(facultyFiles);
+    }
+  }, [facultyFiles]);
+
+  useEffect(() => {
+    const unsub = subscribeFacultyFiles((files) => {
+      setLiveFacultyFiles(files || []);
+    });
+    return () => unsub();
+  }, []);
+
+  // Master Teacher DLL Review Status Modal State
+  interface DllReviewModalData {
+    facultyEmail: string;
+    facultyName: string;
+    facultySurname: string;
+    department: string;
+    weekIndex: number;
+    weekNumber: number;
+    termId: string;
+    termName: string;
+    totalDllFolders: number;
+    dllFolders: FacultyFolder[];
+    uploadedFilesByFolder: Record<string, FacultyPersonalFile[]>;
+    allDllFilesForWeek: FacultyPersonalFile[];
+    currentStatus: ItemSubmissionStatus;
+    currentComment: string;
+    isFullySubmitted: boolean;
+  }
+
+  const [dllReviewModalData, setDllReviewModalData] = useState<DllReviewModalData | null>(null);
+  const [reviewStatusChoice, setReviewStatusChoice] = useState<'checked' | 'with-comments' | 'incomplete'>('checked');
+  const [reviewFeedback, setReviewFeedback] = useState<string>('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState<boolean>(false);
+  const [previewingFile, setPreviewingFile] = useState<FacultyPersonalFile | null>(null);
+
+  // Open the DLL Review Status modal for Master Teacher
+  const handleOpenDllReviewStatus = (
+    faculty: { email: string; name: string; surname: string; department: string },
+    weekIdx: number
+  ) => {
+    const cleanEmail = faculty.email.toLowerCase().trim();
+    const facultyDllFolders = liveFacultyFolders.filter(
+      (f) =>
+        (f.facultyEmail || '').toLowerCase().trim() === cleanEmail &&
+        (f.category === 'DLL' || (f.name && f.name.startsWith('DLL')) || f.category?.includes('DLL'))
+    );
+
+    const weekNum = weekIdx + 1;
+    const filesByFolder: Record<string, FacultyPersonalFile[]> = {};
+    const weekFiles: FacultyPersonalFile[] = [];
+
+    facultyDllFolders.forEach((folder) => {
+      const matched = liveFacultyFiles.filter(
+        (file) =>
+          file.folderId === folder.id &&
+          (file.week === weekNum ||
+            file.specifiedWeek === weekNum ||
+            file.description?.toLowerCase() === `week ${weekNum}` ||
+            file.title?.toLowerCase().includes(`week ${weekNum}`) ||
+            file.fileName?.toLowerCase().includes(`week${weekNum}`) ||
+            file.fileName?.toLowerCase().includes(`week_${weekNum}`) ||
+            file.fileName?.toLowerCase().includes(`week-${weekNum}`) ||
+            file.fileName?.toLowerCase().includes(`week ${weekNum}`))
+      );
+      filesByFolder[folder.id] = matched;
+      weekFiles.push(...matched);
+    });
+
+    const currentStatus = getItemStatus(faculty.email, weekIdx);
+    const currentComment = getItemComment(faculty.email, weekIdx);
+    const isFullySubmitted = facultyDllFolders.length > 0 && Object.values(filesByFolder).every((arr) => arr.length > 0);
+
+    const termObj = termsList.find((t) => t.id === selectedTermId);
+    const termDisplayName = termObj?.name || (selectedTermId === 'term-1' ? '1st Term' : selectedTermId === 'term-2' ? '2nd Term' : '3rd Term');
+
+    setDllReviewModalData({
+      facultyEmail: faculty.email,
+      facultyName: faculty.name,
+      facultySurname: faculty.surname,
+      department: faculty.department,
+      weekIndex: weekIdx,
+      weekNumber: weekNum,
+      termId: selectedTermId,
+      termName: termDisplayName,
+      totalDllFolders: facultyDllFolders.length,
+      dllFolders: facultyDllFolders,
+      uploadedFilesByFolder: filesByFolder,
+      allDllFilesForWeek: weekFiles,
+      currentStatus,
+      currentComment,
+      isFullySubmitted,
+    });
+
+    setReviewStatusChoice(currentStatus === 'unchecked' ? 'checked' : (currentStatus as any));
+    setReviewFeedback(currentComment || '');
+  };
+
+  // Confirm final DLL review status by Master Teacher
+  const handleConfirmDllReview = async () => {
+    if (!dllReviewModalData) return;
+    setIsSubmittingReview(true);
+    try {
+      await confirmDllReviewStatusInFirestore(
+        dllReviewModalData.termId,
+        dllReviewModalData.facultyEmail,
+        dllReviewModalData.weekIndex,
+        reviewStatusChoice,
+        reviewFeedback,
+        currentUser.name || 'Norma Jabagat',
+        currentUser.designation || 'Master Teacher'
+      );
+
+      const cleanEmail = dllReviewModalData.facultyEmail.toLowerCase().trim();
+      const currentWeeks = submissions[cleanEmail] ? [...submissions[cleanEmail]] : [];
+      while (currentWeeks.length <= dllReviewModalData.weekIndex) currentWeeks.push(false);
+      currentWeeks[dllReviewModalData.weekIndex] = reviewStatusChoice === 'checked';
+      setSubmissions((prev) => ({ ...prev, [cleanEmail]: currentWeeks }));
+
+      const currentStatuses = itemStatuses[cleanEmail] ? [...itemStatuses[cleanEmail]] : [];
+      while (currentStatuses.length <= dllReviewModalData.weekIndex) currentStatuses.push('unchecked');
+      currentStatuses[dllReviewModalData.weekIndex] = reviewStatusChoice;
+      setItemStatuses((prev) => ({ ...prev, [cleanEmail]: currentStatuses }));
+
+      const currentComments = itemComments[cleanEmail] ? { ...itemComments[cleanEmail] } : {};
+      currentComments[String(dllReviewModalData.weekIndex)] = reviewFeedback;
+      setItemComments((prev) => ({ ...prev, [cleanEmail]: currentComments }));
+
+      // Immediately mark this week as confirmed & approved so notification bell instantly turns into Green Check ✓
+      const isApproved = reviewStatusChoice === 'checked';
+      setConfirmedWeeks((prev) => {
+        const curFac = prev[cleanEmail] ? { ...prev[cleanEmail] } : {};
+        curFac[String(dllReviewModalData.weekIndex)] = isApproved;
+        return {
+          ...prev,
+          [cleanEmail]: curFac,
+        };
+      });
+
+      showToast(
+        isApproved
+          ? `⭐ DLL Approved & Verified! Notification bell changed to Green Check ✓ for ${dllReviewModalData.facultyName} (Week ${dllReviewModalData.weekNumber})`
+          : `⭐ DLL Review Status updated to ${reviewStatusChoice} for ${dllReviewModalData.facultyName} (Week ${dllReviewModalData.weekNumber})`
+      );
+      setDllReviewModalData(null);
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ Error confirming DLL review status');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
 
   const [isManualSyncing, setIsManualSyncing] = useState<boolean>(false);
 
@@ -3870,6 +4053,62 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                               <div className="text-[10px] text-slate-400 truncate font-mono">
                                 {faculty.email}
                               </div>
+                              {activeCategory === 'dll' && isMasterTeacher && completedCount > 0 && (() => {
+                                const cleanFacEmail = faculty.email.toLowerCase().trim();
+                                const facConf = confirmedWeeks[cleanFacEmail] || {};
+                                const pendingCount = visibleSlice.reduce((acc, isSub, idx) => {
+                                  if (!isSub) return acc;
+                                  const isAppr = Boolean(
+                                    facConf[String(idx)] ||
+                                    getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
+                                    getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
+                                    getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
+                                    getItemComment(faculty.email, idx)?.includes('[Confirmed by')
+                                  );
+                                  return isAppr ? acc : acc + 1;
+                                }, 0);
+
+                                if (pendingCount > 0) {
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const firstUnverified = visibleSlice.findIndex((isSub, idx) => {
+                                          if (!isSub) return false;
+                                          return !Boolean(
+                                            facConf[String(idx)] ||
+                                            getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
+                                            getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
+                                            getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
+                                            getItemComment(faculty.email, idx)?.includes('[Confirmed by')
+                                          );
+                                        });
+                                        handleOpenDllReviewStatus(faculty, firstUnverified >= 0 ? firstUnverified : 0);
+                                      }}
+                                      className="mt-1 px-2 py-0.5 bg-gradient-to-r from-amber-500/20 to-amber-600/30 hover:from-amber-500/30 hover:to-amber-600/40 border border-amber-400/40 rounded-lg text-amber-300 font-mono text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition-all shadow-2xs"
+                                      title="Open DLL Review Status to review pending submission"
+                                    >
+                                      <Bell className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
+                                      <span>Review DLL ({pendingCount} pending)</span>
+                                    </button>
+                                  );
+                                }
+
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const firstSubmitted = visibleSlice.findIndex(Boolean);
+                                      handleOpenDllReviewStatus(faculty, firstSubmitted >= 0 ? firstSubmitted : 0);
+                                    }}
+                                    className="mt-1 px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg text-emerald-300 font-mono text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition-all shadow-2xs"
+                                    title="All submissions approved and verified by Master Teacher"
+                                  >
+                                    <Check className="w-3 h-3 text-emerald-400 stroke-[3]" />
+                                    <span>Approved & Verified ({completedCount})</span>
+                                  </button>
+                                );
+                              })()}
                             </div>
                           </div>
                         </td>
@@ -3885,12 +4124,28 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                         {columnItems.map((col) => {
                           const itemStatus = getItemStatus(faculty.email, col.index);
                           const itemComment = getItemComment(faculty.email, col.index);
-                          const isCurrentlySaving = autoSavingItemKey === `${faculty.email.toLowerCase().trim()}_${col.index}`;
+                          const cleanFacultyEmail = faculty.email.toLowerCase().trim();
+                          const isCurrentlySaving = autoSavingItemKey === `${cleanFacultyEmail}_${col.index}`;
                           const isChecked = itemStatus === 'checked';
                           const isWithComments = itemStatus === 'with-comments';
                           const isIncomplete = itemStatus === 'incomplete';
                           const isLate = itemStatus === 'late';
                           const isTermStart = termGroups && col.index % 3 === 0;
+
+                          const facultyConfMap = confirmedWeeks[cleanFacultyEmail] || {};
+                          const isConfirmedApproved = Boolean(
+                            facultyConfMap[String(col.index)] ||
+                            itemComment?.includes('Verified and Approved') ||
+                            itemComment?.includes('Approved & Verified') ||
+                            itemComment?.includes('Approved and Verified') ||
+                            itemComment?.includes('[Confirmed by')
+                          );
+
+                          // In DLL Category for Master Teacher:
+                          // - If submitted ('checked') but not yet confirmed by Master Teacher: Render Notification Bell
+                          // - When Master Teacher confirms "Approved and Verified": Change Notification Bell to Green Check ✓
+                          const isDll = activeCategory === 'dll';
+                          const showDllNotificationBell = isDll && isMasterTeacher && isChecked && !isConfirmedApproved;
 
                           return (
                             <td
@@ -3901,14 +4156,22 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                             >
                               <button
                                 type="button"
-                                onClick={() => canEditDllTosTq && handleOpenCellAction(faculty, col)}
+                                onClick={() => {
+                                  if (isDll && isMasterTeacher && isChecked) {
+                                    handleOpenDllReviewStatus(faculty, col.index);
+                                  } else if (canEditDllTosTq) {
+                                    handleOpenCellAction(faculty, col);
+                                  }
+                                }}
                                 disabled={!canEditDllTosTq}
                                 aria-label={`Review ${col.fullLabel} for ${faculty.name}`}
                                 className={`rounded-lg border flex items-center justify-center mx-auto transition-all ${canEditDllTosTq ? 'cursor-pointer active:scale-90' : 'cursor-default'} relative ${
                                   isWeeklyCategory ? 'w-7 h-7' : 'w-7 h-7 sm:w-8 sm:h-7'
                                 } ${
                                   isChecked
-                                    ? 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600'
+                                    ? showDllNotificationBell
+                                      ? 'bg-gradient-to-br from-amber-500 to-amber-600 border-amber-300 text-white shadow-md ring-2 ring-amber-400/60 hover:from-amber-400 hover:to-amber-500'
+                                      : 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600 ring-2 ring-emerald-400/40'
                                     : isWithComments
                                     ? 'bg-amber-500 border-amber-600 text-white shadow-2xs hover:bg-amber-600 ring-1 ring-amber-400'
                                     : isIncomplete
@@ -3919,7 +4182,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                                 } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
                                 title={`${faculty.name} - ${col.fullLabel}: ${
                                   isChecked
-                                    ? 'Checked (No Comments / Approved)'
+                                    ? showDllNotificationBell
+                                      ? '🔔 All DLL folders uploaded (Submitted)! Click notification bell to view DLL Review Status and confirm final status'
+                                      : isConfirmedApproved && isMasterTeacher
+                                      ? '✓ Approved and Verified by Master Teacher! Click to view verified review status or update feedback'
+                                      : 'Checked (Clean / Approved)'
                                     : isWithComments
                                     ? `With Comments: "${itemComment || 'Feedback recorded'}"`
                                     : isIncomplete
@@ -3927,9 +4194,21 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                                     : isLate
                                     ? `Late (Submitted Late): "${itemComment || 'Submitted past deadline'}"`
                                     : 'Pending / Not Checked'
-                                } • Click to select Checked, With Comments, Incomplete, Late, or Pending`}
+                                } • Click to review or update status`}
                               >
-                                {isChecked && <Check className="w-4 h-4 stroke-[3]" />}
+                                {isChecked && (
+                                  showDllNotificationBell ? (
+                                    <div className="relative flex items-center justify-center">
+                                      <Bell className="w-3.5 h-3.5 fill-white text-white animate-bounce" />
+                                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-200 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <Check className="w-4 h-4 stroke-[3]" />
+                                  )
+                                )}
                                 {isWithComments && <MessageSquare className="w-3.5 h-3.5 fill-current" />}
                                 {isIncomplete && <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />}
                                 {isLate && <Clock className="w-3.5 h-3.5 stroke-[2.5]" />}
@@ -5271,6 +5550,339 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* MASTER TEACHER DLL REVIEW STATUS MODAL */}
+      {dllReviewModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-[#121c30] border border-amber-500/50 rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden animate-scaleUp text-slate-100 max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-[#172238] to-[#121c30] border-b border-[#24334b] flex items-center justify-between shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-amber-500/20 text-amber-300 rounded-2xl border border-amber-400/40 shadow-xs">
+                  <Bell className="w-5 h-5 fill-amber-400 text-amber-200 animate-bounce" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] font-mono font-extrabold uppercase tracking-wider text-amber-300 bg-amber-500/20 border border-amber-400/40 px-2 py-0.5 rounded-full">
+                      Master Teacher Evaluation
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-400 font-bold">
+                      {dllReviewModalData.termName} • Week {dllReviewModalData.weekNumber}
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-bold text-white font-sans mt-0.5">
+                    DLL Review Status — {dllReviewModalData.facultySurname}, {dllReviewModalData.facultyName}
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono truncate">
+                    {dllReviewModalData.facultyEmail} • {dllReviewModalData.department || 'Senior High School Dept.'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setDllReviewModalData(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-[#1f2d47] transition-all cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1 font-mono">
+              {/* Submission Overview Status Banner */}
+              <div className={`p-4 rounded-2xl border ${
+                dllReviewModalData.isFullySubmitted
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
+                  : 'bg-amber-500/10 border-amber-500/40 text-amber-200'
+              } flex items-start justify-between gap-3`}>
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${dllReviewModalData.isFullySubmitted ? 'bg-emerald-400' : 'bg-amber-400'} animate-pulse`} />
+                    <span className="font-bold text-xs uppercase tracking-wider font-sans">
+                      {dllReviewModalData.isFullySubmitted
+                        ? 'All DLL Folders Uploaded (Submitted Remark)'
+                        : 'Partial / Incomplete Upload'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    {dllReviewModalData.isFullySubmitted
+                      ? `All ${dllReviewModalData.totalDllFolders} workspace DLL folders have uploaded lesson log files for Week ${dllReviewModalData.weekNumber}. Confirm the final evaluation status below.`
+                      : `Uploaded documents in ${dllReviewModalData.allDllFilesForWeek.length} of ${dllReviewModalData.totalDllFolders} DLL folders.`}
+                  </p>
+                </div>
+
+                {/* Week Selector Dropdown inside modal */}
+                <div className="shrink-0">
+                  <label className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Switch Week:</label>
+                  <select
+                    value={dllReviewModalData.weekIndex}
+                    onChange={(e) => {
+                      const newIdx = Number(e.target.value);
+                      const fObj = allFaculty.find((f) => f.email === dllReviewModalData.facultyEmail) || {
+                        email: dllReviewModalData.facultyEmail,
+                        name: dllReviewModalData.facultyName,
+                        surname: dllReviewModalData.facultySurname,
+                        department: dllReviewModalData.department,
+                      };
+                      handleOpenDllReviewStatus(fObj, newIdx);
+                    }}
+                    className="bg-[#0d1524] border border-[#2d4060] text-xs font-bold text-white rounded-xl px-2.5 py-1.5 cursor-pointer focus:outline-none"
+                  >
+                    {columnItems.map((c) => (
+                      <option key={c.key} value={c.index} className="bg-[#0d1524] text-white">
+                        {c.fullLabel}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* DLL Workspace Folders & Document Files List */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  <span>Workspace DLL Folders ({dllReviewModalData.totalDllFolders}):</span>
+                  <span className="text-[11px] text-slate-400 font-normal">Week {dllReviewModalData.weekNumber} Deliverables</span>
+                </div>
+
+                {dllReviewModalData.dllFolders.length === 0 ? (
+                  <div className="p-4 bg-[#0d1524] rounded-2xl border border-[#24334b] text-center text-xs text-slate-400">
+                    This faculty member has not created any DLL folders yet.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {dllReviewModalData.dllFolders.map((folder) => {
+                      const files = dllReviewModalData.uploadedFilesByFolder[folder.id] || [];
+                      const hasUploadedFile = files.length > 0;
+                      return (
+                        <div
+                          key={folder.id}
+                          className={`p-3.5 rounded-2xl border transition-all ${
+                            hasUploadedFile
+                              ? 'bg-[#0d1524] border-emerald-500/40 shadow-xs'
+                              : 'bg-rose-500/10 border-rose-500/30'
+                          } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-bold text-xs text-white font-sans">{folder.name}</span>
+                              {hasUploadedFile ? (
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-bold border border-emerald-500/40">
+                                  ✓ Uploaded
+                                </span>
+                              ) : (
+                                <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full font-bold border border-rose-500/40">
+                                  Missing
+                                </span>
+                              )}
+                            </div>
+
+                            {hasUploadedFile ? (
+                              <p className="text-[11px] text-slate-300 font-mono">
+                                <span className="text-white font-semibold">{files[0].title}</span> ({files[0].fileName}) • {files[0].fileSizeFormatted} • Uploaded {files[0].uploadedAt?.substring(0, 10)}
+                              </p>
+                            ) : (
+                              <p className="text-[11px] text-rose-300 italic">
+                                No document specified for Week {dllReviewModalData.weekNumber} in this folder yet.
+                              </p>
+                            )}
+                          </div>
+
+                          {hasUploadedFile && (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewingFile(files[0])}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-xs shrink-0 self-start sm:self-auto"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>View Document</span>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Master Teacher Final Status Decision */}
+              <div className="space-y-3 pt-3 border-t border-[#24334b]">
+                <label className="block text-xs font-bold text-amber-300 uppercase tracking-wider">
+                  Confirm Final Status (Master Teacher Decision):
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {/* Status 1: Checked / Verified */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReviewStatusChoice('checked');
+                      if (!reviewFeedback.trim()) {
+                        setReviewFeedback(`All learning objectives and competencies verified and approved by ${currentUser.name || 'Norma Jabagat'} (${currentUser.designation || 'Master Teacher'}).`);
+                      }
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      reviewStatusChoice === 'checked'
+                        ? 'bg-emerald-500/20 border-emerald-500 ring-2 ring-emerald-500/40 shadow-xs'
+                        : 'bg-[#0d1524] border-[#24334b] hover:border-slate-500 hover:bg-[#1a2638]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-300 flex items-center space-x-1.5">
+                        <span className="w-4 h-4 rounded-md bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
+                        <span>Approved & Verified</span>
+                      </span>
+                      {reviewStatusChoice === 'checked' ? (
+                        <span className="text-[10px] bg-emerald-500 text-white font-mono font-bold px-2 py-0.5 rounded-full flex items-center space-x-1 shadow-2xs">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                          <span>Sets Green Check ✓</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-emerald-400 font-mono font-medium">Click to approve</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-tight">
+                      Confirmed clean compliance. All DLL requirements met. Changes the notification bell to a Green Check.
+                    </p>
+                  </button>
+
+                  {/* Status 2: With Comments */}
+                  <button
+                    type="button"
+                    onClick={() => setReviewStatusChoice('with-comments')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      reviewStatusChoice === 'with-comments'
+                        ? 'bg-amber-500/20 border-amber-500 ring-2 ring-amber-500/40 shadow-xs'
+                        : 'bg-[#0d1524] border-[#24334b] hover:border-slate-500 hover:bg-[#1a2638]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300 flex items-center space-x-1.5">
+                        <span className="w-4 h-4 rounded-md bg-amber-500 text-white flex items-center justify-center text-[10px]">💬</span>
+                        <span>With Comments</span>
+                      </span>
+                      {reviewStatusChoice === 'with-comments' && <span className="w-2 h-2 rounded-full bg-amber-400" />}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-tight">
+                      Approve with feedback or minor revisions needed.
+                    </p>
+                  </button>
+
+                  {/* Status 3: Incomplete */}
+                  <button
+                    type="button"
+                    onClick={() => setReviewStatusChoice('incomplete')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                      reviewStatusChoice === 'incomplete'
+                        ? 'bg-rose-500/20 border-rose-500 ring-2 ring-rose-500/40 shadow-xs'
+                        : 'bg-[#0d1524] border-[#24334b] hover:border-slate-500 hover:bg-[#1a2638]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-rose-300 flex items-center space-x-1.5">
+                        <span className="w-4 h-4 rounded-md bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">!</span>
+                        <span>Incomplete</span>
+                      </span>
+                      {reviewStatusChoice === 'incomplete' && <span className="w-2 h-2 rounded-full bg-rose-400" />}
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-tight">
+                      Lacks required attachments or missing folders.
+                    </p>
+                  </button>
+                </div>
+
+                {/* Remarks & Guidance Textarea */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 block">
+                    Master Teacher Remarks & Guidance (Optional):
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={reviewFeedback}
+                    onChange={(e) => setReviewFeedback(e.target.value)}
+                    placeholder="Enter Master Teacher remarks, instructional feedback, or notes for the faculty member..."
+                    className="w-full p-3 bg-[#0d1524] border border-[#24334b] rounded-xl text-xs text-white focus:outline-none focus:border-amber-500 resize-none"
+                  />
+                  {/* Preset quick remarks */}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold self-center">Presets:</span>
+                    {[
+                      'All learning objectives and competencies verified and approved.',
+                      'Complete DLL deliverables with appropriate formative assessments.',
+                      'Please ensure learning activity sheets (LAS) references are included.',
+                      'Approved by Master Teacher for classroom delivery.',
+                    ].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setReviewFeedback(preset)}
+                        className="px-2 py-0.5 bg-[#0d1524] hover:bg-[#1f2d47] text-slate-300 text-[10px] rounded-lg border border-[#24334b] transition-all cursor-pointer"
+                      >
+                        {preset.substring(0, 38)}...
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 sm:p-5 bg-[#0e1625] border-t border-[#24334b] flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={() => setDllReviewModalData(null)}
+                className="px-4 py-2 bg-[#1a2538] hover:bg-[#24334c] text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmDllReview}
+                disabled={isSubmittingReview}
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center space-x-2 cursor-pointer disabled:opacity-50 ${
+                  reviewStatusChoice === 'checked'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white ring-2 ring-emerald-400/40 shadow-emerald-950/40'
+                    : reviewStatusChoice === 'with-comments'
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white'
+                }`}
+              >
+                {isSubmittingReview ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Saving Confirmation...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 stroke-[3]" />
+                    <span>
+                      {reviewStatusChoice === 'checked'
+                        ? 'Approve & Mark with Green Check ✓'
+                        : 'Confirm Final Status'}
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULL DOCUMENT VIEWER MODAL FOR MASTER TEACHER PREVIEW */}
+      {previewingFile && (
+        <FacultyDocumentViewerModal
+          isOpen={Boolean(previewingFile)}
+          file={previewingFile}
+          onClose={() => setPreviewingFile(null)}
+          canDelete={false}
+          currentUser={currentUser}
+          onCommentSaved={(updated) => {
+            setPreviewingFile(updated);
+          }}
+        />
       )}
     </div>
   );

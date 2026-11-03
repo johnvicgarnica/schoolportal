@@ -21,6 +21,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import svnhsLogo from '../assets/images/svnhs_school_logo_1784856263175.jpg';
+import { SyncStatusWidget } from './SyncStatusWidget';
 
 interface HeaderProps {
   activeTab: 'files' | 'my-workspace' | 'announcements' | 'admin' | 'submission-report' | 'copilot';
@@ -196,6 +197,9 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
+            {/* Persistent Local Cache Status & Manual Sync Button */}
+            <SyncStatusWidget />
+
             {currentUser && (
               <div className="flex items-center space-x-2.5 bg-[#0d1524] border border-[#24334b] p-1.5 pl-3 rounded-2xl font-sans text-xs shrink-0 shadow-2xs">
                 <div className="text-left">
@@ -315,6 +319,12 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               </div>
             )}
+
+            {/* Mobile Local Cache Status & Sync Button */}
+            <div className="flex items-center justify-between bg-[#0d1524] border border-[#24334b] p-2 rounded-xl">
+              <span className="text-[11px] text-slate-400 font-semibold">Database Sync</span>
+              <SyncStatusWidget />
+            </div>
 
             {/* Mobile User Profile Info & Logout */}
             {currentUser && (

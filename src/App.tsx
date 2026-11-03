@@ -61,9 +61,10 @@ import {
   deleteSchoolPermanentFolderFromFirestore,
   getStoredFaculty,
   subscribeFaculty,
-  updateUserPresence,
-  setUserOffline,
+  syncFacultyDllSubmissionReportOnUpload,
 } from './lib/firebase';
+import { initializeOfflineDatabase } from './lib/offlineStore';
+import { performDeltaSync } from './lib/syncManager';
 
 export function App() {
   // Authentication State - emails and passwords are never saved locally
@@ -129,6 +130,15 @@ export function App() {
   const [facultyFiles, setFacultyFiles] = useState<FacultyPersonalFile[]>(() => {
     return getStoredFacultyFiles();
   });
+
+  // 1. Local-First Caching: Hydrate IndexedDB and trigger background delta sync
+  useEffect(() => {
+    initializeOfflineDatabase().then(() => {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        performDeltaSync().catch((err) => console.warn('Background delta sync notice:', err));
+      }
+    });
+  }, []);
 
   // Subscribe to Announcements in Firebase
   useEffect(() => {
@@ -355,13 +365,13 @@ export function App() {
 
   const handleLogout = () => {
     setIsLoggingOut(true);
-    if (currentUser?.email) {
-      setUserOffline(currentUser.email).catch(() => {});
-    }
     setTimeout(() => {
       try {
         localStorage.removeItem('svnhs_user_session');
         sessionStorage.removeItem('svnhs_active_session');
+        // Clear active user-specific workspace in memory to prevent cross-account exposure
+        setFacultyFolders([]);
+        setFacultyFiles([]);
       } catch (_) {}
       setCurrentUser(null);
       setIsLoggingOut(false);
@@ -517,6 +527,17 @@ export function App() {
     };
     setFacultyFiles((prev) => [newFile, ...prev]);
     saveFacultyFileToFirestore(newFile);
+
+    if (fileData.week || fileData.specifiedWeek) {
+      syncFacultyDllSubmissionReportOnUpload(
+        fileData.facultyEmail,
+        [newFile, ...facultyFiles],
+        facultyFolders,
+        undefined,
+        fileData.facultyName,
+        currentUser?.department
+      ).catch(() => {});
+    }
   };
 
   const handleDeleteFacultyFile = (id: string) => {
@@ -588,50 +609,11 @@ export function App() {
     };
   }, []);
 
-  // Real-time user presence heartbeat & online session tracking
-  useEffect(() => {
-    if (!currentUser || !currentUser.email) return;
-
-    // Immediately post active status
-    updateUserPresence(currentUser, 'online', activeTab).catch(() => {});
-
-    // Periodic heartbeat every 25 seconds
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        updateUserPresence(currentUser, 'online', activeTab).catch(() => {});
-      } else {
-        updateUserPresence(currentUser, 'idle', activeTab).catch(() => {});
-      }
-    }, 25000);
-
-    const handleFocus = () => {
-      updateUserPresence(currentUser, 'online', activeTab).catch(() => {});
-    };
-
-    const handleBeforeUnload = () => {
-      if (currentUser?.email) {
-        setUserOffline(currentUser.email).catch(() => {});
-      }
-    };
-
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handleBeforeUnload);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handleBeforeUnload);
-    };
-  }, [currentUser, activeTab]);
-
   const handleLogin = (user: UserProfile) => {
     setCurrentUser(user);
     try {
       sessionStorage.setItem('svnhs_active_session', JSON.stringify(user));
     } catch (_) {}
-    updateUserPresence(user, 'online', 'announcements').catch(() => {});
     const isCoord =
       user.designation === 'Coordinator' ||
       (user.designation?.toLowerCase().includes('coordinator') ?? false) ||
@@ -815,6 +797,7 @@ export function App() {
             <SubmissionReportView
               currentUser={currentUser}
               facultyFolders={facultyFolders}
+              facultyFiles={facultyFiles}
             />
           )}
 

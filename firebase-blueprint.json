@@ -167,7 +167,9 @@
         "masterTeacherComments": {
           "type": "array",
           "items": { "type": "object" }
-        }
+        },
+        "week": { "type": "number" },
+        "specifiedWeek": { "type": "number" }
       },
       "required": ["id", "folderId", "facultyEmail", "title", "fileName"]
     },

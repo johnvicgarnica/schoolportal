@@ -531,10 +531,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isOnline) {
-      setErrorMsg('No Internet Connection Detected: Sign in is disabled until your network reconnects. The page will automatically reload once internet is detected.');
-      return;
-    }
     setErrorMsg(null);
     setSuccessMsg(null);
 
@@ -622,11 +618,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         // Immediately clear password input state to protect sensitive credentials
         setPassword('');
 
-        // Never store email or password locally
+        // Store active session securely for the current browser session
         try {
-          localStorage.removeItem('svnhs_user_session');
+          sessionStorage.setItem('svnhs_active_session', JSON.stringify(res.user));
           localStorage.removeItem('svnhs_cached_password');
-          localStorage.removeItem('svnhs_cached_email');
         } catch (_) {}
 
         onLogin(res.user);
