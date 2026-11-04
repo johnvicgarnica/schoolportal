@@ -4188,6 +4188,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           <SubmissionReportView
             currentUser={currentUser}
             facultyFolders={facultyFolders}
+            facultyFiles={facultyFiles}
+            facultyList={facultyList}
+            activeTermId={activeTermId}
+            termWeeksConfig={termWeeksConfig}
             initialCategory="class-advisers"
           />
         </div>

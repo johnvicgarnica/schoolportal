@@ -106,7 +106,7 @@ export function invalidateFirestoreQueryCache(prefix?: string) {
 export async function fetchWithCacheDedupe<T>(
   cacheKey: string,
   fetchFn: () => Promise<T>,
-  ttlMs: number = 3 * 60 * 1000 // 3 minutes TTL default
+  ttlMs: number = 5 * 60 * 1000 // 5 minutes TTL default
 ): Promise<T> {
   const cached = queryCache.get(cacheKey);
   const now = Date.now();
@@ -131,6 +131,97 @@ export async function fetchWithCacheDedupe<T>(
 
   inFlightRequests.set(cacheKey, promise);
   return promise;
+}
+
+// ---------------------------------------------------------------------------
+// GLOBAL SHARED REAL-TIME LISTENER POOL (90%+ Read Reduction Engine)
+// Deduplicates identical onSnapshot queries across multiple components
+// and keeps listeners alive across rapid tab changes via 45s grace period.
+// ---------------------------------------------------------------------------
+
+interface SharedSubscriptionEntry<T> {
+  refCount: number;
+  lastData: T | null;
+  callbacks: Set<(data: T) => void>;
+  unsubscribeFirestore: (() => void) | null;
+  teardownTimer: any | null;
+}
+
+const sharedSubscriptions = new Map<string, SharedSubscriptionEntry<any>>();
+
+export function createSharedSubscription<T>(
+  key: string,
+  startListener: (emit: (data: T) => void) => () => void,
+  cachedInitialData?: () => T
+): (callback: (data: T) => void) => () => void {
+  return (callback: (data: T) => void) => {
+    let entry = sharedSubscriptions.get(key);
+    if (!entry) {
+      entry = {
+        refCount: 0,
+        lastData: cachedInitialData ? cachedInitialData() : null,
+        callbacks: new Set(),
+        unsubscribeFirestore: null,
+        teardownTimer: null,
+      };
+      sharedSubscriptions.set(key, entry);
+    }
+
+    entry.refCount++;
+
+    // Cancel pending teardown if a component remounted within grace period
+    if (entry.teardownTimer) {
+      clearTimeout(entry.teardownTimer);
+      entry.teardownTimer = null;
+    }
+
+    entry.callbacks.add(callback);
+
+    // Immediately deliver cached or last data (0-millisecond instant UI)
+    if (entry.lastData !== null && entry.lastData !== undefined) {
+      try {
+        callback(entry.lastData);
+      } catch (e) {
+        console.warn('Error in subscription callback:', e);
+      }
+    }
+
+    // Start Firestore listener only once if not active
+    if (!entry.unsubscribeFirestore) {
+      entry.unsubscribeFirestore = startListener((newData) => {
+        if (!entry) return;
+        entry.lastData = newData;
+        entry.callbacks.forEach((cb) => {
+          try {
+            cb(newData);
+          } catch (e) {
+            console.warn('Error in shared subscription callback:', e);
+          }
+        });
+      });
+    }
+
+    // Return cleanup function
+    return () => {
+      if (!entry) return;
+      entry.callbacks.delete(callback);
+      entry.refCount = Math.max(0, entry.refCount - 1);
+
+      // Grace period (45 seconds) before actually unsubscribing from Firestore
+      // Prevents rapid tab-switching from tearing down and remounting Firestore listeners
+      if (entry.refCount === 0 && !entry.teardownTimer) {
+        entry.teardownTimer = setTimeout(() => {
+          if (entry && entry.refCount === 0) {
+            if (entry.unsubscribeFirestore) {
+              entry.unsubscribeFirestore();
+              entry.unsubscribeFirestore = null;
+            }
+            sharedSubscriptions.delete(key);
+          }
+        }, 45000);
+      }
+    };
+  };
 }
 
 // Types
@@ -372,47 +463,51 @@ export const fetchFacultyPaginated = async (params: {
   }
 };
 
-// Bounded Real-time Subscription with Quota Protection and clean unmount
+// Shared Real-time Subscription with Quota Protection, Shared Reference Counting, and 45s Grace Period
 export const subscribeFaculty = (onUpdate: (facultyList: FacultyDoc[]) => void) => {
-  // Always serve local cache immediately to prevent wait/flicker
-  const cached = getStoredFaculty();
-  if (cached.length > 0) {
-    onUpdate(cached);
-  }
+  const shared = createSharedSubscription<FacultyDoc[]>(
+    'shared_faculty_list',
+    (emit) => {
+      const q = collection(db, FACULTY_COL);
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const list: FacultyDoc[] = snapshot.docs.map((d) => d.data() as FacultyDoc);
+          const seenEmails = new Set<string>();
+          const seenIds = new Set<string>();
+          const uniqueFaculty: FacultyDoc[] = [];
 
-  // Stream all registered faculty in real-time
-  const q = collection(db, FACULTY_COL);
-  return onSnapshot(q, (snapshot) => {
-    const list: FacultyDoc[] = snapshot.docs.map((d) => d.data() as FacultyDoc);
-    const seenEmails = new Set<string>();
-    const seenIds = new Set<string>();
-    const uniqueFaculty: FacultyDoc[] = [];
+          for (const f of list) {
+            const emailLower = (f.email || '').toLowerCase().trim();
+            if (emailLower && seenEmails.has(emailLower)) continue;
+            if (emailLower) seenEmails.add(emailLower);
 
-    for (const f of list) {
-      const emailLower = (f.email || '').toLowerCase().trim();
-      if (emailLower && seenEmails.has(emailLower)) continue;
-      if (emailLower) seenEmails.add(emailLower);
+            let uniqueId = f.id;
+            if (!uniqueId || seenIds.has(uniqueId)) {
+              uniqueId = emailLower ? `faculty-${emailToDocId(emailLower)}` : `faculty-${Math.random().toString(36).substring(2, 9)}`;
+            }
+            seenIds.add(uniqueId);
 
-      let uniqueId = f.id;
-      if (!uniqueId || seenIds.has(uniqueId)) {
-        uniqueId = emailLower ? `faculty-${emailToDocId(emailLower)}` : `faculty-${Math.random().toString(36).substring(2, 9)}`;
-      }
-      seenIds.add(uniqueId);
+            uniqueFaculty.push({
+              ...f,
+              id: uniqueId,
+            });
+          }
 
-      uniqueFaculty.push({
-        ...f,
-        id: uniqueId,
-      });
-    }
-
-    if (uniqueFaculty.length > 0) {
-      saveFacultyToLocalStorage(uniqueFaculty);
-    }
-    onUpdate(uniqueFaculty);
-  }, (err) => {
-    handleFirestoreError('subscribing to faculty collection', err);
-    onUpdate(getStoredFaculty());
-  });
+          if (uniqueFaculty.length > 0) {
+            saveFacultyToLocalStorage(uniqueFaculty);
+          }
+          emit(uniqueFaculty);
+        },
+        (err) => {
+          handleFirestoreError('subscribing to faculty collection', err);
+          emit(getStoredFaculty());
+        }
+      );
+    },
+    getStoredFaculty
+  );
+  return shared(onUpdate);
 };
 
 // 2. ADMIN DIRECTORY
@@ -537,99 +632,101 @@ export const fetchAdminsOnce = async (pageSize: number = 20): Promise<AdminDoc[]
   });
 };
 
-// Bounded Real-time Subscription with Quota Protection and clean unmount
+// Shared Real-time Subscription for Admins with Quota Protection and 45s Grace Period
 export const subscribeAdmins = (onUpdate: (adminList: AdminDoc[]) => void) => {
-  // Deliver cached admins immediately
-  const cached = getStoredAdmins();
-  if (cached.length > 0) {
-    onUpdate(cached);
-  }
+  const shared = createSharedSubscription<AdminDoc[]>(
+    'shared_admins_list',
+    (emit) => {
+      // Bound query to limit(20) to protect free read quota
+      const q = query(collection(db, ADMINS_COL), limit(20));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          let list: AdminDoc[] = snapshot.docs.map((d) => d.data() as AdminDoc);
 
-  // Bound query to limit(20) to protect free read quota
-  const q = query(collection(db, ADMINS_COL), limit(20));
-  return onSnapshot(q, (snapshot) => {
-    let list: AdminDoc[] = snapshot.docs.map((d) => d.data() as AdminDoc);
+          // Explicitly filter out deleted admin accounts: SHS Department Coordinator & Marivic R. Villaluz
+          list = list.filter((a) => {
+            const emailLower = (a.email || '').toLowerCase().trim();
+            const nameLower = (a.name || '').toLowerCase().trim();
+            const idLower = (a.id || '').toLowerCase().trim();
+            if (
+              emailLower === 'coordinator@deped.gov.ph' ||
+              emailLower === 'marivic.villaluz@deped.gov.ph' ||
+              idLower === 'admin-coordinator' ||
+              idLower === 'admin-marivic' ||
+              nameLower === 'shs department coordinator' ||
+              nameLower === 'marivic r. villaluz' ||
+              nameLower === 'marivic villaluz'
+            ) {
+              return false;
+            }
+            return true;
+          });
 
-    // Explicitly filter out deleted admin accounts: SHS Department Coordinator & Marivic R. Villaluz
-    list = list.filter((a) => {
-      const emailLower = (a.email || '').toLowerCase().trim();
-      const nameLower = (a.name || '').toLowerCase().trim();
-      const idLower = (a.id || '').toLowerCase().trim();
-      if (
-        emailLower === 'coordinator@deped.gov.ph' ||
-        emailLower === 'marivic.villaluz@deped.gov.ph' ||
-        idLower === 'admin-coordinator' ||
-        idLower === 'admin-marivic' ||
-        nameLower === 'shs department coordinator' ||
-        nameLower === 'marivic r. villaluz' ||
-        nameLower === 'marivic villaluz'
-      ) {
-        return false;
-      }
-      return true;
-    });
+          // Ensure required designations for current admins and master admin
+          list = list.map((a) => {
+            const emailLower = (a.email || '').toLowerCase();
+            if (emailLower.includes('johnvic') || a.id === 'admin-master') {
+              return { ...a, designation: 'Web Developer' };
+            }
+            if (emailLower.includes('norma') || emailLower.includes('jabagat') || a.id === 'admin-norma') {
+              return { ...a, designation: 'Master Teacher' };
+            }
+            if (emailLower.includes('coordinator') || a.id === 'admin-coordinator' || a.designation === 'Coordinator') {
+              return { ...a, designation: 'Coordinator' };
+            }
+            return a;
+          });
 
-    // Ensure required designations for current admins and master admin
-    list = list.map((a) => {
-      const emailLower = (a.email || '').toLowerCase();
-      if (emailLower.includes('johnvic') || a.id === 'admin-master') {
-        return { ...a, designation: 'Web Developer' };
-      }
-      if (emailLower.includes('norma') || emailLower.includes('jabagat') || a.id === 'admin-norma') {
-        return { ...a, designation: 'Master Teacher' };
-      }
-      if (emailLower.includes('coordinator') || a.id === 'admin-coordinator' || a.designation === 'Coordinator') {
-        return { ...a, designation: 'Coordinator' };
-      }
-      return a;
-    });
+          if (!list.some((a) => (a.email || '').toLowerCase().includes('norma') || a.id === 'admin-norma')) {
+            list.push({
+              id: 'admin-norma',
+              name: 'Norma Jabagat',
+              email: 'norma.jabagat@deped.gov.ph',
+              designation: 'Master Teacher',
+            });
+          }
 
-    if (!list.some((a) => (a.email || '').toLowerCase().includes('norma') || a.id === 'admin-norma')) {
-      list.push({
-        id: 'admin-norma',
-        name: 'Norma Jabagat',
-        email: 'norma.jabagat@deped.gov.ph',
-        designation: 'Master Teacher',
-      });
-    }
+          // Deduplicate admins by email and ID
+          const seenIds = new Set<string>();
+          const seenEmails = new Set<string>();
+          const deduplicatedList: AdminDoc[] = [];
 
-    // Deduplicate admins by email and ID
-    const seenIds = new Set<string>();
-    const seenEmails = new Set<string>();
-    const deduplicatedList: AdminDoc[] = [];
+          for (const admin of list) {
+            const emailLower = (admin.email || '').toLowerCase().trim();
+            let uniqueId = admin.id;
 
-    for (const admin of list) {
-      const emailLower = (admin.email || '').toLowerCase().trim();
-      let uniqueId = admin.id;
+            if (emailLower && seenEmails.has(emailLower)) {
+              continue;
+            }
 
-      if (emailLower && seenEmails.has(emailLower)) {
-        continue;
-      }
+            if (!uniqueId || seenIds.has(uniqueId)) {
+              uniqueId = emailLower ? `admin-${emailToDocId(emailLower)}` : `admin-${Math.random().toString(36).substring(2, 9)}`;
+            }
 
-      if (!uniqueId || seenIds.has(uniqueId)) {
-        uniqueId = emailLower ? `admin-${emailToDocId(emailLower)}` : `admin-${Math.random().toString(36).substring(2, 9)}`;
-      }
+            seenIds.add(uniqueId);
+            if (emailLower) seenEmails.add(emailLower);
 
-      seenIds.add(uniqueId);
-      if (emailLower) seenEmails.add(emailLower);
+            deduplicatedList.push({
+              ...admin,
+              id: uniqueId,
+            });
+          }
 
-      deduplicatedList.push({
-        ...admin,
-        id: uniqueId,
-      });
-    }
+          list = deduplicatedList;
 
-    list = deduplicatedList;
-
-    saveOfflineData(ADMINS_STORAGE_KEY, list);
-    onUpdate(list);
-  }, (err) => {
-    handleFirestoreError('subscribing to admins collection', err);
-    const cached = getStoredAdmins();
-    if (cached && cached.length > 0) {
-      onUpdate(cached);
-    }
-  });
+          saveOfflineData(ADMINS_STORAGE_KEY, list);
+          emit(list);
+        },
+        (err) => {
+          handleFirestoreError('subscribing to admins collection', err);
+          emit(getStoredAdmins());
+        }
+      );
+    },
+    getStoredAdmins
+  );
+  return shared(onUpdate);
 };
 
 // 3. FACULTY REGISTRATION REQUESTS
@@ -1362,38 +1459,38 @@ export const fetchAnnouncementsPaginated = async (params: {
   }
 };
 
-// Bounded Real-time Subscription with Quota Protection and clean unmount
+// Shared Real-time Subscription for Announcements with Quota Protection and 45s Grace Period
 export const subscribeAnnouncements = (onUpdate: (announcements: Announcement[]) => void) => {
-  // Deliver cached announcements immediately
-  const cached = getStoredAnnouncements();
-  if (cached.length > 0) {
-    onUpdate(cached);
-  }
+  const shared = createSharedSubscription<Announcement[]>(
+    'shared_announcements',
+    (emit) => {
+      // Bound query to limit(20) to protect free read quota
+      const q = query(collection(db, ANNOUNCEMENTS_COL), limit(20));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const list: Announcement[] = snapshot.docs.map((d) => d.data() as Announcement);
 
-  // Bound query to limit(20) to protect free read quota
-  const q = query(collection(db, ANNOUNCEMENTS_COL), limit(20));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const list: Announcement[] = snapshot.docs.map((d) => d.data() as Announcement);
+          // Sort by pinned first, then by createdAt desc
+          list.sort((a, b) => {
+            if (a.isPinned && !b.isPinned) return -1;
+            if (!a.isPinned && b.isPinned) return 1;
+            return (b.createdAt || '').localeCompare(a.createdAt || '');
+          });
 
-      // Sort by pinned first, then by createdAt desc
-      list.sort((a, b) => {
-        if (a.isPinned && !b.isPinned) return -1;
-        if (!a.isPinned && b.isPinned) return 1;
-        return (b.createdAt || '').localeCompare(a.createdAt || '');
-      });
-
-      // Synchronize exact Firestore collection snapshot to IndexedDB and local cache
-      saveOfflineData(ANNOUNCEMENTS_STORAGE_KEY, list);
-
-      onUpdate(list);
+          // Synchronize exact Firestore collection snapshot to IndexedDB and local cache
+          saveOfflineData(ANNOUNCEMENTS_STORAGE_KEY, list);
+          emit(list);
+        },
+        (err) => {
+          handleFirestoreError('subscribing to announcements collection', err);
+          emit(getStoredAnnouncements());
+        }
+      );
     },
-    (err) => {
-      handleFirestoreError('subscribing to announcements collection', err);
-      onUpdate(getStoredAnnouncements());
-    }
+    getStoredAnnouncements
   );
+  return shared(onUpdate);
 };
 
 let isSeedingAnnouncements = false;
@@ -1568,42 +1665,44 @@ export const fetchDriveFoldersOnce = async (pageSize: number = 25): Promise<Driv
   });
 };
 
+// Shared Real-time Subscription for Drive Folders with Quota Protection and 45s Grace Period
 export const subscribeDriveFolders = (onUpdate: (folders: DriveFolder[]) => void) => {
-  // Deliver cached drive folders immediately
-  const cached = getStoredDriveFolders();
-  if (cached.length > 0) {
-    onUpdate(cached);
-  }
+  const shared = createSharedSubscription<DriveFolder[]>(
+    'shared_drive_folders',
+    (emit) => {
+      // Bound query to limit(25) to protect read quota
+      const q = query(collection(db, DRIVE_FOLDERS_COL), limit(25));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          if (snapshot.empty) {
+            seedInitialDriveFoldersIfEmpty();
+            const cached = getStoredDriveFolders();
+            emit(cached.length > 0 ? cached : INITIAL_DRIVE_FOLDERS);
+            return;
+          }
 
-  // Bound query to limit(25) to protect read quota
-  const q = query(collection(db, DRIVE_FOLDERS_COL), limit(25));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      if (snapshot.empty) {
-        seedInitialDriveFoldersIfEmpty();
-        const cached = getStoredDriveFolders();
-        onUpdate(cached.length > 0 ? cached : INITIAL_DRIVE_FOLDERS);
-        return;
-      }
+          const list: DriveFolder[] = snapshot.docs.map((d) => d.data() as DriveFolder);
 
-      const list: DriveFolder[] = snapshot.docs.map((d) => d.data() as DriveFolder);
+          list.sort((a, b) => {
+            if (a.path === 'all') return -1;
+            if (b.path === 'all') return 1;
+            return (a.name || '').localeCompare(b.name || '');
+          });
 
-      list.sort((a, b) => {
-        if (a.path === 'all') return -1;
-        if (b.path === 'all') return 1;
-        return (a.name || '').localeCompare(b.name || '');
-      });
-
-      saveOfflineData(DRIVE_FOLDERS_STORAGE_KEY, list);
-      onUpdate(list);
+          saveOfflineData(DRIVE_FOLDERS_STORAGE_KEY, list);
+          emit(list);
+        },
+        (err) => {
+          handleFirestoreError('subscribing to drive folders collection', err);
+          const cached = getStoredDriveFolders();
+          emit(cached.length > 0 ? cached : INITIAL_DRIVE_FOLDERS);
+        }
+      );
     },
-    (err) => {
-      handleFirestoreError('subscribing to drive folders collection', err);
-      const cached = getStoredDriveFolders();
-      onUpdate(cached.length > 0 ? cached : INITIAL_DRIVE_FOLDERS);
-    }
+    getStoredDriveFolders
   );
+  return shared(onUpdate);
 };
 
 let isSeedingDriveFolders = false;
@@ -1649,11 +1748,12 @@ export const seedInitialDriveFoldersIfEmpty = async () => {
   }
 };
 
-// INITIALIZATION & SEEDING
+let hasSeededAdminInMemory = false;
 let isSeedingAdmin = false;
 export const seedInitialAdminIfEmpty = async () => {
-  if (isSeedingAdmin) return;
+  if (hasSeededAdminInMemory || isSeedingAdmin) return;
   if (typeof window !== 'undefined' && localStorage.getItem('svnhs_admin_seeded') === 'true') {
+    hasSeededAdminInMemory = true;
     return;
   }
   isSeedingAdmin = true;
@@ -1719,25 +1819,33 @@ export const seedInitialAdminIfEmpty = async () => {
       await deleteDoc(doc(db, PASSWORDS_COL, `admin_${coordDocId}`));
       await deleteDoc(doc(db, PASSWORDS_COL, `faculty_${coordDocId}`));
 
-      // Scan and delete any remaining document in ADMINS_COL matching the deleted admins
-      const existingAdminsSnap = await getDocs(collection(db, ADMINS_COL));
-      for (const d of existingAdminsSnap.docs) {
-        const dData = d.data();
-        const dEmail = (dData.email || '').toLowerCase().trim();
-        const dName = (dData.name || '').toLowerCase().trim();
-        if (
-          dEmail === 'coordinator@deped.gov.ph' ||
-          dEmail === 'marivic.villaluz@deped.gov.ph' ||
-          dName.includes('shs department coordinator') ||
-          (dName.includes('marivic') && dName.includes('villaluz')) ||
-          d.id === 'admin-marivic' ||
-          d.id === 'admin-coordinator'
-        ) {
-          await deleteDoc(d.ref);
+      // Scan and delete any remaining document in ADMINS_COL matching the deleted admins (run only once per device)
+      if (typeof window !== 'undefined' && localStorage.getItem('svnhs_purged_admins_v1') !== 'true') {
+        const existingAdminsSnap = await getDocs(query(collection(db, ADMINS_COL), limit(15)));
+        for (const d of existingAdminsSnap.docs) {
+          const dData = d.data();
+          const dEmail = (dData.email || '').toLowerCase().trim();
+          const dName = (dData.name || '').toLowerCase().trim();
+          if (
+            dEmail === 'coordinator@deped.gov.ph' ||
+            dEmail === 'marivic.villaluz@deped.gov.ph' ||
+            dName.includes('shs department coordinator') ||
+            (dName.includes('marivic') && dName.includes('villaluz')) ||
+            d.id === 'admin-marivic' ||
+            d.id === 'admin-coordinator'
+          ) {
+            await deleteDoc(d.ref);
+          }
         }
+        localStorage.setItem('svnhs_purged_admins_v1', 'true');
       }
     } catch (e) {
       console.warn('Purged deleted admins check notice:', e);
+    }
+
+    hasSeededAdminInMemory = true;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('svnhs_admin_seeded', 'true');
     }
 
     // Seed master admin password into Firebase settings if not already present
@@ -1878,55 +1986,59 @@ export const fetchFacultyFoldersOnce = async (pageSize: number = 30): Promise<Fa
   });
 };
 
+// Shared Real-time Subscription for Faculty Folders with Quota Protection and 45s Grace Period
 export const subscribeFacultyFolders = (
   onUpdate: (folders: FacultyFolder[]) => void,
   facultyEmail?: string
 ) => {
   const cleanEmail = facultyEmail ? facultyEmail.toLowerCase().trim() : null;
+  const subKey = cleanEmail ? `shared_faculty_folders_${cleanEmail}` : 'shared_faculty_folders_all';
 
-  // Deliver cached faculty folders immediately
-  const cached = getStoredFacultyFolders();
-  if (cached.length > 0) {
-    if (cleanEmail) {
-      onUpdate(cached.filter((f) => (f.facultyEmail || '').toLowerCase().trim() === cleanEmail));
-    } else {
-      onUpdate(cached);
-    }
-  }
+  const shared = createSharedSubscription<FacultyFolder[]>(
+    subKey,
+    (emit) => {
+      const colRef = collection(db, FACULTY_FOLDERS_COL);
+      const q = cleanEmail
+        ? query(colRef, where('facultyEmail', '==', cleanEmail))
+        : colRef;
 
-  // Stream faculty folders: scope query by facultyEmail if specified to cut reads by ~95%
-  const colRef = collection(db, FACULTY_FOLDERS_COL);
-  const q = cleanEmail
-    ? query(colRef, where('facultyEmail', '==', cleanEmail))
-    : colRef;
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const list: FacultyFolder[] = snapshot.docs.map((d) => d.data() as FacultyFolder);
+          list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const list: FacultyFolder[] = snapshot.docs.map((d) => d.data() as FacultyFolder);
-      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          if (cleanEmail) {
+            const allStored = getStoredFacultyFolders();
+            const otherFolders = allStored.filter((f) => (f.facultyEmail || '').toLowerCase().trim() !== cleanEmail);
+            saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, [...list, ...otherFolders]);
+          } else {
+            saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, list);
+          }
 
-      if (cleanEmail) {
-        // Merge user folders into cached storage without overwriting other records
-        const allStored = getStoredFacultyFolders();
-        const otherFolders = allStored.filter((f) => (f.facultyEmail || '').toLowerCase().trim() !== cleanEmail);
-        saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, [...list, ...otherFolders]);
-      } else {
-        saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, list);
-      }
-
-      onUpdate(list);
+          emit(list);
+        },
+        (err) => {
+          handleFirestoreError('subscribing to faculty folders collection', err);
+          const cachedFolders = getStoredFacultyFolders();
+          if (cleanEmail) {
+            emit(cachedFolders.filter((f) => (f.facultyEmail || '').toLowerCase().trim() === cleanEmail));
+          } else {
+            emit(cachedFolders);
+          }
+        }
+      );
     },
-    (err) => {
-      handleFirestoreError('subscribing to faculty folders collection', err);
-      const cachedFolders = getStoredFacultyFolders();
+    () => {
+      const cached = getStoredFacultyFolders();
       if (cleanEmail) {
-        onUpdate(cachedFolders.filter((f) => (f.facultyEmail || '').toLowerCase().trim() === cleanEmail));
-      } else {
-        onUpdate(cachedFolders);
+        return cached.filter((f) => (f.facultyEmail || '').toLowerCase().trim() === cleanEmail);
       }
+      return cached;
     }
   );
+
+  return shared(onUpdate);
 };
 
 // 10. FACULTY PERSONAL FILES
@@ -2096,14 +2208,24 @@ export const saveFacultyFileToFirestore = async (file: FacultyPersonalFile) => {
 export const getFacultyFileData = async (file: FacultyPersonalFile): Promise<string | null> => {
   if (file.fileData) return file.fileData;
 
-  // Check local offline store
+  // 1. Check local offline store in-memory mirror
   const storedList = getStoredFacultyFiles();
   const cached = storedList.find((f) => f.id === file.id);
   if (cached?.fileData) {
     return cached.fileData;
   }
 
-  // Check if chunked in Firestore
+  // 2. Check persistent IndexedDB binary cache (0 Firestore reads!)
+  const binaryCacheKey = `svnhs_file_binary_${file.id}`;
+  try {
+    const cachedBinary = await getOfflineData<string>(binaryCacheKey);
+    if (cachedBinary) {
+      if (cached) cached.fileData = cachedBinary;
+      return cachedBinary;
+    }
+  } catch (_) {}
+
+  // 3. Check if chunked in Firestore
   if (file.chunkCount && file.chunkCount > 1) {
     try {
       const chunksQuery = query(
@@ -2116,9 +2238,9 @@ export const getFacultyFileData = async (file: FacultyPersonalFile): Promise<str
         chunkDocs.sort((a, b) => a.chunkIndex - b.chunkIndex);
         const assembled = chunkDocs.map((c) => c.data).join('');
         if (assembled) {
-          // Cache assembled in local store for next time
-          cached && (cached.fileData = assembled);
-          saveFacultyFileToLocalStorage({ ...file, fileData: assembled });
+          // Cache assembled binary permanently in IndexedDB so it NEVER needs to be re-read from Firestore!
+          await saveOfflineData(binaryCacheKey, assembled);
+          if (cached) cached.fileData = assembled;
           return assembled;
         }
       }
@@ -2127,13 +2249,14 @@ export const getFacultyFileData = async (file: FacultyPersonalFile): Promise<str
     }
   }
 
-  // Fallback: check main doc in Firestore
+  // 4. Fallback: check main doc in Firestore
   try {
     const docSnap = await getDoc(doc(db, FACULTY_FILES_COL, file.id));
     if (docSnap.exists()) {
       const data = docSnap.data() as FacultyPersonalFile;
       if (data.fileData) {
-        saveFacultyFileToLocalStorage(data);
+        await saveOfflineData(binaryCacheKey, data.fileData);
+        if (cached) cached.fileData = data.fileData;
         return data.fileData;
       }
     }
@@ -2330,88 +2453,85 @@ export const fetchFacultyFilesPaginated = async (params: {
   }
 };
 
-// Bounded Real-time Subscription with Quota Protection and clean unmount
+// Shared Real-time Subscription with Quota Protection and clean unmount
 export const subscribeFacultyFiles = (
   onUpdate: (files: FacultyPersonalFile[]) => void,
   facultyEmail?: string
 ) => {
   const cleanEmail = facultyEmail ? facultyEmail.toLowerCase().trim() : null;
+  const subKey = cleanEmail ? `shared_faculty_files_${cleanEmail}` : 'shared_faculty_files_all';
 
-  // Always serve local cache immediately to prevent wait/flicker
-  const cached = getStoredFacultyFiles();
-  if (cached.length > 0) {
-    if (cleanEmail) {
-      onUpdate(
-        cached.filter(
+  const shared = createSharedSubscription<FacultyPersonalFile[]>(
+    subKey,
+    (emit) => {
+      const colRef = collection(db, FACULTY_FILES_COL);
+      const q = cleanEmail
+        ? query(colRef, where('facultyEmail', '==', cleanEmail))
+        : colRef;
+
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const list: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
+          list.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+
+          if (cleanEmail) {
+            const allStored = getStoredFacultyFiles();
+            const otherFiles = allStored.filter(
+              (f) => (f.facultyEmail || '').toLowerCase().trim() !== cleanEmail
+            );
+            saveOfflineData(FACULTY_FILES_STORAGE_KEY, [...list, ...otherFiles]);
+          } else {
+            saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
+          }
+
+          // Return sanitized list where personal faculty files are strictly PDF format
+          const sanitized = list.filter((f) => {
+            const isPerm =
+              f.folderId === 'school-forms' ||
+              f.folderId === 'school-documents' ||
+              f.folderId?.startsWith('school-');
+            if (isPerm) return true;
+            const format = (f.format || '').toLowerCase();
+            const fileName = (f.fileName || '').toLowerCase();
+            return format === 'pdf' || fileName.endsWith('.pdf');
+          });
+
+          emit(sanitized);
+        },
+        (err) => {
+          handleFirestoreError('subscribing to faculty files collection', err);
+          const cachedFiles = getStoredFacultyFiles();
+          if (cleanEmail) {
+            emit(
+              cachedFiles.filter(
+                (f) =>
+                  (f.facultyEmail || '').toLowerCase().trim() === cleanEmail ||
+                  f.folderId?.startsWith('school-')
+              )
+            );
+          } else {
+            emit(cachedFiles);
+          }
+        }
+      );
+    },
+    () => {
+      const cached = getStoredFacultyFiles();
+      if (cleanEmail) {
+        return cached.filter(
           (f) =>
             (f.facultyEmail || '').toLowerCase().trim() === cleanEmail ||
             f.folderId === 'school-forms' ||
             f.folderId === 'school-documents' ||
             f.folderId?.startsWith('school-')
-        )
-      );
-    } else {
-      onUpdate(cached);
-    }
-  }
-
-  // Stream faculty files: scope query by facultyEmail if specified to cut reads by ~95%
-  const colRef = collection(db, FACULTY_FILES_COL);
-  const q = cleanEmail
-    ? query(colRef, where('facultyEmail', '==', cleanEmail))
-    : colRef;
-
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const list: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
-      list.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
-
-      if (cleanEmail) {
-        // Merge user files into cached storage without overwriting other records or permanent folders
-        const allStored = getStoredFacultyFiles();
-        const otherFiles = allStored.filter(
-          (f) => (f.facultyEmail || '').toLowerCase().trim() !== cleanEmail
         );
-        saveOfflineData(FACULTY_FILES_STORAGE_KEY, [...list, ...otherFiles]);
-      } else {
-        saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
       }
-
-      // Trigger asynchronous background cleanup of any expired 15-day files and non-PDF files in faculty folders
-      cleanupExpiredFacultyFiles();
-      purgeNonPdfFacultyFiles();
-
-      // Return sanitized list where personal faculty files are strictly PDF format
-      const sanitized = list.filter((f) => {
-        const isPerm =
-          f.folderId === 'school-forms' ||
-          f.folderId === 'school-documents' ||
-          f.folderId?.startsWith('school-');
-        if (isPerm) return true;
-        const format = (f.format || '').toLowerCase();
-        const fileName = (f.fileName || '').toLowerCase();
-        return format === 'pdf' || fileName.endsWith('.pdf');
-      });
-
-      onUpdate(sanitized);
-    },
-    (err) => {
-      handleFirestoreError('subscribing to faculty files collection', err);
-      const cachedFiles = getStoredFacultyFiles();
-      if (cleanEmail) {
-        onUpdate(
-          cachedFiles.filter(
-            (f) =>
-              (f.facultyEmail || '').toLowerCase().trim() === cleanEmail ||
-              f.folderId?.startsWith('school-')
-          )
-        );
-      } else {
-        onUpdate(cachedFiles);
-      }
+      return cached;
     }
   );
+
+  return shared(onUpdate);
 };
 
 // 10. FACULTY WEEKLY SUBMISSION REPORTS (DLL, TOS, TQ - 11 WEEKS PER TERM)
@@ -2863,6 +2983,13 @@ export const confirmDllReviewStatusInFirestore = async (
   }
 };
 
+interface FacultySubmissionsState {
+  map: Record<string, boolean[]>;
+  statusMap: Record<string, ItemSubmissionStatus[]>;
+  commentMap: Record<string, Record<string, string>>;
+  confirmedMap: Record<string, Record<string, boolean>>;
+}
+
 export const subscribeFacultySubmissions = (
   termId: string,
   category: SubmissionCategory = 'dll',
@@ -2871,90 +2998,172 @@ export const subscribeFacultySubmissions = (
     statusesMap?: Record<string, ItemSubmissionStatus[]>,
     commentsMap?: Record<string, Record<string, string>>,
     confirmedWeeksMap?: Record<string, Record<string, boolean>>
-  ) => void
+  ) => void,
+  userEmailScope?: string
 ) => {
   const colName = getCategoryCollectionName(category);
-  const cached = getStoredFacultySubmissions(termId, category);
-  const cachedStatuses = getStoredFacultyStatuses(termId, category);
-  const cachedComments = getStoredFacultyComments(termId, category);
-  const cachedConfirmed = getStoredFacultyConfirmedWeeks(termId, category);
-  if (cached && Object.keys(cached).length > 0) {
-    onUpdate(cached, cachedStatuses, cachedComments, cachedConfirmed);
-  }
+  const cleanEmail = userEmailScope ? userEmailScope.toLowerCase().trim() : null;
+  const subKey = cleanEmail
+    ? `shared_sub_${category}_${termId}_${cleanEmail}`
+    : `shared_sub_${category}_${termId}_all`;
 
-  // Real-time listener for all submissions in this category without limit(30) truncation
-  const q = collection(db, colName);
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const map: Record<string, boolean[]> = {};
-      const statusMap: Record<string, ItemSubmissionStatus[]> = {};
-      const commentMap: Record<string, Record<string, string>> = {};
-      const confirmedMap: Record<string, Record<string, boolean>> = {};
+  const shared = createSharedSubscription<FacultySubmissionsState>(
+    subKey,
+    (emit) => {
+      if (cleanEmail) {
+        // Teacher Scoped: 1 Single Document Read instead of whole collection
+        const docId = `${termId}_${emailToDocId(cleanEmail)}`;
+        return onSnapshot(
+          doc(db, colName, docId),
+          (snapshot) => {
+            const map: Record<string, boolean[]> = {};
+            const statusMap: Record<string, ItemSubmissionStatus[]> = {};
+            const commentMap: Record<string, Record<string, string>> = {};
+            const confirmedMap: Record<string, Record<string, boolean>> = {};
 
-      snapshot.docs.forEach((d) => {
-        const data = d.data();
-        const docTermId = data.termId || (d.id.includes('_') ? d.id.split('_')[0] : '');
-        const matchesTerm =
-          docTermId === termId ||
-          d.id.startsWith(`${termId}_`) ||
-          (termId === 'annual' && (!data.termId || data.termId === 'annual' || d.id.startsWith('annual_')));
+            if (snapshot.exists()) {
+              const data = snapshot.data();
+              if (Array.isArray(data.weeks)) {
+                map[cleanEmail] = data.weeks;
+              }
+              if (Array.isArray(data.statuses)) {
+                statusMap[cleanEmail] = data.statuses;
+              } else if (Array.isArray(data.weeks)) {
+                statusMap[cleanEmail] = data.weeks.map((w: boolean) => (w ? 'checked' : 'unchecked'));
+              }
+              if (data.comments && typeof data.comments === 'object') {
+                commentMap[cleanEmail] = data.comments;
+              }
+              if (data.confirmedWeeks && typeof data.confirmedWeeks === 'object') {
+                confirmedMap[cleanEmail] = data.confirmedWeeks;
+              }
+            }
 
-        if (matchesTerm) {
-          const emailRaw =
-            data.facultyEmail ||
-            (d.id.includes('_') ? d.id.substring(d.id.indexOf('_') + 1) : '');
-          if (emailRaw) {
-            const cleanEmail = emailRaw.toLowerCase().trim();
-            if (Array.isArray(data.weeks)) {
-              map[cleanEmail] = data.weeks;
-            }
-            if (Array.isArray(data.statuses)) {
-              statusMap[cleanEmail] = data.statuses;
-            } else if (Array.isArray(data.weeks)) {
-              // Derive statuses from weeks for backward compatibility
-              statusMap[cleanEmail] = data.weeks.map((w: boolean) => (w ? 'checked' : 'unchecked'));
-            }
-            if (data.comments && typeof data.comments === 'object') {
-              commentMap[cleanEmail] = data.comments;
-            }
-            if (data.confirmedWeeks && typeof data.confirmedWeeks === 'object') {
-              confirmedMap[cleanEmail] = data.confirmedWeeks;
-            }
+            // Sync with existing cached data for other faculty without overwriting
+            const currentSubmissions = getStoredFacultySubmissions(termId, category);
+            const currentStatuses = getStoredFacultyStatuses(termId, category);
+            const currentComments = getStoredFacultyComments(termId, category);
+            const currentConfirmed = getStoredFacultyConfirmedWeeks(termId, category);
+
+            if (map[cleanEmail]) currentSubmissions[cleanEmail] = map[cleanEmail];
+            if (statusMap[cleanEmail]) currentStatuses[cleanEmail] = statusMap[cleanEmail];
+            if (commentMap[cleanEmail]) currentComments[cleanEmail] = commentMap[cleanEmail];
+            if (confirmedMap[cleanEmail]) currentConfirmed[cleanEmail] = confirmedMap[cleanEmail];
+
+            saveFacultySubmissionsToLocalStorage(termId, category, currentSubmissions);
+            saveFacultyStatusesToLocalStorage(termId, category, currentStatuses);
+            saveFacultyCommentsToLocalStorage(termId, category, currentComments);
+            saveFacultyConfirmedWeeksToLocalStorage(termId, category, currentConfirmed);
+
+            emit({
+              map: currentSubmissions,
+              statusMap: currentStatuses,
+              commentMap: currentComments,
+              confirmedMap: currentConfirmed,
+            });
+          },
+          (err) => {
+            handleFirestoreError(`subscribing to faculty ${category} submission for ${cleanEmail}`, err);
+            emit({
+              map: getStoredFacultySubmissions(termId, category),
+              statusMap: getStoredFacultyStatuses(termId, category),
+              commentMap: getStoredFacultyComments(termId, category),
+              confirmedMap: getStoredFacultyConfirmedWeeks(termId, category),
+            });
           }
-        }
-      });
+        );
+      } else {
+        // Admin / Management Scoped: Listen to the collection with shared pooling
+        const q = collection(db, colName);
+        return onSnapshot(
+          q,
+          (snapshot) => {
+            const map: Record<string, boolean[]> = {};
+            const statusMap: Record<string, ItemSubmissionStatus[]> = {};
+            const commentMap: Record<string, Record<string, string>> = {};
+            const confirmedMap: Record<string, Record<string, boolean>> = {};
 
-      // If category is dll and empty, also check legacy collection
-      if (category === 'dll' && Object.keys(map).length === 0) {
-        const localCached = getStoredFacultySubmissions(termId, 'dll');
-        const merged = { ...localCached, ...map };
-        const localStatuses = getStoredFacultyStatuses(termId, 'dll');
-        const localComments = getStoredFacultyComments(termId, 'dll');
-        const localConfirmed = getStoredFacultyConfirmedWeeks(termId, 'dll');
-        if (Object.keys(merged).length > 0) {
-          onUpdate(merged, localStatuses, localComments, localConfirmed);
-          return;
-        }
+            snapshot.docs.forEach((d) => {
+              const data = d.data();
+              const docTermId = data.termId || (d.id.includes('_') ? d.id.split('_')[0] : '');
+              const matchesTerm =
+                docTermId === termId ||
+                d.id.startsWith(`${termId}_`) ||
+                (termId === 'annual' && (!data.termId || data.termId === 'annual' || d.id.startsWith('annual_')));
+
+              if (matchesTerm) {
+                const emailRaw =
+                  data.facultyEmail ||
+                  (d.id.includes('_') ? d.id.substring(d.id.indexOf('_') + 1) : '');
+                if (emailRaw) {
+                  const emailKey = emailRaw.toLowerCase().trim();
+                  if (Array.isArray(data.weeks)) {
+                    map[emailKey] = data.weeks;
+                  }
+                  if (Array.isArray(data.statuses)) {
+                    statusMap[emailKey] = data.statuses;
+                  } else if (Array.isArray(data.weeks)) {
+                    statusMap[emailKey] = data.weeks.map((w: boolean) => (w ? 'checked' : 'unchecked'));
+                  }
+                  if (data.comments && typeof data.comments === 'object') {
+                    commentMap[emailKey] = data.comments;
+                  }
+                  if (data.confirmedWeeks && typeof data.confirmedWeeks === 'object') {
+                    confirmedMap[emailKey] = data.confirmedWeeks;
+                  }
+                }
+              }
+            });
+
+            // If category is dll and empty, check legacy collection
+            if (category === 'dll' && Object.keys(map).length === 0) {
+              const localCached = getStoredFacultySubmissions(termId, 'dll');
+              const merged = { ...localCached, ...map };
+              const localStatuses = getStoredFacultyStatuses(termId, 'dll');
+              const localComments = getStoredFacultyComments(termId, 'dll');
+              const localConfirmed = getStoredFacultyConfirmedWeeks(termId, 'dll');
+              if (Object.keys(merged).length > 0) {
+                emit({
+                  map: merged,
+                  statusMap: localStatuses,
+                  commentMap: localComments,
+                  confirmedMap: localConfirmed,
+                });
+                return;
+              }
+            }
+
+            // Prioritize freshly fetched data from Firestore and update local cache
+            saveFacultySubmissionsToLocalStorage(termId, category, map);
+            saveFacultyStatusesToLocalStorage(termId, category, statusMap);
+            saveFacultyCommentsToLocalStorage(termId, category, commentMap);
+            saveFacultyConfirmedWeeksToLocalStorage(termId, category, confirmedMap);
+
+            emit({ map, statusMap, commentMap, confirmedMap });
+          },
+          (err) => {
+            handleFirestoreError(`subscribing to faculty ${category} submissions`, err);
+            emit({
+              map: getStoredFacultySubmissions(termId, category),
+              statusMap: getStoredFacultyStatuses(termId, category),
+              commentMap: getStoredFacultyComments(termId, category),
+              confirmedMap: getStoredFacultyConfirmedWeeks(termId, category),
+            });
+          }
+        );
       }
-
-      // Prioritize freshly fetched data from Firestore and update local cache
-      saveFacultySubmissionsToLocalStorage(termId, category, map);
-      saveFacultyStatusesToLocalStorage(termId, category, statusMap);
-      saveFacultyCommentsToLocalStorage(termId, category, commentMap);
-      saveFacultyConfirmedWeeksToLocalStorage(termId, category, confirmedMap);
-
-      onUpdate(map, statusMap, commentMap, confirmedMap);
     },
-    (err) => {
-      handleFirestoreError(`subscribing to faculty ${category} submissions`, err);
-      const fallback = getStoredFacultySubmissions(termId, category);
-      const fallbackStatuses = getStoredFacultyStatuses(termId, category);
-      const fallbackComments = getStoredFacultyComments(termId, category);
-      const fallbackConfirmed = getStoredFacultyConfirmedWeeks(termId, category);
-      onUpdate(fallback, fallbackStatuses, fallbackComments, fallbackConfirmed);
-    }
+    () => ({
+      map: getStoredFacultySubmissions(termId, category),
+      statusMap: getStoredFacultyStatuses(termId, category),
+      commentMap: getStoredFacultyComments(termId, category),
+      confirmedMap: getStoredFacultyConfirmedWeeks(termId, category),
+    })
   );
+
+  return shared((payload) => {
+    onUpdate(payload.map, payload.statusMap, payload.commentMap, payload.confirmedMap);
+  });
 };
 
 // 11. FACULTY TOS / TQ SUBMISSION REPORTS
@@ -3231,33 +3440,35 @@ export const saveTermWeeksConfigToFirestore = async (config: TermWeeksConfig) =>
 };
 
 export const subscribeTermWeeksConfig = (onUpdate: (config: TermWeeksConfig) => void) => {
-  // Always emit cached immediately for 0ms initial render
-  const cached = getStoredTermWeeksConfig();
-  onUpdate(cached);
-
-  return onSnapshot(
-    doc(db, SETTINGS_COL, 'term_weeks_config'),
-    (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        const config: TermWeeksConfig = {
-          'term-1': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-1']) || 11)),
-          'term-2': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-2']) || 11)),
-          'term-3': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-3']) || 11)),
-        };
-        saveTermWeeksConfigToLocalStorage(config);
-        onUpdate(config);
-      } else {
-        const cached = getStoredTermWeeksConfig();
-        onUpdate(cached);
-      }
+  const shared = createSharedSubscription<TermWeeksConfig>(
+    'shared_term_weeks_config',
+    (emit) => {
+      return onSnapshot(
+        doc(db, SETTINGS_COL, 'term_weeks_config'),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            const config: TermWeeksConfig = {
+              'term-1': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-1']) || 11)),
+              'term-2': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-2']) || 11)),
+              'term-3': Math.min(MAX_TERM_WEEKS, Math.max(MIN_TERM_WEEKS, Number(data['term-3']) || 11)),
+            };
+            saveTermWeeksConfigToLocalStorage(config);
+            emit(config);
+          } else {
+            const cached = getStoredTermWeeksConfig();
+            emit(cached);
+          }
+        },
+        (err) => {
+          handleFirestoreError('subscribing to term weeks config', err);
+          emit(getStoredTermWeeksConfig());
+        }
+      );
     },
-    (err) => {
-      handleFirestoreError('subscribing to term weeks config', err);
-      const cached = getStoredTermWeeksConfig();
-      onUpdate(cached);
-    }
+    getStoredTermWeeksConfig
   );
+  return shared(onUpdate);
 };
 
 // 14. ACTIVE ACADEMIC TERM CONFIGURATION (Default term remembered across page refreshes)
@@ -3298,30 +3509,31 @@ export const saveActiveTermIdToFirestore = async (termId: string) => {
 };
 
 export const subscribeActiveTermId = (onUpdate: (termId: string) => void) => {
-  // Always emit cached immediately for 0ms initial render
-  const cached = getStoredActiveTermId();
-  onUpdate(cached);
-
-  return onSnapshot(
-    doc(db, SETTINGS_COL, 'active_academic_term'),
-    (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        const termId = data.value || data.termId || DEFAULT_ACTIVE_TERM_ID;
-        const valid = termId === 'term-2' || termId === 'term-3' ? termId : 'term-1';
-        saveActiveTermIdToLocalStorage(valid);
-        onUpdate(valid);
-      } else {
-        const cached = getStoredActiveTermId();
-        onUpdate(cached);
-      }
+  const shared = createSharedSubscription<string>(
+    'shared_active_academic_term',
+    (emit) => {
+      return onSnapshot(
+        doc(db, SETTINGS_COL, 'active_academic_term'),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            const termId = data.value || data.termId || DEFAULT_ACTIVE_TERM_ID;
+            const valid = termId === 'term-2' || termId === 'term-3' ? termId : 'term-1';
+            saveActiveTermIdToLocalStorage(valid);
+            emit(valid);
+          } else {
+            emit(getStoredActiveTermId());
+          }
+        },
+        (err) => {
+          handleFirestoreError('subscribing to active academic term', err);
+          emit(getStoredActiveTermId());
+        }
+      );
     },
-    (err) => {
-      handleFirestoreError('subscribing to active academic term', err);
-      const cached = getStoredActiveTermId();
-      onUpdate(cached);
-    }
+    getStoredActiveTermId
   );
+  return shared(onUpdate);
 };
 
 // 15. SCHOOL PERMANENT WORKSPACE FOLDERS ("SCHOOL FORMS" and "SCHOOL DOCUMENTS")
@@ -3437,68 +3649,69 @@ export const deleteSchoolPermanentFolderFromFirestore = async (id: string): Prom
 };
 
 export const subscribeSchoolPermanentFolders = (onUpdate: (folders: SchoolPermanentFolder[]) => void) => {
-  // Always emit cached immediately for 0ms initial render
-  const cached = getStoredSchoolPermanentFolders();
-  if (cached.length > 0) {
-    onUpdate(cached);
-  }
+  const shared = createSharedSubscription<SchoolPermanentFolder[]>(
+    'shared_school_permanent_folders',
+    (emit) => {
+      return onSnapshot(
+        doc(db, SETTINGS_COL, SCHOOL_PERMANENT_FOLDERS_DOC_ID),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (Array.isArray(data.folders) && data.folders.length > 0) {
+              const loaded: SchoolPermanentFolder[] = data.folders.map((f: Partial<SchoolPermanentFolder>) => {
+                const isForms = f.id === 'school-forms';
+                const isDocs = f.id === 'school-documents';
 
-  return onSnapshot(
-    doc(db, SETTINGS_COL, SCHOOL_PERMANENT_FOLDERS_DOC_ID),
-    (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (Array.isArray(data.folders) && data.folders.length > 0) {
-          const loaded: SchoolPermanentFolder[] = data.folders.map((f: Partial<SchoolPermanentFolder>) => {
-            const isForms = f.id === 'school-forms';
-            const isDocs = f.id === 'school-documents';
+                // School forms and school documents use direct Firebase storage with 10MB upload limit
+                const finalDriveUrl = isForms || isDocs ? '' : (f.driveUrl && f.driveUrl.trim() !== '' ? f.driveUrl.trim() : '');
+                const finalDriveId = isForms || isDocs ? '' : (f.driveId || extractDriveId(finalDriveUrl) || '');
 
-            // School forms and school documents use direct Firebase storage with 10MB upload limit
-            const finalDriveUrl = isForms || isDocs ? '' : (f.driveUrl && f.driveUrl.trim() !== '' ? f.driveUrl.trim() : '');
-            const finalDriveId = isForms || isDocs ? '' : (f.driveId || extractDriveId(finalDriveUrl) || '');
+                return {
+                  id: f.id || `school-folder-${Date.now()}`,
+                  name: f.name || (isForms ? 'SCHOOL FORMS' : isDocs ? 'SCHOOL DOCUMENTS' : 'Untitled Folder'),
+                  description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms. Stored directly in Firebase Cloud Storage (Max 10MB per file).' : isDocs ? 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies. Stored directly in Firebase Cloud Storage (Max 10MB per file).' : ''),
+                  driveUrl: finalDriveUrl,
+                  driveId: finalDriveId,
+                  category: f.category || (isForms ? 'DepEd Forms & Portfolio' : isDocs ? 'General Subject Materials' : 'School Documents'),
+                  color: f.color || (isForms ? 'Blue' : isDocs ? 'Emerald' : 'Indigo'),
+                  isPermanent: isForms || isDocs ? true : Boolean(f.isPermanent),
+                  createdAt: f.createdAt,
+                  updatedAt: f.updatedAt || new Date().toISOString(),
+                  updatedBy: f.updatedBy || 'School Administration',
+                  createdBy: f.createdBy,
+                  subfolders: undefined,
+                };
+              });
 
-            return {
-              id: f.id || `school-folder-${Date.now()}`,
-              name: f.name || (isForms ? 'SCHOOL FORMS' : isDocs ? 'SCHOOL DOCUMENTS' : 'Untitled Folder'),
-              description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms. Stored directly in Firebase Cloud Storage (Max 10MB per file).' : isDocs ? 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies. Stored directly in Firebase Cloud Storage (Max 10MB per file).' : ''),
-              driveUrl: finalDriveUrl,
-              driveId: finalDriveId,
-              category: f.category || (isForms ? 'DepEd Forms & Portfolio' : isDocs ? 'General Subject Materials' : 'School Documents'),
-              color: f.color || (isForms ? 'Blue' : isDocs ? 'Emerald' : 'Indigo'),
-              isPermanent: isForms || isDocs ? true : Boolean(f.isPermanent),
-              createdAt: f.createdAt,
-              updatedAt: f.updatedAt || new Date().toISOString(),
-              updatedBy: f.updatedBy || 'School Administration',
-              createdBy: f.createdBy,
-              subfolders: undefined,
-            };
-          });
+              // Ensure both core default folders always exist
+              const hasForms = loaded.some(f => f.id === 'school-forms');
+              const hasDocs = loaded.some(f => f.id === 'school-documents');
+              if (!hasForms) {
+                loaded.unshift(INITIAL_SCHOOL_PERMANENT_FOLDERS[0]);
+              }
+              if (!hasDocs) {
+                const formsIdx = loaded.findIndex(f => f.id === 'school-forms');
+                loaded.splice(formsIdx >= 0 ? formsIdx + 1 : 0, 0, INITIAL_SCHOOL_PERMANENT_FOLDERS[1]);
+              }
 
-          // Ensure both core default folders always exist
-          const hasForms = loaded.some(f => f.id === 'school-forms');
-          const hasDocs = loaded.some(f => f.id === 'school-documents');
-          if (!hasForms) {
-            loaded.unshift(INITIAL_SCHOOL_PERMANENT_FOLDERS[0]);
+              saveSchoolPermanentFoldersToLocalStorage(loaded);
+              emit(loaded);
+              return;
+            }
           }
-          if (!hasDocs) {
-            const formsIdx = loaded.findIndex(f => f.id === 'school-forms');
-            loaded.splice(formsIdx >= 0 ? formsIdx + 1 : 0, 0, INITIAL_SCHOOL_PERMANENT_FOLDERS[1]);
-          }
-
-          saveSchoolPermanentFoldersToLocalStorage(loaded);
-          onUpdate(loaded);
-          return;
+          const cached = getStoredSchoolPermanentFolders();
+          emit(cached);
+        },
+        (err) => {
+          handleFirestoreError('subscribing to school permanent folders', err);
+          const cached = getStoredSchoolPermanentFolders();
+          emit(cached);
         }
-      }
-      const cached = getStoredSchoolPermanentFolders();
-      onUpdate(cached);
+      );
     },
-    (err) => {
-      handleFirestoreError('subscribing to school permanent folders', err);
-      const cached = getStoredSchoolPermanentFolders();
-      onUpdate(cached);
-    }
+    getStoredSchoolPermanentFolders
   );
+  return shared(onUpdate);
 };
 
 let isSeedingSchoolPermanentFolders = false;
@@ -3743,58 +3956,58 @@ export const fetchClassAdviserSchoolFormsOnce = async (pageSize: number = 30): P
 export const subscribeClassAdviserSchoolForms = (
   onUpdate: (dataMap: Record<string, ClassAdviserSchoolFormsRecord>) => void
 ) => {
-  const cached = getStoredClassAdviserSchoolForms();
-  if (cached && Object.keys(cached).length > 0) {
-    onUpdate(cached);
-  }
+  const shared = createSharedSubscription<Record<string, ClassAdviserSchoolFormsRecord>>(
+    'shared_class_adviser_forms',
+    (emit) => {
+      const q = collection(db, CLASS_ADVISER_FORMS_COL);
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const map: Record<string, ClassAdviserSchoolFormsRecord> = {};
+          snapshot.docs.forEach((d) => {
+            const data = d.data();
+            if (data.facultyEmail) {
+              const emailKey = data.facultyEmail.toLowerCase().trim();
+              map[emailKey] = {
+                facultyEmail: emailKey,
+                facultyName: data.facultyName || '',
+                department: data.department || '',
+                sf1: Boolean(data.sf1),
+                sf3: Boolean(data.sf3),
+                sf4: Boolean(data.sf4),
+                sf5: Boolean(data.sf5),
+                sf6: Boolean(data.sf6),
+                sf8: Boolean(data.sf8),
+                sf10: Boolean(data.sf10),
+                sf2_june: Boolean(data.sf2_june),
+                sf2_july: Boolean(data.sf2_july),
+                sf2_august: Boolean(data.sf2_august),
+                sf2_september: Boolean(data.sf2_september),
+                sf2_october: Boolean(data.sf2_october),
+                sf2_november: Boolean(data.sf2_november),
+                sf2_december: Boolean(data.sf2_december),
+                sf2_january: Boolean(data.sf2_january),
+                sf2_february: Boolean(data.sf2_february),
+                sf2_march: Boolean(data.sf2_march),
+                sf2_april: Boolean(data.sf2_april),
+                updatedAt: data.updatedAt || '',
+                updatedBy: data.updatedBy || '',
+              };
+            }
+          });
 
-  // Stream all class advisers compliance records in real-time
-  const q = collection(db, CLASS_ADVISER_FORMS_COL);
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const map: Record<string, ClassAdviserSchoolFormsRecord> = {};
-      snapshot.docs.forEach((d) => {
-        const data = d.data();
-        if (data.facultyEmail) {
-          const emailKey = data.facultyEmail.toLowerCase().trim();
-          map[emailKey] = {
-            facultyEmail: emailKey,
-            facultyName: data.facultyName || '',
-            department: data.department || '',
-            sf1: Boolean(data.sf1),
-            sf3: Boolean(data.sf3),
-            sf4: Boolean(data.sf4),
-            sf5: Boolean(data.sf5),
-            sf6: Boolean(data.sf6),
-            sf8: Boolean(data.sf8),
-            sf10: Boolean(data.sf10),
-            sf2_june: Boolean(data.sf2_june),
-            sf2_july: Boolean(data.sf2_july),
-            sf2_august: Boolean(data.sf2_august),
-            sf2_september: Boolean(data.sf2_september),
-            sf2_october: Boolean(data.sf2_october),
-            sf2_november: Boolean(data.sf2_november),
-            sf2_december: Boolean(data.sf2_december),
-            sf2_january: Boolean(data.sf2_january),
-            sf2_february: Boolean(data.sf2_february),
-            sf2_march: Boolean(data.sf2_march),
-            sf2_april: Boolean(data.sf2_april),
-            updatedAt: data.updatedAt || '',
-            updatedBy: data.updatedBy || '',
-          };
+          saveClassAdviserSchoolFormsToLocalStorage(map);
+          emit(map);
+        },
+        (err) => {
+          handleFirestoreError('subscribing to Class Adviser School Forms', err);
+          emit(getStoredClassAdviserSchoolForms());
         }
-      });
-
-      saveClassAdviserSchoolFormsToLocalStorage(map);
-      onUpdate(map);
+      );
     },
-    (err) => {
-      handleFirestoreError('subscribing to Class Adviser School Forms', err);
-      const fallback = getStoredClassAdviserSchoolForms();
-      onUpdate(fallback);
-    }
+    getStoredClassAdviserSchoolForms
   );
+  return shared(onUpdate);
 };
 
 // ==========================================

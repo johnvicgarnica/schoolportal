@@ -373,13 +373,16 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   // Class Adviser School Forms Data Map (SF 1, 3, 4, 5, 6, 8, 10 & SF 2 Monthly)
   const [classAdviserData, setClassAdviserData] = useState<Record<string, ClassAdviserSchoolFormsRecord>>(() => getStoredClassAdviserSchoolForms());
 
-  // Subscribe to real-time Class Adviser School Forms from Firebase
+  // Subscribe to real-time Class Adviser School Forms from Firebase (strictly scoped to active tab or authorized roles)
   useEffect(() => {
+    if (activeCategory !== 'class-advisers' && !canManageClassAdvisers && !isClassAdviser) {
+      return;
+    }
     const unsub = subscribeClassAdviserSchoolForms((map) => {
       setClassAdviserData(map || {});
     });
     return () => unsub();
-  }, []);
+  }, [activeCategory, canManageClassAdvisers, isClassAdviser]);
 
   // Term Weeks Configuration (Max 12 weeks per term)
   const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => getStoredTermWeeksConfig());
@@ -511,16 +514,25 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     setConfirmedWeeks(cachedConf || {});
     setIsLoading(true);
 
-    const unsub = subscribeFacultySubmissions(effectiveTermId, cat, (subs, stats, comms, confs) => {
-      setSubmissions(subs || {});
-      if (stats) setItemStatuses(stats);
-      if (comms) setItemComments(comms);
-      if (confs) setConfirmedWeeks(confs);
-      setIsLoading(false);
-    });
+    const teacherScope = (!canEditDllTosTq && !isAdmin && currentUser.role === 'Faculty')
+      ? currentUser.email
+      : undefined;
+
+    const unsub = subscribeFacultySubmissions(
+      effectiveTermId,
+      cat,
+      (subs, stats, comms, confs) => {
+        setSubmissions(subs || {});
+        if (stats) setItemStatuses(stats);
+        if (comms) setItemComments(comms);
+        if (confs) setConfirmedWeeks(confs);
+        setIsLoading(false);
+      },
+      teacherScope
+    );
 
     return () => unsub();
-  }, [effectiveTermId, activeCategory]);
+  }, [effectiveTermId, activeCategory, canEditDllTosTq, isAdmin, currentUser.role, currentUser.email]);
 
   // Synchronized Faculty Folders state from props / local cache (0 duplicate Firestore listeners)
   const [liveFacultyFolders, setLiveFacultyFolders] = useState<FacultyFolder[]>(() => {

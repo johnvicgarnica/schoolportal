@@ -401,9 +401,11 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
     // Completely avoid unnecessary Firestore reads when user is not Master Admin or not looking at passwords
     if (!isMasterAdmin || adminSubTab !== 'passwords') return;
 
-    const unsubFaculty = subscribeFaculty((list) => {
-      setFacultyList(list || []);
-    });
+    const unsubFaculty = (propFacultyList && propFacultyList.length > 0)
+      ? () => {}
+      : subscribeFaculty((list) => {
+          setFacultyList(list || []);
+        });
 
     const unsubAdmins = subscribeAdmins((list) => {
       setAdminList(list || []);
