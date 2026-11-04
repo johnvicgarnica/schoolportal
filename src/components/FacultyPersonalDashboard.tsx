@@ -102,7 +102,7 @@ const COLOR_THEMES = [
 ];
 
 const ALLOWED_EXTENSIONS = ['pdf'];
-const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> = ({
   currentUser,
@@ -364,7 +364,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     return `${cat} ${sub} ${gr}`;
   }, [folderCategory, subjectTitle, gradeLevel]);
 
-  // Form States - Upload File to Folder (Max 2MB)
+  // Form States - Upload File to Folder (Max 10MB)
   const [fileTitle, setFileTitle] = useState('');
   const [fileDescription, setFileDescription] = useState('');
   const [fileCategory, setFileCategory] = useState(CATEGORY_OPTIONS[0]);
@@ -577,7 +577,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     }
   };
 
-  // Validate File Selection (Strictly Max 2MB, PDF/XLS/XLSX/DOC/DOCX)
+  // Validate File Selection (Strictly Max 10MB, PDF/XLS/XLSX/DOC/DOCX)
   const handleFileSelection = (selectedFile: File) => {
     setUploadError(null);
 
@@ -599,11 +599,11 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       return;
     }
 
-    // 2. Strict file size validation (maximum 2MB)
+    // 2. Strict file size validation (maximum 10MB)
     if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
       const sizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2);
       setUploadError(
-        `File exceeds strict maximum limit of 2MB (Selected file is ${sizeMb} MB). Please choose a file under 2MB.`
+        `File exceeds strict maximum limit of 10MB (Selected file is ${sizeMb} MB). Please choose a file under 10MB.`
       );
       setAttachedFile(null);
       return;
@@ -762,7 +762,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
               Welcome, {currentUser.name}
             </h1>
             <p className="text-blue-100 text-xs font-medium max-w-2xl leading-normal">
-              Your personalized repository for Daily Lesson Logs (DLL), Table of Specifications (TOS), Test Questions, and class instructional materials. Upload PDF documents (.pdf up to 2MB).
+              Your personalized repository for Daily Lesson Logs (DLL), Table of Specifications (TOS), Test Questions, and class instructional materials. Upload PDF documents (.pdf up to 10MB).
             </p>
           </div>
 
@@ -869,10 +869,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     {isPermanentActive ? (
                       <span className="text-emerald-400 font-bold flex items-center space-x-1">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Firebase Cloud Storage (Permanent Repository • Max 2MB)</span>
+                        <span>Firebase Cloud Storage (Permanent Repository • Max 10MB)</span>
                       </span>
                     ) : (
-                      <span className="text-emerald-400 font-bold">Firebase Cloud Storage (Max 2MB)</span>
+                      <span className="text-emerald-400 font-bold">Firebase Cloud Storage (Max 10MB)</span>
                     )}
                     <span>•</span>
                     <span>{filesInActiveFolder.length} documents uploaded</span>
@@ -891,8 +891,8 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   <Upload className="w-4 h-4" />
                   <span>
                     {activeFolder.id === 'school-forms'
-                      ? '+ Upload School Form (Max 2MB)'
-                      : '+ Upload School Document (Max 2MB)'}
+                      ? '+ Upload School Form (Max 10MB)'
+                      : '+ Upload School Document (Max 10MB)'}
                   </span>
                 </button>
               ) : (
@@ -903,7 +903,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold transition-all shadow-md flex items-center space-x-1.5 cursor-pointer"
                   >
                     <Upload className="w-4 h-4" />
-                    <span>Upload Document (Max 2MB)</span>
+                    <span>Upload Document (Max 10MB)</span>
                   </button>
 
                   <button
@@ -973,7 +973,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     <h3 className="text-xs sm:text-sm font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center space-x-2">
                       <span>Firebase Cloud Storage Central Repository</span>
                       <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px] normal-case font-bold">
-                        Permanent • Max 2MB
+                        Permanent • Max 10MB
                       </span>
                     </h3>
                     <p className="text-[11px] text-slate-300 font-mono mt-0.5">
@@ -988,7 +988,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer shrink-0"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>Upload to Firebase (Max 2MB)</span>
+                  <span>Upload to Firebase (Max 10MB)</span>
                 </button>
               </div>
             </div>
@@ -1027,7 +1027,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     No Files in this Folder Yet
                   </h4>
                   <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
-                    Upload your documents and forms with a maximum size of 2MB. Files are saved directly to the Firebase database with no external Google Drive links required.
+                    Upload your documents and forms with a maximum size of 10MB. Files are saved directly to the Firebase database with no external Google Drive links required.
                   </p>
                 </div>
                 <button
@@ -1036,7 +1036,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-mono font-bold rounded-2xl transition-all shadow-sm inline-flex items-center space-x-2 cursor-pointer hover:scale-105 active:scale-95"
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Upload Document (Max 2MB)</span>
+                  <span>Upload Document (Max 10MB)</span>
                 </button>
               </div>
             ) : (
@@ -1359,7 +1359,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
 
                         <div className="flex items-center space-x-2">
                           <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 px-1.5 py-0.5 rounded font-mono font-medium">
-                            Firebase Storage • 2MB Max
+                            Firebase Storage • 10MB Max
                           </span>
                           <div className="flex items-center space-x-1 text-[11px] font-bold text-blue-400 group-hover:text-blue-300 group-hover:translate-x-1 transition-transform">
                             <span>Open Folder</span>
@@ -1386,7 +1386,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     Personal Faculty Folders ({myFolders.length})
                   </h2>
                   <p className="text-[11px] text-slate-400 font-mono">
-                    Unique Firebase file storage for DLL, TOS, TQ, and instructional materials (PDF only, Max 2MB per document, 15-day auto-delete).
+                    Unique Firebase file storage for DLL, TOS, TQ, and instructional materials (PDF only, Max 10MB per document, 15-day auto-delete).
                   </p>
                 </div>
               </div>
@@ -1738,7 +1738,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
         </div>
       )}
 
-      {/* UPLOAD FILE MODAL (MAX 2MB, PDF/XLS/XLSX) - SMOOTHLY SCROLLABLE DIALOG */}
+      {/* UPLOAD FILE MODAL (MAX 10MB, PDF/XLS/XLSX) - SMOOTHLY SCROLLABLE DIALOG */}
       {isAddFileModalOpen && activeFolder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm animate-fadeIn overflow-y-auto">
           <div className="bg-[#111927] rounded-3xl border border-[#24334b] shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden my-auto animate-scaleUp text-slate-100">
@@ -1753,7 +1753,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     Upload to "{activeFolder.name}"
                   </h3>
                   <p className="text-xs text-slate-400 font-mono">
-                    Firebase Cloud Storage • Max 2MB Limit • Direct App Editing
+                    Firebase Cloud Storage • Max 10MB Limit • Direct App Editing
                   </p>
                 </div>
               </div>
@@ -1824,7 +1824,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   </div>
                 )}
 
-                {/* File Picker with 2MB validation and drag & drop */}
+                {/* File Picker with 10MB validation and drag & drop */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block flex items-center justify-between">
                     <span>
@@ -1832,7 +1832,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                         ? 'Select File (.xlsx, .xls, .pdf, .docx, .doc) *'
                         : 'Select PDF Document (.pdf only) *'}
                     </span>
-                    <span className="text-emerald-400 font-bold">Strict 2MB Limit</span>
+                    <span className="text-emerald-400 font-bold">Strict 10MB Limit</span>
                   </label>
                   <div className="border-2 border-dashed border-[#24334b] hover:border-emerald-500/60 rounded-2xl p-5 text-center bg-[#0d1524] transition-all relative">
                     <input
@@ -1860,7 +1860,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                             ✓ Selected File: {attachedFile.name}
                           </p>
                           <p className="text-[10px] text-slate-400">
-                            Size: {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB • Strictly under 2MB limit
+                            Size: {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB • Strictly under 10MB limit
                           </p>
                         </div>
                       ) : (
@@ -1872,8 +1872,8 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                           </p>
                           <p className="text-[10px] text-slate-500">
                             {isPermanentActive
-                              ? 'Allowed: .xlsx, .xls, .pdf, .docx, .doc • Maximum size 2.0 MB'
-                              : 'Allowed: PDF (.pdf) only • Maximum size 2.0 MB'}
+                              ? 'Allowed: .xlsx, .xls, .pdf, .docx, .doc • Maximum size 10.0 MB'
+                              : 'Allowed: PDF (.pdf) only • Maximum size 10.0 MB'}
                           </p>
                         </div>
                       )}
@@ -1962,10 +1962,10 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                 <div className="text-[11px] text-slate-400 font-mono">
                   {attachedFile ? (
                     <span className="text-emerald-400 font-bold">
-                      {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB / 2.0 MB Max
+                      {(attachedFile.size / (1024 * 1024)).toFixed(2)} MB / 10.0 MB Max
                     </span>
                   ) : (
-                    <span>Max limit: 2.0 MB • Firebase Direct Storage</span>
+                    <span>Max limit: 10.0 MB • Firebase Direct Storage</span>
                   )}
                 </div>
 

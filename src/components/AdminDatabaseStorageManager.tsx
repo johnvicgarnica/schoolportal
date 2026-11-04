@@ -459,7 +459,7 @@ export const AdminDatabaseStorageManager: React.FC<AdminDatabaseStorageManagerPr
             </div>
             <div className="text-xs text-slate-400 font-mono mt-1 flex items-center space-x-1">
               <span className="font-bold text-rose-300">{facultyFiles.length} active PDFs</span>
-              <span>(Max 2MB each)</span>
+              <span>(Max 10MB each)</span>
             </div>
           </div>
 
@@ -603,7 +603,7 @@ export const AdminDatabaseStorageManager: React.FC<AdminDatabaseStorageManagerPr
           <div className="bg-[#0b121e] p-3 rounded-xl border border-[#202d42]">
             <div className="text-[10px] text-slate-400 uppercase font-bold">Max Document Size</div>
             <div className="text-sm font-bold text-slate-200 mt-0.5">1 MiB (1,048,576 B)</div>
-            <div className="text-[10px] text-blue-400 mt-0.5">2MB Chunking Active</div>
+            <div className="text-[10px] text-blue-400 mt-0.5">10MB Chunking Active</div>
           </div>
         </div>
 

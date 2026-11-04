@@ -6,7 +6,7 @@ export const INITIAL_SCHOOL_PERMANENT_FOLDERS: SchoolPermanentFolder[] = [
   {
     id: 'school-forms',
     name: 'SCHOOL FORMS',
-    description: 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms. All files stored directly in Firebase Cloud Storage (Max 2MB per file).',
+    description: 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms. All files stored directly in Firebase Cloud Storage (Max 10MB per file).',
     driveUrl: '',
     driveId: '',
     category: 'DepEd Forms & Portfolio',
@@ -18,7 +18,7 @@ export const INITIAL_SCHOOL_PERMANENT_FOLDERS: SchoolPermanentFolder[] = [
   {
     id: 'school-documents',
     name: 'SCHOOL DOCUMENTS',
-    description: 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies. All files stored directly in Firebase Cloud Storage (Max 2MB per file).',
+    description: 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies. All files stored directly in Firebase Cloud Storage (Max 10MB per file).',
     driveUrl: '',
     driveId: '',
     category: 'General Subject Materials',

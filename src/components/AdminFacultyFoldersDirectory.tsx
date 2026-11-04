@@ -290,7 +290,7 @@ export const AdminFacultyFoldersDirectory: React.FC<AdminFacultyFoldersDirectory
               Faculty Repository & Personal Folders Directory
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 font-medium max-w-3xl leading-relaxed">
-              Alphabetical index by faculty surname. Inspect uploaded DLL, TOS, TQ, and instructional PDF documents (PDF up to 2MB). Files are automatically purged after 1 week.
+              Alphabetical index by faculty surname. Inspect uploaded DLL, TOS, TQ, and instructional PDF documents (PDF up to 10MB). Files are automatically purged after 1 week.
             </p>
           </div>
 

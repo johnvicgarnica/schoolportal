@@ -323,9 +323,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       return;
     }
 
-    if (selectedFile.size > 2 * 1024 * 1024) {
+    if (selectedFile.size > 10 * 1024 * 1024) {
       const sizeMb = (selectedFile.size / (1024 * 1024)).toFixed(2);
-      setAdminUploadError(`File exceeds maximum limit of 2MB (Selected file is ${sizeMb} MB).`);
+      setAdminUploadError(`File exceeds maximum limit of 10MB (Selected file is ${sizeMb} MB).`);
       setAdminUploadFile(null);
       return;
     }
@@ -3484,7 +3484,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   School Forms & Documents Management
                 </h2>
                 <p className="text-xs sm:text-sm text-indigo-100/90 max-w-2xl leading-relaxed">
-                  Manage official school repositories for <strong className="text-white">"SCHOOL FORMS"</strong> and <strong className="text-white">"SCHOOL DOCUMENTS"</strong>. All documents are stored directly in Firebase Cloud Storage (strictly max 2MB per upload) with permanent retention and in-app viewing/editing.
+                  Manage official school repositories for <strong className="text-white">"SCHOOL FORMS"</strong> and <strong className="text-white">"SCHOOL DOCUMENTS"</strong>. All documents are stored directly in Firebase Cloud Storage (strictly max 10MB per upload) with permanent retention and in-app viewing/editing.
                 </p>
               </div>
 
@@ -3586,7 +3586,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       </span>
                       <span className="text-[10px] font-mono text-emerald-400 font-semibold flex items-center space-x-1">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Firebase Cloud Storage • Max 2MB</span>
+                        <span>Firebase Cloud Storage • Max 10MB</span>
                       </span>
                     </div>
                     <h3 className="text-lg font-bold text-slate-100 mt-1">
@@ -3602,7 +3602,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-2xs transition-all cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Upload File (Max 2MB)</span>
+                    <span>Upload File (Max 10MB)</span>
                   </button>
                 </div>
               </div>
@@ -3615,7 +3615,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     <span>Firebase Cloud Storage Active</span>
                   </span>
                   <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded font-bold">
-                    Strict Max 2MB / File
+                    Strict Max 10MB / File
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
@@ -3753,7 +3753,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       </span>
                       <span className="text-[10px] font-mono text-emerald-400 font-semibold flex items-center space-x-1">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Firebase Cloud Storage • Max 2MB</span>
+                        <span>Firebase Cloud Storage • Max 10MB</span>
                       </span>
                     </div>
                     <h3 className="text-lg font-bold text-slate-100 mt-1">
@@ -3769,7 +3769,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 shadow-2xs transition-all cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Upload Document (Max 2MB)</span>
+                    <span>Upload Document (Max 10MB)</span>
                   </button>
                 </div>
               </div>
@@ -3782,7 +3782,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     <span>Firebase Cloud Storage Active</span>
                   </span>
                   <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded font-bold">
-                    Strict Max 2MB / File
+                    Strict Max 10MB / File
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
@@ -4493,7 +4493,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         : 'Upload School Document'}
                     </h3>
                     <p className="text-xs text-slate-400 font-mono">
-                      Firebase Cloud Storage • Max 2MB Limit • Direct App Editing
+                      Firebase Cloud Storage • Max 10MB Limit • Direct App Editing
                     </p>
                   </div>
                 </div>
@@ -4534,7 +4534,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block flex items-center justify-between">
                     <span>Select File (.xlsx, .xls, .pdf) *</span>
-                    <span className="text-emerald-400 font-bold">Max 2MB Limit</span>
+                    <span className="text-emerald-400 font-bold">Max 10MB Limit</span>
                   </label>
                   <div className="border-2 border-dashed border-[#24334b] hover:border-emerald-500/60 rounded-2xl p-5 text-center bg-[#0d1524] transition-all relative">
                     <input
@@ -4558,7 +4558,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                             ✓ Selected: {adminUploadFile.name}
                           </p>
                           <p className="text-[10px] text-slate-400">
-                            Size: {(adminUploadFile.size / (1024 * 1024)).toFixed(2)} MB • Within 2MB limit
+                            Size: {(adminUploadFile.size / (1024 * 1024)).toFixed(2)} MB • Within 10MB limit
                           </p>
                         </div>
                       ) : (
@@ -4567,7 +4567,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                             Click to select spreadsheet (.xlsx, .xls) or document (.pdf)
                           </p>
                           <p className="text-[10px] text-slate-500">
-                            Maximum upload file size is strictly limited to 2MB
+                            Maximum upload file size is strictly limited to 10MB
                           </p>
                         </div>
                       )}
@@ -4585,10 +4585,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                 <div className="text-[11px] text-slate-400 font-mono">
                   {adminUploadFile ? (
                     <span className="text-emerald-400 font-bold">
-                      {(adminUploadFile.size / (1024 * 1024)).toFixed(2)} MB / 2.0 MB Limit
+                      {(adminUploadFile.size / (1024 * 1024)).toFixed(2)} MB / 10.0 MB Limit
                     </span>
                   ) : (
-                    <span>Strict 2.0 MB Limit</span>
+                    <span>Strict 10.0 MB Limit</span>
                   )}
                 </div>
 

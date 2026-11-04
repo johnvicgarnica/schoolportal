@@ -1116,7 +1116,7 @@ export const FacultyDocumentViewerModal: React.FC<FacultyDocumentViewerModalProp
                         {file.category || 'Instructional Document'}
                       </span>
                       <span className="inline-block px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-900 text-xs font-mono font-bold">
-                        Verified 2MB Storage
+                        Verified 10MB Storage
                       </span>
                     </div>
 

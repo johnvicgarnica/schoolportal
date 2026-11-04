@@ -3453,14 +3453,14 @@ export const subscribeSchoolPermanentFolders = (onUpdate: (folders: SchoolPerman
             const isForms = f.id === 'school-forms';
             const isDocs = f.id === 'school-documents';
 
-            // School forms and school documents use direct Firebase storage with 2MB upload limit
+            // School forms and school documents use direct Firebase storage with 10MB upload limit
             const finalDriveUrl = isForms || isDocs ? '' : (f.driveUrl && f.driveUrl.trim() !== '' ? f.driveUrl.trim() : '');
             const finalDriveId = isForms || isDocs ? '' : (f.driveId || extractDriveId(finalDriveUrl) || '');
 
             return {
               id: f.id || `school-folder-${Date.now()}`,
               name: f.name || (isForms ? 'SCHOOL FORMS' : isDocs ? 'SCHOOL DOCUMENTS' : 'Untitled Folder'),
-              description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms. Stored directly in Firebase Cloud Storage (Max 2MB per file).' : isDocs ? 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies. Stored directly in Firebase Cloud Storage (Max 2MB per file).' : ''),
+              description: f.description || (isForms ? 'Official DepEd school forms (SF1, SF2, SF5, SF9, etc.), templates, and department administrative forms. Stored directly in Firebase Cloud Storage (Max 10MB per file).' : isDocs ? 'Central school memorandums, department orders, curriculum guidelines, faculty circulars, and official policies. Stored directly in Firebase Cloud Storage (Max 10MB per file).' : ''),
               driveUrl: finalDriveUrl,
               driveId: finalDriveId,
               category: f.category || (isForms ? 'DepEd Forms & Portfolio' : isDocs ? 'General Subject Materials' : 'School Documents'),
