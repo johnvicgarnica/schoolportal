@@ -144,6 +144,7 @@ interface AdminDashboardViewProps {
   shouldOpenModal?: boolean;
   onModalOpened?: () => void;
   onNavigateToSubmissionReport?: () => void;
+  facultyList?: FacultyDoc[];
 }
 
 export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
@@ -170,6 +171,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   shouldOpenModal,
   onModalOpened,
   onNavigateToSubmissionReport,
+  facultyList: propFacultyList,
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
@@ -859,9 +861,15 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   useEffect(() => {
     if (adminSubTab !== 'passwords') return;
 
-    const unsubFaculty = subscribeFaculty((list) => {
-      setFacultyList(list || []);
-    });
+    if (propFacultyList && propFacultyList.length > 0) {
+      setFacultyList(propFacultyList);
+    }
+
+    const unsubFaculty = (propFacultyList && propFacultyList.length > 0)
+      ? () => {}
+      : subscribeFaculty((list) => {
+          setFacultyList(list || []);
+        });
 
     const unsubAdmins = subscribeAdmins((list) => {
       setAdminList(list || []);
@@ -906,7 +914,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       unsubSettings();
       unsubPasswordResets();
     };
-  }, [adminSubTab]);
+  }, [adminSubTab, propFacultyList]);
 
   // Handlers for Faculty Requests
   const handleAcceptRequest = (req: { id: string; name: string; email: string; password: string; department?: string }) => {

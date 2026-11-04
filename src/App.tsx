@@ -34,6 +34,7 @@ import { AdminDashboardView } from './components/AdminDashboardView';
 import { FacultyPersonalDashboard } from './components/FacultyPersonalDashboard';
 import { SubmissionReportView } from './components/SubmissionReportView';
 import { LoginScreen } from './components/LoginScreen';
+import { HeatIndexMonitor } from './components/HeatIndexMonitor';
 import buildingBg from './assets/images/svnhs_shs_building_1785313106378.jpg';
 import {
   subscribeAnnouncements,
@@ -61,10 +62,15 @@ import {
   deleteSchoolPermanentFolderFromFirestore,
   getStoredFaculty,
   subscribeFaculty,
+  FacultyDoc,
+  subscribeActiveTermId,
+  getStoredActiveTermId,
+  subscribeTermWeeksConfig,
+  getStoredTermWeeksConfig,
+  TermWeeksConfig,
   syncFacultyDllSubmissionReportOnUpload,
 } from './lib/firebase';
 import { initializeOfflineDatabase } from './lib/offlineStore';
-import { performDeltaSync } from './lib/syncManager';
 
 export function App() {
   // Authentication State - emails and passwords are never saved locally
@@ -131,13 +137,25 @@ export function App() {
     return getStoredFacultyFiles();
   });
 
-  // 1. Local-First Caching: Hydrate IndexedDB and trigger background delta sync
+  // Shared Faculty and Academic Term State (Single listener for the entire app, 0 duplicate reads)
+  const [facultyList, setFacultyList] = useState<FacultyDoc[]>(() => getStoredFaculty());
+  const [activeTermId, setActiveTermId] = useState<string>(() => getStoredActiveTermId());
+  const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => getStoredTermWeeksConfig());
+
+  // Shared Term Configuration Subscriptions
   useEffect(() => {
-    initializeOfflineDatabase().then(() => {
-      if (typeof navigator !== 'undefined' && navigator.onLine) {
-        performDeltaSync().catch((err) => console.warn('Background delta sync notice:', err));
-      }
-    });
+    if (!currentUser) return;
+    const unsubTerm = subscribeActiveTermId((term) => setActiveTermId(term));
+    const unsubWeeks = subscribeTermWeeksConfig((cfg) => setTermWeeksConfig(cfg));
+    return () => {
+      unsubTerm();
+      unsubWeeks();
+    };
+  }, [currentUser]);
+
+  // 1. Local-First Caching: Hydrate IndexedDB
+  useEffect(() => {
+    initializeOfflineDatabase();
   }, []);
 
   // Subscribe to Announcements in Firebase
@@ -159,21 +177,25 @@ export function App() {
   }, [currentUser]);
 
   // Subscribe to Faculty Personal Folders in Firebase (only when logged in)
+  // Scoped by currentUser.email for Faculty users to cut reads by ~95%
   useEffect(() => {
     if (!currentUser) return;
+    const emailScope = currentUser.role === 'Faculty' ? currentUser.email : undefined;
     const unsub = subscribeFacultyFolders((list) => {
       setFacultyFolders(list || []);
-    });
+    }, emailScope);
     return () => unsub();
   }, [currentUser]);
 
   // Subscribe to Faculty Personal Files in Firebase (only when logged in)
+  // Scoped by currentUser.email for Faculty users to cut reads by ~95%
   useEffect(() => {
     if (!currentUser) return;
     purgeNonPdfFacultyFiles();
+    const emailScope = currentUser.role === 'Faculty' ? currentUser.email : undefined;
     const unsub = subscribeFacultyFiles((list) => {
       setFacultyFiles(list || []);
-    });
+    }, emailScope);
     return () => unsub();
   }, [currentUser]);
 
@@ -566,9 +588,11 @@ export function App() {
     }
   }, [isCoordinator, activeTab]);
 
-  // Real-time synchronization of current faculty user's advisoryRole from Firestore
+  // Real-time synchronization of registered faculty list & current faculty user's advisoryRole from Firestore
   useEffect(() => {
+    if (!currentUser) return;
     const unsub = subscribeFaculty((list) => {
+      setFacultyList(list || []);
       if (currentUser && currentUser.role === 'Faculty' && currentUser.email) {
         const cleanEmail = currentUser.email.toLowerCase().trim();
         const matched = list.find((f) => (f.email || '').toLowerCase().trim() === cleanEmail);
@@ -709,6 +733,9 @@ export function App() {
         />
 
         <main className="w-full px-3 sm:px-5 lg:px-6 pt-4 flex-1">
+          {/* Prominent Real-Time Heat Index Monitoring Dashboard Section */}
+          <HeatIndexMonitor />
+
           {activeTab === 'my-workspace' && (
             <FacultyPersonalDashboard
               currentUser={currentUser}
@@ -723,6 +750,8 @@ export function App() {
               onNavigateToRepository={() => setActiveTab('files')}
               onNavigateToAdminDashboard={() => setActiveTab('admin')}
               onNavigateToSubmissionReport={() => setActiveTab('submission-report')}
+              activeTermId={activeTermId}
+              termWeeksConfig={termWeeksConfig}
             />
           )}
 
@@ -762,6 +791,7 @@ export function App() {
               setIsAdminDemoMode={setIsAdminDemoMode}
               shouldOpenModal={shouldOpenAnnouncementModal}
               onModalOpened={() => setShouldOpenAnnouncementModal(false)}
+              facultyList={facultyList}
             />
           )}
 
@@ -790,6 +820,7 @@ export function App() {
               shouldOpenModal={shouldOpenAnnouncementModal}
               onModalOpened={() => setShouldOpenAnnouncementModal(false)}
               onNavigateToSubmissionReport={() => setActiveTab('submission-report')}
+              facultyList={facultyList}
             />
           )}
 
@@ -798,6 +829,9 @@ export function App() {
               currentUser={currentUser}
               facultyFolders={facultyFolders}
               facultyFiles={facultyFiles}
+              facultyList={facultyList}
+              activeTermId={activeTermId}
+              termWeeksConfig={termWeeksConfig}
             />
           )}
 

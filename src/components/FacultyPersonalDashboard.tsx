@@ -68,6 +68,8 @@ interface FacultyPersonalDashboardProps {
   onNavigateToRepository?: () => void;
   onNavigateToAdminDashboard?: () => void;
   onNavigateToSubmissionReport?: () => void;
+  activeTermId?: string;
+  termWeeksConfig?: TermWeeksConfig;
 }
 
 export const FACULTY_FOLDER_CATEGORIES = ['DLL', 'TOS&TQ'] as const;
@@ -113,6 +115,8 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   onAddFile,
   onDeleteFile,
   onNavigateToAdminDashboard,
+  activeTermId: propActiveTermId,
+  termWeeksConfig: propTermWeeksConfig,
 }) => {
   // Permanent School-Wide Folders state ("SCHOOL FORMS" and "SCHOOL DOCUMENTS")
   const [livePermanentFolders, setLivePermanentFolders] = useState<SchoolPermanentFolder[]>(() => {
@@ -235,19 +239,29 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     return cat === 'dll' || cat.includes('daily lesson log') || name.startsWith('dll') || name.includes('dll');
   }, [activeFolder]);
 
-  // Current academic term and weeks count for DLL submissions
-  const [activeTermId, setActiveTermId] = useState<string>(() => getStoredActiveTermId());
-  const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => getStoredTermWeeksConfig());
+  // Current academic term and weeks count for DLL submissions (reusing parent props to save Firestore reads)
+  const [activeTermId, setActiveTermId] = useState<string>(() => propActiveTermId || getStoredActiveTermId());
+  const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => propTermWeeksConfig || getStoredTermWeeksConfig());
   const [specifiedWeek, setSpecifiedWeek] = useState<number>(1);
 
   useEffect(() => {
+    if (propActiveTermId) setActiveTermId(propActiveTermId);
+  }, [propActiveTermId]);
+
+  useEffect(() => {
+    if (propTermWeeksConfig) setTermWeeksConfig(propTermWeeksConfig);
+  }, [propTermWeeksConfig]);
+
+  useEffect(() => {
+    // Only subscribe directly if parent App.tsx didn't pass configs down
+    if (propActiveTermId && propTermWeeksConfig) return;
     const unsubTerm = subscribeActiveTermId((term) => setActiveTermId(term));
     const unsubWeeks = subscribeTermWeeksConfig((cfg) => setTermWeeksConfig(cfg));
     return () => {
       unsubTerm();
       unsubWeeks();
     };
-  }, []);
+  }, [propActiveTermId, propTermWeeksConfig]);
 
   const currentTermWeeksCount = useMemo(() => {
     const count = (termWeeksConfig as any)?.[activeTermId];

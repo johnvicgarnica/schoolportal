@@ -84,6 +84,7 @@ interface AnnouncementsViewProps {
   shouldOpenModal?: boolean;
   onModalOpened?: () => void;
   onGoToAdminDashboard?: () => void;
+  facultyList?: FacultyDoc[];
 }
 
 export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
@@ -97,6 +98,7 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
   shouldOpenModal,
   onModalOpened,
   onGoToAdminDashboard,
+  facultyList: propFacultyList,
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
@@ -390,8 +392,15 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Real-Time Firebase Subscriptions
+  // Real-Time Firebase Subscriptions - strictly active only when Master Admin opens Accounts & Passwords tab
   useEffect(() => {
+    if (propFacultyList && propFacultyList.length > 0) {
+      setFacultyList(propFacultyList);
+    }
+
+    // Completely avoid unnecessary Firestore reads when user is not Master Admin or not looking at passwords
+    if (!isMasterAdmin || adminSubTab !== 'passwords') return;
+
     const unsubFaculty = subscribeFaculty((list) => {
       setFacultyList(list || []);
     });
@@ -434,7 +443,7 @@ export const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
       unsubPasswords();
       unsubSettings();
     };
-  }, []);
+  }, [isMasterAdmin, adminSubTab, propFacultyList]);
 
   // Handler: Update Master Admin Credentials (Email & Password)
   const handleUpdateMasterAdminCredentials = (e: React.FormEvent) => {

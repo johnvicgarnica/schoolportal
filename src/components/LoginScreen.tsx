@@ -27,6 +27,7 @@ import { subscribeOfflineCache } from '../lib/offlineStore';
 import { AutoSwipingGallery } from './AutoSwipingGallery';
 import { ScrollableVideoSection } from './ScrollableVideoSection';
 import { ScrollableAnnouncementSection } from './ScrollableAnnouncementSection';
+import { HeatIndexMonitor } from './HeatIndexMonitor';
 import {
   Lock,
   Mail,
@@ -882,7 +883,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-[450px] h-[450px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
 
-      {/* TOP SECTION: Auto-Swiping Gallery of Pictures (Only pictures uploaded by Master Admin) */}
+      {/* TOP SECTION: Real-Time Heat Index Monitoring Dashboard */}
+      <div className="w-full max-w-6xl relative z-10 mb-2 sm:mb-2.5 animate-fadeIn">
+        <HeatIndexMonitor />
+      </div>
+
+      {/* Auto-Swiping Gallery of Pictures (Only pictures uploaded by Master Admin) */}
       {(isLoadingGallery || (galleryPhotos && galleryPhotos.length > 0)) && (
         <div className="w-full max-w-6xl relative z-10 mb-6 sm:mb-8 animate-fadeIn">
           <AutoSwipingGallery photos={galleryPhotos} isLoading={isLoadingGallery} />

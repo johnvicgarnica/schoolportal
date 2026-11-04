@@ -103,6 +103,9 @@ interface SubmissionReportViewProps {
   facultyFolders?: FacultyFolder[];
   facultyFiles?: FacultyPersonalFile[];
   initialCategory?: SubmissionCategoryTab;
+  facultyList?: FacultyDoc[];
+  activeTermId?: string;
+  termWeeksConfig?: TermWeeksConfig;
 }
 
 export interface TermDefinition {
@@ -210,6 +213,9 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   facultyFolders = [],
   facultyFiles = [],
   initialCategory,
+  facultyList: propFacultyList,
+  activeTermId: propActiveTermId,
+  termWeeksConfig: propTermWeeksConfig,
 }) => {
   // Check if current user has coordinator or administrator role
   const isCoordinator =
@@ -253,9 +259,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     currentUser.role?.toLowerCase() === 'admin' ||
     isCoordinator;
 
-  // Registered faculty state from Firebase & localStorage cache
-  const [registeredFaculty, setRegisteredFaculty] = useState<FacultyDoc[]>(() => getStoredFaculty());
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // Registered faculty state from props / Firebase & localStorage cache
+  const [registeredFaculty, setRegisteredFaculty] = useState<FacultyDoc[]>(() => {
+    return propFacultyList && propFacultyList.length > 0 ? propFacultyList : getStoredFaculty();
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Dynamically & robustly resolve whether current user is a Class Adviser
   const isClassAdviser = useMemo(() => {
@@ -388,21 +396,29 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const [selectedItemToSave, setSelectedItemToSave] = useState<number>(0);
   const [lastSavedTimestamp, setLastSavedTimestamp] = useState<string | null>(null);
 
-  // Subscribe to real-time term weeks configuration from Firebase
+  // Subscribe to real-time term weeks configuration from Firebase (reusing parent props when provided)
   useEffect(() => {
+    if (propTermWeeksConfig) {
+      setTermWeeksConfig(propTermWeeksConfig);
+      return;
+    }
     const unsub = subscribeTermWeeksConfig((config) => {
       setTermWeeksConfig(config);
     });
     return () => unsub();
-  }, []);
+  }, [propTermWeeksConfig]);
 
   // Subscribe to real-time active default academic term from Firebase
   useEffect(() => {
+    if (propActiveTermId) {
+      setActiveDefaultTermId(propActiveTermId);
+      return;
+    }
     const unsub = subscribeActiveTermId((termId) => {
       setActiveDefaultTermId(termId);
     });
     return () => unsub();
-  }, []);
+  }, [propActiveTermId]);
 
   // Compute active term storage ID
   // DLL is per academic term (term-1, term-2, term-3)
@@ -466,14 +482,19 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     comment: string;
   } | null>(null);
 
-  // Subscribe to faculty list
+  // Subscribe to faculty list (skip duplicate Firestore listener if passed via props)
   useEffect(() => {
+    if (propFacultyList && propFacultyList.length > 0) {
+      setRegisteredFaculty(propFacultyList);
+      setIsLoading(false);
+      return;
+    }
     const unsub = subscribeFaculty((list) => {
       setRegisteredFaculty(list || []);
       setIsLoading(false);
     });
     return () => unsub();
-  }, []);
+  }, [propFacultyList]);
 
   // Subscribe to faculty submissions whenever category or term changes
   useEffect(() => {
@@ -501,19 +522,18 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     return () => unsub();
   }, [effectiveTermId, activeCategory]);
 
-  // Synchronized Faculty Folders state to detect any new faculty workspace additions in real time
+  // Synchronized Faculty Folders state from props / local cache (0 duplicate Firestore listeners)
   const [liveFacultyFolders, setLiveFacultyFolders] = useState<FacultyFolder[]>(() => {
     return facultyFolders && facultyFolders.length > 0 ? facultyFolders : getStoredFacultyFolders();
   });
 
   useEffect(() => {
-    const unsub = subscribeFacultyFolders((folders) => {
-      setLiveFacultyFolders(folders || []);
-    });
-    return () => unsub();
-  }, []);
+    if (facultyFolders && facultyFolders.length > 0) {
+      setLiveFacultyFolders(facultyFolders);
+    }
+  }, [facultyFolders]);
 
-  // Synchronized Faculty Files state to evaluate uploaded DLL files in real time
+  // Synchronized Faculty Files state from props / local cache (0 duplicate Firestore listeners)
   const [liveFacultyFiles, setLiveFacultyFiles] = useState<FacultyPersonalFile[]>(() => {
     return facultyFiles && facultyFiles.length > 0 ? facultyFiles : getStoredFacultyFiles();
   });
@@ -523,13 +543,6 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       setLiveFacultyFiles(facultyFiles);
     }
   }, [facultyFiles]);
-
-  useEffect(() => {
-    const unsub = subscribeFacultyFiles((files) => {
-      setLiveFacultyFiles(files || []);
-    });
-    return () => unsub();
-  }, []);
 
   // Master Teacher DLL Review Status Modal State
   interface DllReviewModalData {

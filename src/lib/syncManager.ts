@@ -286,7 +286,15 @@ export async function performDeltaSync(
       let fetchedDocs: any[] = [];
 
       if (!lastSyncForCollection) {
-        // Full initial download for this collection
+        // If local cache already exists, treat collection as initialized to avoid cold-start full reads
+        const existingCached = (await getOfflineData<any[]>(target.storageKey)) || [];
+        if (existingCached.length > 0 && !options.forceFull) {
+          collectionTimestamps[target.collectionName] = currentSyncTime;
+          syncedCollectionsCount++;
+          continue;
+        }
+
+        // Full initial download only when no local cache exists
         const colRef = collection(db, target.collectionName);
         const snapshot = await getDocs(colRef);
         fetchedDocs = snapshot.docs.map((d) => ({

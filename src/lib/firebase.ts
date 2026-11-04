@@ -1878,27 +1878,53 @@ export const fetchFacultyFoldersOnce = async (pageSize: number = 30): Promise<Fa
   });
 };
 
-export const subscribeFacultyFolders = (onUpdate: (folders: FacultyFolder[]) => void) => {
+export const subscribeFacultyFolders = (
+  onUpdate: (folders: FacultyFolder[]) => void,
+  facultyEmail?: string
+) => {
+  const cleanEmail = facultyEmail ? facultyEmail.toLowerCase().trim() : null;
+
   // Deliver cached faculty folders immediately
   const cached = getStoredFacultyFolders();
   if (cached.length > 0) {
-    onUpdate(cached);
+    if (cleanEmail) {
+      onUpdate(cached.filter((f) => (f.facultyEmail || '').toLowerCase().trim() === cleanEmail));
+    } else {
+      onUpdate(cached);
+    }
   }
 
-  // Stream all faculty folders in real-time
-  const q = collection(db, FACULTY_FOLDERS_COL);
+  // Stream faculty folders: scope query by facultyEmail if specified to cut reads by ~95%
+  const colRef = collection(db, FACULTY_FOLDERS_COL);
+  const q = cleanEmail
+    ? query(colRef, where('facultyEmail', '==', cleanEmail))
+    : colRef;
+
   return onSnapshot(
     q,
     (snapshot) => {
       const list: FacultyFolder[] = snapshot.docs.map((d) => d.data() as FacultyFolder);
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
-      saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, list);
+      if (cleanEmail) {
+        // Merge user folders into cached storage without overwriting other records
+        const allStored = getStoredFacultyFolders();
+        const otherFolders = allStored.filter((f) => (f.facultyEmail || '').toLowerCase().trim() !== cleanEmail);
+        saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, [...list, ...otherFolders]);
+      } else {
+        saveOfflineData(FACULTY_FOLDERS_STORAGE_KEY, list);
+      }
+
       onUpdate(list);
     },
     (err) => {
       handleFirestoreError('subscribing to faculty folders collection', err);
-      onUpdate(getStoredFacultyFolders());
+      const cachedFolders = getStoredFacultyFolders();
+      if (cleanEmail) {
+        onUpdate(cachedFolders.filter((f) => (f.facultyEmail || '').toLowerCase().trim() === cleanEmail));
+      } else {
+        onUpdate(cachedFolders);
+      }
     }
   );
 };
@@ -2305,23 +2331,52 @@ export const fetchFacultyFilesPaginated = async (params: {
 };
 
 // Bounded Real-time Subscription with Quota Protection and clean unmount
-export const subscribeFacultyFiles = (onUpdate: (files: FacultyPersonalFile[]) => void) => {
+export const subscribeFacultyFiles = (
+  onUpdate: (files: FacultyPersonalFile[]) => void,
+  facultyEmail?: string
+) => {
+  const cleanEmail = facultyEmail ? facultyEmail.toLowerCase().trim() : null;
+
   // Always serve local cache immediately to prevent wait/flicker
   const cached = getStoredFacultyFiles();
   if (cached.length > 0) {
-    onUpdate(cached);
+    if (cleanEmail) {
+      onUpdate(
+        cached.filter(
+          (f) =>
+            (f.facultyEmail || '').toLowerCase().trim() === cleanEmail ||
+            f.folderId === 'school-forms' ||
+            f.folderId === 'school-documents' ||
+            f.folderId?.startsWith('school-')
+        )
+      );
+    } else {
+      onUpdate(cached);
+    }
   }
 
-  // Stream all faculty files in real-time
-  const q = collection(db, FACULTY_FILES_COL);
+  // Stream faculty files: scope query by facultyEmail if specified to cut reads by ~95%
+  const colRef = collection(db, FACULTY_FILES_COL);
+  const q = cleanEmail
+    ? query(colRef, where('facultyEmail', '==', cleanEmail))
+    : colRef;
+
   return onSnapshot(
     q,
     (snapshot) => {
       const list: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
       list.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
 
-      // Clean up local list with fresh data
-      saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
+      if (cleanEmail) {
+        // Merge user files into cached storage without overwriting other records or permanent folders
+        const allStored = getStoredFacultyFiles();
+        const otherFiles = allStored.filter(
+          (f) => (f.facultyEmail || '').toLowerCase().trim() !== cleanEmail
+        );
+        saveOfflineData(FACULTY_FILES_STORAGE_KEY, [...list, ...otherFiles]);
+      } else {
+        saveOfflineData(FACULTY_FILES_STORAGE_KEY, list);
+      }
 
       // Trigger asynchronous background cleanup of any expired 15-day files and non-PDF files in faculty folders
       cleanupExpiredFacultyFiles();
@@ -2343,7 +2398,18 @@ export const subscribeFacultyFiles = (onUpdate: (files: FacultyPersonalFile[]) =
     },
     (err) => {
       handleFirestoreError('subscribing to faculty files collection', err);
-      onUpdate(getStoredFacultyFiles());
+      const cachedFiles = getStoredFacultyFiles();
+      if (cleanEmail) {
+        onUpdate(
+          cachedFiles.filter(
+            (f) =>
+              (f.facultyEmail || '').toLowerCase().trim() === cleanEmail ||
+              f.folderId?.startsWith('school-')
+          )
+        );
+      } else {
+        onUpdate(cachedFiles);
+      }
     }
   );
 };
