@@ -177,10 +177,10 @@ export function App() {
   }, [currentUser]);
 
   // Subscribe to Faculty Personal Folders in Firebase (only when logged in)
-  // Scoped by currentUser.email for Faculty users to cut reads by ~95%
+  // Always scoped by currentUser.email for all roles to conserve Firestore reads
   useEffect(() => {
     if (!currentUser) return;
-    const emailScope = currentUser.role === 'Faculty' ? currentUser.email : undefined;
+    const emailScope = currentUser.email;
     const unsub = subscribeFacultyFolders((list) => {
       setFacultyFolders(list || []);
     }, emailScope);
@@ -188,11 +188,11 @@ export function App() {
   }, [currentUser]);
 
   // Subscribe to Faculty Personal Files in Firebase (only when logged in)
-  // Scoped by currentUser.email for Faculty users to cut reads by ~95%
+  // Always scoped by currentUser.email for all roles to conserve Firestore reads
   useEffect(() => {
     if (!currentUser) return;
     purgeNonPdfFacultyFiles();
-    const emailScope = currentUser.role === 'Faculty' ? currentUser.email : undefined;
+    const emailScope = currentUser.email;
     const unsub = subscribeFacultyFiles((list) => {
       setFacultyFiles(list || []);
     }, emailScope);
@@ -563,8 +563,31 @@ export function App() {
   };
 
   const handleDeleteFacultyFile = (id: string) => {
+    const fileToDelete = facultyFiles.find((f) => f.id === id);
     setFacultyFiles((prev) => prev.filter((f) => f.id !== id));
     deleteFacultyFileFromFirestore(id);
+
+    // If deleted file was in a DLL folder or had a week specified, re-sync submission status
+    if (fileToDelete && currentUser) {
+      const remainingFiles = facultyFiles.filter((f) => f.id !== id);
+      const isDllFile =
+        fileToDelete.week !== undefined ||
+        fileToDelete.specifiedWeek !== undefined ||
+        fileToDelete.category === 'DLL' ||
+        (fileToDelete.fileName && fileToDelete.fileName.toLowerCase().includes('week')) ||
+        (fileToDelete.title && fileToDelete.title.toLowerCase().includes('week'));
+
+      if (isDllFile) {
+        syncFacultyDllSubmissionReportOnUpload(
+          fileToDelete.facultyEmail || currentUser.email,
+          remainingFiles,
+          facultyFolders,
+          undefined,
+          fileToDelete.facultyName || currentUser.name,
+          currentUser.department
+        ).catch((err) => console.warn('DLL sync after file delete error:', err));
+      }
+    }
   };
 
   // Metrics for Header

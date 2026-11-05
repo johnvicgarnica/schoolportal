@@ -242,7 +242,7 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
   // Current academic term and weeks count for DLL submissions (reusing parent props to save Firestore reads)
   const [activeTermId, setActiveTermId] = useState<string>(() => propActiveTermId || getStoredActiveTermId());
   const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => propTermWeeksConfig || getStoredTermWeeksConfig());
-  const [specifiedWeek, setSpecifiedWeek] = useState<number>(1);
+  const [specifiedWeek, setSpecifiedWeek] = useState<number | null>(null);
 
   useEffect(() => {
     if (propActiveTermId) setActiveTermId(propActiveTermId);
@@ -292,6 +292,9 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
     }
 
     const titleCore = `${dllSub} ${dllGr}`.replace(/\s+/g, ' ').trim() || activeFolder.name;
+    if (!specifiedWeek) {
+      return `${titleCore} (Select Week)`.replace(/\s+/g, ' ').trim();
+    }
     return `${titleCore} Week ${specifiedWeek}`.replace(/\s+/g, ' ').trim();
   }, [activeFolder, isDllFolder, specifiedWeek]);
 
@@ -535,14 +538,14 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       }
 
       const titleCore = `${dllSub} ${dllGr}`.replace(/\s+/g, ' ').trim() || targetFolder.name;
-      const autoTitle = `${titleCore} Week 1`.replace(/\s+/g, ' ').trim();
+      const autoTitle = `${titleCore} (Select Week)`.replace(/\s+/g, ' ').trim();
       setFileTitle(autoTitle);
     } else {
       setFileTitle('');
     }
     setFileCategory(targetFolder?.category || CATEGORY_OPTIONS[0]);
     setFileDescription('');
-    setSpecifiedWeek(1);
+    setSpecifiedWeek(null);
     setAttachedFile(null);
     setUploadError(null);
     setIsAddFileModalOpen(true);
@@ -625,6 +628,11 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
       return;
     }
 
+    if (isDllFolder && !specifiedWeek) {
+      setUploadError('Please select a week in "Specify Week" before uploading your DLL PDF file.');
+      return;
+    }
+
     const finalTitle = isDllFolder ? autoDllDocTitle : fileTitle.trim();
     if (!finalTitle) {
       setUploadError('Please enter a document title.');
@@ -667,9 +675,9 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
           category: fileCategory,
           expiresAt,
           fileData: fileDataUrl,
-          description: isDllFolder ? `Week ${specifiedWeek}` : fileDescription.trim(),
-          week: isDllFolder ? specifiedWeek : undefined,
-          specifiedWeek: isDllFolder ? specifiedWeek : undefined,
+          description: isDllFolder && specifiedWeek ? `Week ${specifiedWeek}` : fileDescription.trim(),
+          week: isDllFolder && specifiedWeek ? specifiedWeek : undefined,
+          specifiedWeek: isDllFolder && specifiedWeek ? specifiedWeek : undefined,
         };
 
         onAddFile(filePayload);
@@ -1913,19 +1921,37 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                     </div>
 
                     <select
-                      value={specifiedWeek}
-                      onChange={(e) => setSpecifiedWeek(Number(e.target.value))}
-                      className="w-full bg-[#111b2e] border border-blue-500/50 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer font-sans font-bold"
+                      value={specifiedWeek !== null && specifiedWeek !== undefined ? specifiedWeek : ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSpecifiedWeek(val ? Number(val) : null);
+                        setUploadError(null);
+                      }}
+                      className={`w-full bg-[#111b2e] rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 cursor-pointer font-sans font-bold transition-colors ${
+                        !specifiedWeek
+                          ? 'border-2 border-amber-500/70 text-amber-200 focus:ring-amber-400 bg-amber-950/20'
+                          : 'border border-blue-500/50 text-white focus:ring-blue-400'
+                      }`}
                     >
+                      <option value="" className="bg-[#0d1524] text-slate-400 font-normal">
+                        Select Week
+                      </option>
                       {Array.from({ length: currentTermWeeksCount }, (_, i) => i + 1).map((w) => (
-                        <option key={w} value={w} className="bg-[#0d1524] text-white">
+                        <option key={w} value={w} className="bg-[#0d1524] text-white font-bold">
                           Week {w}
                         </option>
                       ))}
                     </select>
 
+                    {!specifiedWeek && (
+                      <div className="flex items-center space-x-2 text-[11px] text-amber-300 font-mono bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>Week not specified. Please choose a week to activate submission.</span>
+                      </div>
+                    )}
+
                     <p className="text-[10px] text-slate-300 font-mono leading-relaxed">
-                      💡 When all your workspace DLL folders have an uploaded document for <strong>Week {specifiedWeek}</strong>, your status will be marked as <strong className="text-emerald-400">"Submitted"</strong> in the submission report. If one or more DLL folders are not uploaded, it will be marked <strong className="text-rose-400">"Incomplete"</strong>.
+                      💡 When all your workspace DLL folders have an uploaded document for <strong>{specifiedWeek ? `Week ${specifiedWeek}` : 'the specified week'}</strong>, your status will be marked as <strong className="text-emerald-400">"Submitted"</strong> in the submission report. If one or more DLL folders are not uploaded, it will be marked <strong className="text-rose-400">"Incomplete"</strong>.
                     </p>
                   </div>
                 ) : (
@@ -1979,13 +2005,29 @@ export const FacultyPersonalDashboard: React.FC<FacultyPersonalDashboardProps> =
                   </button>
                   <button
                     type="submit"
-                    disabled={isUploading || !attachedFile}
-                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl font-bold transition-all shadow-sm cursor-pointer flex items-center space-x-1.5 font-mono text-xs"
+                    disabled={isUploading || !attachedFile || (isDllFolder && !specifiedWeek)}
+                    title={
+                      !attachedFile
+                        ? 'Please select a file to upload'
+                        : isDllFolder && !specifiedWeek
+                        ? 'Please select a week in "Specify Week" to enable submission'
+                        : 'Upload to Firebase'
+                    }
+                    className={`px-5 py-2 rounded-xl font-bold transition-all shadow-sm flex items-center space-x-1.5 font-mono text-xs ${
+                      isUploading || !attachedFile || (isDllFolder && !specifiedWeek)
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50 border border-slate-700/60 pointer-events-none select-none'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer hover:shadow-emerald-600/20'
+                    }`}
                   >
                     {isUploading ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
                         <span>Uploading to Firebase...</span>
+                      </>
+                    ) : isDllFolder && !specifiedWeek ? (
+                      <>
+                        <Calendar className="w-4 h-4 text-amber-400/70" />
+                        <span>Select Week to Submit</span>
                       </>
                     ) : (
                       <>

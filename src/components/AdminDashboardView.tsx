@@ -12,7 +12,6 @@ import {
   GalleryPhoto,
   EmbeddedVideo,
 } from '../types';
-import { AdminFacultyFoldersDirectory } from './AdminFacultyFoldersDirectory';
 import { GoogleDocsSpreadsheetEditor } from './GoogleDocsSpreadsheetEditor';
 import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
@@ -93,7 +92,6 @@ import {
   FileText,
   Clock,
   CheckCircle,
-  FolderGit2,
   FolderLock,
   Link,
   RotateCcw,
@@ -175,9 +173,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 }) => {
   const isAdmin = currentUser.role === 'Admin';
 
-  // Admin Sub-Section Tab ('passwords', 'faculty-folders', 'announcements', 'school-folders', 'submission-report', 'gallery', 'videos', or 'database-storage')
+  // Admin Sub-Section Tab ('passwords', 'announcements', 'school-folders', 'submission-report', 'gallery', 'videos', or 'database-storage')
   // Default to 'announcements' so passwords page is not exposed by default
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'faculty-folders' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery' | 'videos' | 'database-storage'>('announcements');
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery' | 'videos' | 'database-storage'>('announcements');
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
 
   // Login Page Gallery Photos State (Master Admin)
@@ -688,16 +686,19 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     (currentUser.role?.toLowerCase() === 'coordinator') ||
     (currentUser.email?.toLowerCase().includes('coordinator') ?? false);
 
-  // Restrict Accounts & Passwords tab strictly to Master Admin, and restrict Faculty Folders from Coordinator
+  // Restrict Accounts & Passwords tab strictly to Master Admin
   // Ensure non-coordinator admin does not have submission-report subtab in Admin Dashboard (redundant since there is outer Submission Report)
   useEffect(() => {
     if (!isMasterAdmin && (adminSubTab === 'passwords' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'database-storage')) {
       setAdminSubTab('announcements');
     }
-    if (isCoordinator && (adminSubTab === 'passwords' || adminSubTab === 'faculty-folders' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'database-storage')) {
+    if (isCoordinator && (adminSubTab === 'passwords' || (adminSubTab as string) === 'faculty-folders' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'database-storage')) {
       setAdminSubTab('announcements');
     }
     if (!isCoordinator && adminSubTab === 'submission-report') {
+      setAdminSubTab('announcements');
+    }
+    if ((adminSubTab as string) === 'faculty-folders') {
       setAdminSubTab('announcements');
     }
   }, [isMasterAdmin, isCoordinator, adminSubTab]);
@@ -1559,22 +1560,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             <span>Bulletins</span>
             <span className="opacity-80 font-normal ml-0.5">({announcements.length})</span>
           </button>
-
-          {!isCoordinator && (
-            <button
-              type="button"
-              onClick={() => setAdminSubTab('faculty-folders')}
-              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
-                adminSubTab === 'faculty-folders'
-                  ? 'bg-amber-700 text-white shadow-md ring-2 ring-amber-400/60 border border-amber-500'
-                  : 'bg-amber-600/90 hover:bg-amber-600 text-white border border-amber-500/60 hover:shadow-xs'
-              }`}
-            >
-              <FolderGit2 className="w-3.5 h-3.5 text-amber-200 shrink-0" />
-              <span>Faculty Folders</span>
-              <span className="opacity-80 font-normal ml-0.5">({facultyFolders.length})</span>
-            </button>
-          )}
 
           <button
             type="button"
@@ -3446,20 +3431,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             </form>
           </div>
         </div>
-      )}
-
-      {/* SUB-TAB: FACULTY WORKSPACE FOLDERS (GROUPED BY SURNAME) */}
-      {adminSubTab === 'faculty-folders' && !isCoordinator && (
-        <AdminFacultyFoldersDirectory
-          facultyList={facultyList}
-          facultyFolders={facultyFolders}
-          facultyFiles={facultyFiles}
-          currentUser={currentUser}
-          onAddFacultyFolder={onAddFacultyFolder}
-          onDeleteFacultyFolder={onDeleteFacultyFolder}
-          onDeleteFacultyFile={onDeleteFacultyFile}
-          onOpenSpreadsheetEditor={handleOpenAdminSpreadsheetEditor}
-        />
       )}
 
       {/* SUB-TAB: SCHOOL PERMANENT FOLDERS (SCHOOL FORMS & SCHOOL DOCUMENTS) */}

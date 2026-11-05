@@ -612,7 +612,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       .then((res) => {
         setIsLoading(false);
         if (!res.success || !res.user) {
-          setErrorMsg(res.error || 'Authentication failed. Please check your credentials.');
+          const rawErr = res.error || 'Authentication failed. Please check your credentials.';
+          if (
+            rawErr.toLowerCase().includes('quota') ||
+            rawErr.toLowerCase().includes('resource-exhausted') ||
+            rawErr.toLowerCase().includes('resource_exhausted') ||
+            rawErr.toLowerCase().includes('server time out')
+          ) {
+            setErrorMsg('Server Time Out');
+          } else {
+            setErrorMsg(rawErr);
+          }
           return;
         }
 
@@ -629,7 +639,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       })
       .catch((err) => {
         setIsLoading(false);
-        setErrorMsg('Database error during sign in. Please verify your connection.');
+        const errMsg = String(err?.message || err || '').toLowerCase();
+        if (
+          errMsg.includes('quota') ||
+          errMsg.includes('resource_exhausted') ||
+          errMsg.includes('timeout') ||
+          errMsg.includes('time out')
+        ) {
+          setErrorMsg('Server Time Out');
+        } else {
+          setErrorMsg('Server Time Out');
+        }
         console.error('Sign-in error:', err);
       });
   };

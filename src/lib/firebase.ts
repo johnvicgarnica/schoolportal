@@ -1278,11 +1278,17 @@ export const verifyUserDirectlyFromFirestore = async (
 
       return {
         success: false,
-        error: 'Free Daily Database Read Quota Exceeded: Your cloud database read limit has been reached for today. Existing cached users can sign in, but new accounts cannot be verified until the daily quota resets.',
+        error: 'Server Time Out',
       };
     }
 
     console.error('Direct Firestore authentication error:', err);
+    if (isQuotaError(err)) {
+      return {
+        success: false,
+        error: 'Server Time Out',
+      };
+    }
     return {
       success: false,
       error: `Authentication failed due to database connection issue: ${err?.message || 'Please check your internet connection and try again.'}`,
@@ -2534,6 +2540,102 @@ export const subscribeFacultyFiles = (
   return shared(onUpdate);
 };
 
+// In-memory session caches to avoid re-reading for the same faculty / week
+const facultyFoldersCacheByEmail = new Map<string, { data: FacultyFolder[]; timestamp: number }>();
+const facultyWeekFilesCache = new Map<string, { data: FacultyPersonalFile[]; timestamp: number }>();
+
+/**
+ * On-demand: Fetch only DLL folders for a specific faculty member (e.g. when reviewing in Submission Report)
+ * Uses in-memory cache with 3-minute TTL to prevent repeat reads.
+ */
+export const fetchFacultyDllFoldersByEmail = async (facultyEmail: string): Promise<FacultyFolder[]> => {
+  const cleanEmail = (facultyEmail || '').toLowerCase().trim();
+  if (!cleanEmail) return [];
+
+  const now = Date.now();
+  const cached = facultyFoldersCacheByEmail.get(cleanEmail);
+  if (cached && now - cached.timestamp < 3 * 60 * 1000) {
+    return cached.data;
+  }
+
+  // Also check stored offline folders
+  const stored = getStoredFacultyFolders();
+  const storedMatches = stored.filter(
+    (f) =>
+      (f.facultyEmail || '').toLowerCase().trim() === cleanEmail &&
+      (f.category === 'DLL' || (f.name && f.name.startsWith('DLL')) || f.category?.includes('DLL'))
+  );
+
+  try {
+    const colRef = collection(db, FACULTY_FOLDERS_COL);
+    const q = query(colRef, where('facultyEmail', '==', cleanEmail));
+    const snapshot = await getDocs(q);
+    const list: FacultyFolder[] = snapshot.docs.map((d) => d.data() as FacultyFolder);
+    const dllFolders = list.filter(
+      (f) => f.category === 'DLL' || (f.name && f.name.startsWith('DLL')) || f.category?.includes('DLL')
+    );
+    facultyFoldersCacheByEmail.set(cleanEmail, { data: dllFolders, timestamp: now });
+    return dllFolders;
+  } catch (err) {
+    handleFirestoreError(`fetching folders for ${cleanEmail}`, err);
+    if (storedMatches.length > 0) return storedMatches;
+    return [];
+  }
+};
+
+/**
+ * On-demand: Fetch uploaded files ONLY for a certain faculty in a certain week (when notification bell is clicked)
+ * Does NOT download files of other faculty members or other weeks.
+ * Uses in-memory cache with 3-minute TTL to conserve Firestore read quota.
+ */
+export const fetchFacultyDllFilesForWeek = async (
+  facultyEmail: string,
+  weekNumber: number
+): Promise<FacultyPersonalFile[]> => {
+  const cleanEmail = (facultyEmail || '').toLowerCase().trim();
+  if (!cleanEmail) return [];
+
+  const cacheKey = `${cleanEmail}_week_${weekNumber}`;
+  const now = Date.now();
+  const cached = facultyWeekFilesCache.get(cacheKey);
+  if (cached && now - cached.timestamp < 3 * 60 * 1000) {
+    return cached.data;
+  }
+
+  try {
+    const colRef = collection(db, FACULTY_FILES_COL);
+    // Query only this specific teacher's files
+    const q = query(colRef, where('facultyEmail', '==', cleanEmail));
+    const snapshot = await getDocs(q);
+    const allTeacherFiles: FacultyPersonalFile[] = snapshot.docs.map((d) => d.data() as FacultyPersonalFile);
+
+    // Filter to only the requested week's uploaded files
+    const weekFiles = allTeacherFiles.filter((file) => {
+      const format = (file.format || '').toLowerCase();
+      const fileName = (file.fileName || '').toLowerCase();
+      const isPdf = format === 'pdf' || fileName.endsWith('.pdf');
+      if (!isPdf) return false;
+
+      return (
+        file.week === weekNumber ||
+        file.specifiedWeek === weekNumber ||
+        file.description?.toLowerCase() === `week ${weekNumber}` ||
+        file.title?.toLowerCase().includes(`week ${weekNumber}`) ||
+        file.fileName?.toLowerCase().includes(`week${weekNumber}`) ||
+        file.fileName?.toLowerCase().includes(`week_${weekNumber}`) ||
+        file.fileName?.toLowerCase().includes(`week-${weekNumber}`) ||
+        file.fileName?.toLowerCase().includes(`week ${weekNumber}`)
+      );
+    });
+
+    facultyWeekFilesCache.set(cacheKey, { data: weekFiles, timestamp: now });
+    return weekFiles;
+  } catch (err) {
+    handleFirestoreError(`fetching week ${weekNumber} files for ${cleanEmail}`, err);
+    return [];
+  }
+};
+
 // 10. FACULTY WEEKLY SUBMISSION REPORTS (DLL, TOS, TQ - 11 WEEKS PER TERM)
 export type SubmissionCategory = 'dll' | 'tos' | 'tq';
 export type ItemSubmissionStatus = 'unchecked' | 'checked' | 'with-comments' | 'incomplete' | 'late';
@@ -2883,17 +2985,24 @@ export const syncFacultyDllSubmissionReportOnUpload = async (
           hasChanges = true;
         }
       } else if (uploadedCount > 0 && uploadedCount < totalDllFoldersCount) {
-        // One or more DLL folders are not uploaded -> Mark "Incomplete"
+        // One or more DLL folders are not uploaded -> Mark "Incomplete" (Lacking)
         const missingFolders = facultyDllFolders.filter((f) => !uploadedFolderIds.has(f.id)).map((f) => f.name);
-        const incompleteMsg = `Incomplete: ${uploadedCount}/${totalDllFoldersCount} DLL folders uploaded. Pending: ${missingFolders.join(', ')}`;
-        if (facultyStatuses[idx] !== 'incomplete' || facultyComm[String(idx)] !== incompleteMsg) {
+        const incompleteMsg = `Incomplete (Lacking): ${uploadedCount}/${totalDllFoldersCount} DLL folders uploaded. Missing in: ${missingFolders.join(', ')}`;
+        if (facultyStatuses[idx] !== 'incomplete' || facultyWeeks[idx] || facultyComm[String(idx)] !== incompleteMsg) {
           facultyWeeks[idx] = false;
           facultyStatuses[idx] = 'incomplete';
           facultyComm[String(idx)] = incompleteMsg;
           hasChanges = true;
         }
       } else {
-        // 0 documents uploaded for this week in all DLL folders: DO NOTHING / RETAIN OLD DATA
+        // 0 documents uploaded for this week in all DLL folders:
+        // If files were previously uploaded but deleted, reset status to unchecked
+        if (facultyWeeks[idx] || facultyStatuses[idx] === 'checked' || facultyStatuses[idx] === 'incomplete') {
+          facultyWeeks[idx] = false;
+          facultyStatuses[idx] = 'unchecked';
+          facultyComm[String(idx)] = '';
+          hasChanges = true;
+        }
       }
     }
 
@@ -3164,6 +3273,66 @@ export const subscribeFacultySubmissions = (
   return shared((payload) => {
     onUpdate(payload.map, payload.statusMap, payload.commentMap, payload.confirmedMap);
   });
+};
+
+/**
+ * On-demand: Fetch a single faculty member's submission document (for individualized card view in Master Teacher role)
+ * Reads exactly 1 document: ${termId}_${emailToDocId(cleanEmail)}
+ */
+export const fetchSingleFacultySubmission = async (
+  termId: string,
+  category: SubmissionCategory,
+  facultyEmail: string
+): Promise<{
+  weeks: boolean[];
+  statuses: ItemSubmissionStatus[];
+  comments: Record<string, string>;
+  confirmedWeeks: Record<string, boolean>;
+}> => {
+  const cleanEmail = (facultyEmail || '').toLowerCase().trim();
+  if (!cleanEmail) {
+    return { weeks: [], statuses: [], comments: {}, confirmedWeeks: {} };
+  }
+  const colName = getCategoryCollectionName(category);
+  const docId = `${termId}_${emailToDocId(cleanEmail)}`;
+  try {
+    const docSnap = await getDoc(doc(db, colName, docId));
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      const weeks: boolean[] = Array.isArray(data.weeks) ? data.weeks : [];
+      let statuses: ItemSubmissionStatus[] = [];
+      if (Array.isArray(data.statuses)) {
+        statuses = data.statuses;
+      } else if (weeks.length > 0) {
+        statuses = weeks.map((w: boolean) => (w ? 'checked' : 'unchecked'));
+      }
+      const comments: Record<string, string> =
+        data.comments && typeof data.comments === 'object' ? data.comments : {};
+      const confirmedWeeks: Record<string, boolean> =
+        data.confirmedWeeks && typeof data.confirmedWeeks === 'object' ? data.confirmedWeeks : {};
+
+      // Save to local cache
+      const storedSubs = getStoredFacultySubmissions(termId, category);
+      const storedStats = getStoredFacultyStatuses(termId, category);
+      const storedComms = getStoredFacultyComments(termId, category);
+      const storedConfs = getStoredFacultyConfirmedWeeks(termId, category);
+
+      storedSubs[cleanEmail] = weeks;
+      storedStats[cleanEmail] = statuses;
+      storedComms[cleanEmail] = comments;
+      storedConfs[cleanEmail] = confirmedWeeks;
+
+      saveFacultySubmissionsToLocalStorage(termId, category, storedSubs);
+      saveFacultyStatusesToLocalStorage(termId, category, storedStats);
+      saveFacultyCommentsToLocalStorage(termId, category, storedComms);
+      saveFacultyConfirmedWeeksToLocalStorage(termId, category, storedConfs);
+
+      return { weeks, statuses, comments, confirmedWeeks };
+    }
+  } catch (err) {
+    handleFirestoreError(`fetching single submission doc for ${cleanEmail}`, err);
+  }
+  return { weeks: [], statuses: [], comments: {}, confirmedWeeks: {} };
 };
 
 // 11. FACULTY TOS / TQ SUBMISSION REPORTS

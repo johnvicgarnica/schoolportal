@@ -33,26 +33,15 @@ import {
   getStoredClassAdviserSchoolForms,
   subscribeFacultyFolders,
   getStoredFacultyFolders,
-  subscribeFacultyFiles,
   getStoredFacultyFiles,
   confirmDllReviewStatusInFirestore,
   getStoredFacultyConfirmedWeeks,
+  fetchFacultyDllFoldersByEmail,
+  fetchFacultyDllFilesForWeek,
+  fetchSingleFacultySubmission,
 } from '../lib/firebase';
 import { FacultyPersonalFile } from '../types';
 import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-  PieChart,
-  Pie,
-  Legend,
-} from 'recharts';
 import {
   FileCheck2,
   CheckSquare,
@@ -68,6 +57,7 @@ import {
   RefreshCw,
   Sparkles,
   ChevronDown,
+  ChevronUp,
   Building2,
   Check,
   Copy,
@@ -80,7 +70,6 @@ import {
   FileText,
   HelpCircle,
   TrendingUp,
-  PieChart as PieChartIcon,
   SlidersHorizontal,
   Plus,
   Minus,
@@ -366,8 +355,6 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'complete' | 'with-comments' | 'incomplete' | 'late' | 'in-progress' | 'none'>('all');
-  const [viewMode, setViewMode] = useState<'faculty-chart' | 'weekly-chart' | 'pie-chart'>('faculty-chart');
-  const [facultyPieTab, setFacultyPieTab] = useState<'both' | 'compliance' | 'volume' | 'periods'>('both');
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
 
   // Class Adviser School Forms Data Map (SF 1, 3, 4, 5, 6, 8, 10 & SF 2 Monthly)
@@ -499,6 +486,71 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     return () => unsub();
   }, [propFacultyList]);
 
+  // Master Teacher Individualized Faculty Cards on-demand download states:
+  const [directoryLayout, setDirectoryLayout] = useState<'cards' | 'table'>(() => (isMasterTeacher ? 'cards' : 'table'));
+  const [expandedFacultyMap, setExpandedFacultyMap] = useState<Record<string, boolean>>({});
+  const [loadingFacultyMap, setLoadingFacultyMap] = useState<Record<string, boolean>>({});
+  const [loadedFacultyMap, setLoadedFacultyMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (isMasterTeacher) {
+      setDirectoryLayout('cards');
+    }
+  }, [isMasterTeacher]);
+
+  // Reset expanded / loaded map when switching terms or categories so data stays fresh
+  useEffect(() => {
+    setExpandedFacultyMap({});
+    setLoadedFacultyMap({});
+    setLoadingFacultyMap({});
+  }, [effectiveTermId, activeCategory]);
+
+  const handleToggleFacultyCard = async (facultyEmail: string) => {
+    const cleanEmail = (facultyEmail || '').toLowerCase().trim();
+    if (!cleanEmail) return;
+
+    const nextExpanded = !expandedFacultyMap[cleanEmail];
+    setExpandedFacultyMap((prev) => ({
+      ...prev,
+      [cleanEmail]: nextExpanded,
+    }));
+
+    // If expanding and not yet loaded from Firestore for this term/category, fetch ONLY this faculty member's document (1 read)
+    if (nextExpanded && !loadedFacultyMap[cleanEmail] && activeCategory !== 'class-advisers') {
+      setLoadingFacultyMap((prev) => ({ ...prev, [cleanEmail]: true }));
+      try {
+        const cat = activeCategory as SubmissionCategory;
+        const result = await fetchSingleFacultySubmission(effectiveTermId, cat, cleanEmail);
+
+        setSubmissions((prev) => ({
+          ...prev,
+          [cleanEmail]: result.weeks,
+          [facultyEmail]: result.weeks,
+        }));
+        setItemStatuses((prev) => ({
+          ...prev,
+          [cleanEmail]: result.statuses,
+          [facultyEmail]: result.statuses,
+        }));
+        setItemComments((prev) => ({
+          ...prev,
+          [cleanEmail]: result.comments,
+          [facultyEmail]: result.comments,
+        }));
+        setConfirmedWeeks((prev) => ({
+          ...prev,
+          [cleanEmail]: result.confirmedWeeks,
+          [facultyEmail]: result.confirmedWeeks,
+        }));
+        setLoadedFacultyMap((prev) => ({ ...prev, [cleanEmail]: true }));
+      } catch (err) {
+        console.error('Error fetching single faculty submission on card click:', err);
+      } finally {
+        setLoadingFacultyMap((prev) => ({ ...prev, [cleanEmail]: false }));
+      }
+    }
+  };
+
   // Subscribe to faculty submissions whenever category or term changes
   useEffect(() => {
     if (activeCategory === 'class-advisers') return;
@@ -513,6 +565,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     setItemComments(cachedComm || {});
     setConfirmedWeeks(cachedConf || {});
     setIsLoading(true);
+
+    // If Master Teacher, DO NOT automatically download all submissions from the database!
+    // Per requirement: "In master teacher role submission report dashboard, do not download all the files of faculty only download and show the uploaded files in a certain week when notification bell is clicked and only download the file of a certain faculty"
+    // "Individualize list in the submission report dashboard in master teacher role by making a card like with the name of the faculty member, when the card is clicked it will show the checkboxes. Do not download automatically the data in the database, only download when the card is clicked and only download the data of the certain faculty"
+    if (isMasterTeacher) {
+      setIsLoading(false);
+      return;
+    }
 
     const teacherScope = (!canEditDllTosTq && !isAdmin && currentUser.role === 'Faculty')
       ? currentUser.email
@@ -532,7 +592,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     );
 
     return () => unsub();
-  }, [effectiveTermId, activeCategory, canEditDllTosTq, isAdmin, currentUser.role, currentUser.email]);
+  }, [effectiveTermId, activeCategory, canEditDllTosTq, isAdmin, currentUser.role, currentUser.email, isMasterTeacher]);
 
   // Synchronized Faculty Folders state from props / local cache (0 duplicate Firestore listeners)
   const [liveFacultyFolders, setLiveFacultyFolders] = useState<FacultyFolder[]>(() => {
@@ -544,17 +604,6 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       setLiveFacultyFolders(facultyFolders);
     }
   }, [facultyFolders]);
-
-  // Synchronized Faculty Files state from props / local cache (0 duplicate Firestore listeners)
-  const [liveFacultyFiles, setLiveFacultyFiles] = useState<FacultyPersonalFile[]>(() => {
-    return facultyFiles && facultyFiles.length > 0 ? facultyFiles : getStoredFacultyFiles();
-  });
-
-  useEffect(() => {
-    if (facultyFiles && facultyFiles.length > 0) {
-      setLiveFacultyFiles(facultyFiles);
-    }
-  }, [facultyFiles]);
 
   // Master Teacher DLL Review Status Modal State
   interface DllReviewModalData {
@@ -573,6 +622,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     currentStatus: ItemSubmissionStatus;
     currentComment: string;
     isFullySubmitted: boolean;
+    isLoadingFiles?: boolean;
   }
 
   const [dllReviewModalData, setDllReviewModalData] = useState<DllReviewModalData | null>(null);
@@ -581,46 +631,20 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   const [isSubmittingReview, setIsSubmittingReview] = useState<boolean>(false);
   const [previewingFile, setPreviewingFile] = useState<FacultyPersonalFile | null>(null);
 
-  // Open the DLL Review Status modal for Master Teacher
-  const handleOpenDllReviewStatus = (
+  // Open the DLL Review Status modal for Master Teacher (On-demand download only for this faculty and week)
+  const handleOpenDllReviewStatus = async (
     faculty: { email: string; name: string; surname: string; department: string },
     weekIdx: number
   ) => {
     const cleanEmail = faculty.email.toLowerCase().trim();
-    const facultyDllFolders = liveFacultyFolders.filter(
-      (f) =>
-        (f.facultyEmail || '').toLowerCase().trim() === cleanEmail &&
-        (f.category === 'DLL' || (f.name && f.name.startsWith('DLL')) || f.category?.includes('DLL'))
-    );
-
     const weekNum = weekIdx + 1;
-    const filesByFolder: Record<string, FacultyPersonalFile[]> = {};
-    const weekFiles: FacultyPersonalFile[] = [];
-
-    facultyDllFolders.forEach((folder) => {
-      const matched = liveFacultyFiles.filter(
-        (file) =>
-          file.folderId === folder.id &&
-          (file.week === weekNum ||
-            file.specifiedWeek === weekNum ||
-            file.description?.toLowerCase() === `week ${weekNum}` ||
-            file.title?.toLowerCase().includes(`week ${weekNum}`) ||
-            file.fileName?.toLowerCase().includes(`week${weekNum}`) ||
-            file.fileName?.toLowerCase().includes(`week_${weekNum}`) ||
-            file.fileName?.toLowerCase().includes(`week-${weekNum}`) ||
-            file.fileName?.toLowerCase().includes(`week ${weekNum}`))
-      );
-      filesByFolder[folder.id] = matched;
-      weekFiles.push(...matched);
-    });
-
     const currentStatus = getItemStatus(faculty.email, weekIdx);
     const currentComment = getItemComment(faculty.email, weekIdx);
-    const isFullySubmitted = facultyDllFolders.length > 0 && Object.values(filesByFolder).every((arr) => arr.length > 0);
 
     const termObj = termsList.find((t) => t.id === selectedTermId);
     const termDisplayName = termObj?.name || (selectedTermId === 'term-1' ? '1st Term' : selectedTermId === 'term-2' ? '2nd Term' : '3rd Term');
 
+    // 1. Immediately open modal with loading indicator (zero bulk download on dashboard startup)
     setDllReviewModalData({
       facultyEmail: faculty.email,
       facultyName: faculty.name,
@@ -630,17 +654,50 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       weekNumber: weekNum,
       termId: selectedTermId,
       termName: termDisplayName,
-      totalDllFolders: facultyDllFolders.length,
-      dllFolders: facultyDllFolders,
-      uploadedFilesByFolder: filesByFolder,
-      allDllFilesForWeek: weekFiles,
+      totalDllFolders: 0,
+      dllFolders: [],
+      uploadedFilesByFolder: {},
+      allDllFilesForWeek: [],
       currentStatus,
       currentComment,
-      isFullySubmitted,
+      isFullySubmitted: false,
+      isLoadingFiles: true,
     });
 
     setReviewStatusChoice(currentStatus === 'unchecked' ? 'checked' : (currentStatus as any));
     setReviewFeedback(currentComment || '');
+
+    // 2. Only download files and DLL folders for THIS specific faculty in THIS certain week
+    try {
+      const [dllFolders, weekFiles] = await Promise.all([
+        fetchFacultyDllFoldersByEmail(cleanEmail),
+        fetchFacultyDllFilesForWeek(cleanEmail, weekNum),
+      ]);
+
+      const filesByFolder: Record<string, FacultyPersonalFile[]> = {};
+      dllFolders.forEach((folder) => {
+        const matched = weekFiles.filter((file) => file.folderId === folder.id);
+        filesByFolder[folder.id] = matched;
+      });
+
+      const isFullySubmitted = dllFolders.length > 0 && Object.values(filesByFolder).every((arr) => arr.length > 0);
+
+      setDllReviewModalData((prev) => {
+        if (!prev || prev.facultyEmail !== faculty.email || prev.weekIndex !== weekIdx) return prev;
+        return {
+          ...prev,
+          totalDllFolders: dllFolders.length,
+          dllFolders,
+          uploadedFilesByFolder: filesByFolder,
+          allDllFilesForWeek: weekFiles,
+          isFullySubmitted,
+          isLoadingFiles: false,
+        };
+      });
+    } catch (err) {
+      console.error('Error downloading DLL review files:', err);
+      setDllReviewModalData((prev) => (prev ? { ...prev, isLoadingFiles: false } : null));
+    }
   };
 
   // Confirm final DLL review status by Master Teacher
@@ -1589,153 +1646,6 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     };
   }, [currentUser, submissions, itemStatuses, itemComments, totalItemCount]);
 
-  // Chart Data: Progress per Faculty
-  const facultyChartData = useMemo(() => {
-    return filteredFaculty.map((f) => {
-      const items = submissions[f.email] || Array(totalItemCount).fill(false);
-      const visibleSlice = items.slice(0, totalItemCount);
-      const submittedCount = visibleSlice.filter(Boolean).length;
-      const percentage = Math.round((submittedCount / totalItemCount) * 100);
-
-      return {
-        name: f.surname || f.name.split(' ')[0],
-        fullName: f.name,
-        email: f.email,
-        department: f.department,
-        submittedCount: submittedCount,
-        totalItems: totalItemCount,
-        percentage: percentage,
-      };
-    });
-  }, [filteredFaculty, submissions, totalItemCount]);
-
-  // Chart Data: Column Compliance Trend (Weeks or Term 1/2/3)
-  const trendChartData = useMemo(() => {
-    return columnItems.map((col) => {
-      let count = 0;
-      allFaculty.forEach((f) => {
-        const items = submissions[f.email] || Array(totalItemCount).fill(false);
-        if (items[col.index]) count++;
-      });
-      const pct = allFaculty.length > 0 ? Math.round((count / allFaculty.length) * 100) : 0;
-      return {
-        itemLabel: col.fullLabel,
-        shortLabel: col.headerLabel,
-        submittedCount: count,
-        totalFaculty: allFaculty.length,
-        percentage: pct,
-      };
-    });
-  }, [allFaculty, submissions, columnItems, totalItemCount]);
-
-  // Pie Chart Dataset 1: Overall Department Compliance Status Distribution
-  const compliancePieData = useMemo(() => {
-    const data = [
-      {
-        name: '100% Fully Compliant',
-        shortName: 'Completed',
-        value: stats.completedFacultyCount,
-        color: '#10B981', // Emerald 500
-        percentage: stats.totalFaculty > 0 ? Math.round((stats.completedFacultyCount / stats.totalFaculty) * 100) : 0,
-        description: `Submitted all ${totalItemCount} ${isWeeklyCategory ? 'weeks' : 'terms'}`,
-      },
-      {
-        name: 'In Progress (Partial)',
-        shortName: 'In Progress',
-        value: stats.inProgressFacultyCount,
-        color: '#F59E0B', // Amber 500
-        percentage: stats.totalFaculty > 0 ? Math.round((stats.inProgressFacultyCount / stats.totalFaculty) * 100) : 0,
-        description: `Submitted 1 to ${Math.max(1, totalItemCount - 1)} ${isWeeklyCategory ? 'weeks' : 'terms'}`,
-      },
-      {
-        name: 'Not Started / Pending',
-        shortName: 'Pending',
-        value: stats.noSubmissionFacultyCount,
-        color: '#94A3B8', // Slate 400
-        percentage: stats.totalFaculty > 0 ? Math.round((stats.noSubmissionFacultyCount / stats.totalFaculty) * 100) : 0,
-        description: `0 ${isWeeklyCategory ? 'weeks' : 'terms'} recorded`,
-      },
-    ];
-
-    // Filter out 0 values for clean pie chart display unless all are 0
-    const nonZero = data.filter((d) => d.value > 0);
-    return nonZero.length > 0 ? nonZero : data;
-  }, [stats, totalItemCount, isWeeklyCategory]);
-
-  // Pie Chart Dataset 2: Deliverables Volume (Checked vs With Comments vs Pending items)
-  const volumePieData = useMemo(() => {
-    const pendingItems = Math.max(0, stats.totalPossible - stats.totalCompleted);
-    const data = [
-      {
-        name: 'Checked (No Comments)',
-        shortName: 'Checked',
-        value: stats.totalCleanChecked,
-        color: '#10B981', // Emerald 500
-        percentage: stats.totalPossible > 0 ? Math.round((stats.totalCleanChecked / stats.totalPossible) * 100) : 0,
-        description: `Reviewed and approved with no corrections needed`,
-      },
-      {
-        name: 'With Comments (Corrections)',
-        shortName: 'With Comments',
-        value: stats.totalWithComments,
-        color: '#F59E0B', // Amber 500
-        percentage: stats.totalPossible > 0 ? Math.round((stats.totalWithComments / stats.totalPossible) * 100) : 0,
-        description: `Deliverables marked with feedback or corrections`,
-      },
-      {
-        name: 'Incomplete (Lacking)',
-        shortName: 'Incomplete',
-        value: stats.totalIncomplete,
-        color: '#EF4444', // Rose / Red 500
-        percentage: stats.totalPossible > 0 ? Math.round((stats.totalIncomplete / stats.totalPossible) * 100) : 0,
-        description: `Deliverables marked lacking required components or attachments`,
-      },
-      {
-        name: 'Late (Submitted Late)',
-        shortName: 'Late',
-        value: stats.totalLate,
-        color: '#F97316', // Orange 500
-        percentage: stats.totalPossible > 0 ? Math.round((stats.totalLate / stats.totalPossible) * 100) : 0,
-        description: `Deliverables submitted past the scheduled deadline`,
-      },
-      {
-        name: 'Pending Deliverables',
-        shortName: 'Pending',
-        value: pendingItems,
-        color: '#CBD5E1', // Slate 300
-        percentage: stats.totalPossible > 0 ? Math.round((pendingItems / stats.totalPossible) * 100) : 0,
-        description: `Deliverables awaiting submission or checking`,
-      },
-    ];
-    const nonZero = data.filter((d) => d.value > 0);
-    return nonZero.length > 0 ? nonZero : data;
-  }, [stats]);
-
-  // Pie Chart Dataset 3: Deliverable Distribution by Period (Weeks or Terms)
-  const periodDistributionPieData = useMemo(() => {
-    const COLOR_PALETTE = [
-      '#3B82F6', // blue
-      '#6366F1', // indigo
-      '#8B5CF6', // purple
-      '#A855F7', // fuchsia
-      '#EC4899', // pink
-      '#F43F5E', // rose
-      '#F97316', // orange
-      '#F59E0B', // amber
-      '#10B981', // emerald
-      '#14B8A6', // teal
-      '#06B6D4', // cyan
-    ];
-
-    return trendChartData.map((col, idx) => ({
-      name: col.shortLabel,
-      fullName: col.itemLabel,
-      value: col.submittedCount,
-      totalFaculty: col.totalFaculty,
-      percentage: col.percentage,
-      color: COLOR_PALETTE[idx % COLOR_PALETTE.length],
-    }));
-  }, [trendChartData]);
 
   // Export to CSV (Privacy aware)
   const handleExportCSV = () => {
@@ -3912,383 +3822,825 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
           </div>
 
-          {/* Directory Table / Matrix View */}
-          <div className="overflow-x-auto">
-            <table className={`w-full text-left border-collapse ${termGroups ? 'min-w-[1040px]' : 'min-w-[700px]'}`}>
-              <thead>
-                {termGroups ? (
-                  <>
-                    {/* Tier 1 Header Row: Grouped by TERM 1 TOS/TQ, TERM 2 TOS/TQ, TERM 3 TOS/TQ */}
-                    <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
-                      <th rowSpan={2} className="py-3 px-4 w-52 sm:w-64 border-r border-[#24334b] align-middle text-slate-200">
-                        Faculty Member
-                      </th>
-                      <th rowSpan={2} className="py-3 px-3 w-32 sm:w-40 border-r border-[#24334b] align-middle text-slate-200">
-                        Department
-                      </th>
-                      {termGroups.map((group, gIdx) => (
-                        <th
-                          key={group.label}
-                          colSpan={group.span}
-                          className={`py-2 px-3 text-center border-l-2 border-b border-[#24334b] font-black text-xs tracking-wider ${
-                            activeCategory === 'tos'
-                              ? 'bg-[#151c30] text-purple-300 border-t-2 border-t-purple-500 border-l-purple-500/40'
-                              : 'bg-[#1c1a27] text-amber-300 border-t-2 border-t-amber-500 border-l-amber-500/40'
-                          }`}
-                        >
-                          <div className="flex items-center justify-center space-x-1.5">
-                            <span className="font-extrabold">{group.label}</span>
-                          </div>
-                        </th>
-                      ))}
-                      <th rowSpan={2} className="py-3 px-3 text-center w-24 border-l border-[#24334b] align-middle text-slate-200">
-                        Progress
-                      </th>
-                      <th rowSpan={2} className="py-3 px-3 text-center w-24 border-l border-[#24334b] align-middle text-slate-200">
-                        Quick Action
-                      </th>
-                    </tr>
-                    {/* Tier 2 Sub-column Headers: ST 1, ST 2, TE 1 | ST 1, ST 2, TE 2 | ST 1, ST 2, TE 3 */}
-                    <tr className="bg-[#090f1a] text-slate-300 text-[10px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
-                      {columnItems.map((col) => {
-                        const isTermStart = col.index % 3 === 0;
-                        return (
-                          <th
-                            key={col.key}
-                            className={`py-1.5 px-1 text-center ${
-                              isTermStart ? 'border-l-2 border-l-[#3b4f73]' : 'border-l border-l-[#24334b]'
-                            } w-12 sm:w-14`}
-                            title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
-                          >
-                            <div className="flex flex-col items-center justify-center">
-                              <span
-                                className={`text-[10.5px] font-black ${
-                                  activeCategory === 'tos' ? 'text-purple-200' : 'text-amber-200'
-                                }`}
-                              >
-                                {col.headerLabel}
-                              </span>
-                              {canEditDllTosTq && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleSaveItemToFirebase(col.index)}
-                                  disabled={isSavingIndex === col.index}
-                                  className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
-                                  title={`Save ${col.fullLabel} data to Firebase`}
-                                >
-                                  {isSavingIndex === col.index ? (
-                                    <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
-                                  ) : (
-                                    <Save className="w-2.5 h-2.5" />
-                                  )}
-                                </button>
-                              )}
-                            </div>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </>
-                ) : (
-                  /* Standard 1-Tier Header for DLL */
-                  <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
-                    <th className="py-3 px-4 w-60 sm:w-72">Faculty Member</th>
-                    <th className="py-3 px-3 w-36 sm:w-44">Department</th>
-                    {columnItems.map((col) => (
-                      <th
-                        key={col.key}
-                        className="py-2.5 px-2 text-center border-l border-[#24334b] w-12"
-                        title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
-                      >
-                        <div className="flex flex-col items-center justify-center">
-                          <span className="text-[11px] font-extrabold text-blue-400">
-                            {col.headerLabel}
-                          </span>
-                          {canEditDllTosTq && (
-                            <button
-                              type="button"
-                              onClick={() => handleSaveItemToFirebase(col.index)}
-                              disabled={isSavingIndex === col.index}
-                              className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
-                              title={`Save ${col.fullLabel} data to Firebase`}
-                            >
-                              {isSavingIndex === col.index ? (
-                                <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
-                              ) : (
-                                <Save className="w-3 h-3" />
-                              )}
-                            </button>
-                          )}
-                        </div>
-                      </th>
-                    ))}
-                    <th className="py-3 px-3 text-center w-28 border-l border-[#24334b]">
-                      Progress
-                    </th>
-                    <th className="py-3 px-3 text-center w-28">Quick Action</th>
-                  </tr>
-                )}
-              </thead>
-              <tbody className="divide-y divide-[#24334b] text-xs font-mono">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={4 + totalItemCount} className="py-16 text-center text-slate-300 bg-[#141c2c]">
-                      <div className="w-9 h-9 rounded-full border-2 border-emerald-500/30 border-t-emerald-400 animate-spin mx-auto mb-3" />
-                      <div className="font-bold text-sm text-slate-200">Retrieving live submission records...</div>
-                      <div className="text-xs text-slate-400 mt-1">
-                        Fetching latest status and comments from database...
-                      </div>
-                    </td>
-                  </tr>
-                ) : filteredFaculty.length === 0 ? (
-                  <tr>
-                    <td colSpan={4 + totalItemCount} className="py-12 text-center text-slate-400 bg-[#141c2c]">
-                      <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
-                      <div className="font-bold text-sm text-slate-200">No faculty members found</div>
-                      <div className="text-xs text-slate-400 mt-0.5">
-                        Try adjusting your search query or department filter.
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredFaculty.map((faculty) => {
-                    const items = submissions[faculty.email] || Array(totalItemCount).fill(false);
+          {/* View Mode Switcher Header */}
+          <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 bg-[#0a101d] border-b border-[#24334b]">
+            <div className="text-xs font-mono text-slate-300 font-bold flex items-center space-x-2">
+              <span className="text-slate-400">Display Layout:</span>
+              <span className="text-blue-400 font-bold">
+                {directoryLayout === 'cards' ? 'Individualized Faculty Cards' : 'Matrix Table'}
+              </span>
+            </div>
+            <div className="flex items-center space-x-1.5 bg-[#0d1524] p-1 rounded-xl border border-[#24334b]">
+              <button
+                type="button"
+                onClick={() => setDirectoryLayout('cards')}
+                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                  directoryLayout === 'cards'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Cards View
+              </button>
+              <button
+                type="button"
+                onClick={() => setDirectoryLayout('table')}
+                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                  directoryLayout === 'table'
+                    ? 'bg-blue-600 text-white shadow-2xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Matrix Table
+              </button>
+            </div>
+          </div>
+
+          {directoryLayout === 'cards' ? (
+            /* Individualized Faculty Cards View (Read Quota Optimized) */
+            <div className="p-4 sm:p-6 space-y-3.5 bg-[#0f1725]">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-[#24334b] text-xs font-mono text-slate-400">
+                <div className="flex items-center space-x-2">
+                  <Users className="w-4 h-4 text-blue-400" />
+                  <span className="font-bold text-slate-200">Individualized Faculty Directory</span>
+                  <span className="text-slate-400">({filteredFaculty.length} faculty members)</span>
+                </div>
+                <div className="flex items-center space-x-2 text-[11px]">
+                  <span className="px-2.5 py-0.5 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                    💡 Click card to view checkboxes & download records on demand (0 reads on load, 1 read per teacher expanded)
+                  </span>
+                </div>
+              </div>
+
+              {filteredFaculty.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 bg-[#141c2c] rounded-2xl border border-[#24334b]">
+                  <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                  <div className="font-bold text-sm text-slate-200">No faculty members found</div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    Try adjusting your search query or department filter.
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3">
+                  {filteredFaculty.map((faculty) => {
+                    const cleanEmail = faculty.email.toLowerCase().trim();
+                    const isExpanded = !!expandedFacultyMap[cleanEmail];
+                    const isCardLoading = !!loadingFacultyMap[cleanEmail];
+                    const isCardLoaded = !!loadedFacultyMap[cleanEmail];
+
+                    const items = submissions[cleanEmail] || submissions[faculty.email] || Array(totalItemCount).fill(false);
                     const visibleSlice = items.slice(0, totalItemCount);
                     const completedCount = visibleSlice.filter(Boolean).length;
                     const pct = Math.round((completedCount / totalItemCount) * 100);
                     const isAllChecked = completedCount === totalItemCount;
 
+                    const facConf = confirmedWeeks[cleanEmail] || confirmedWeeks[faculty.email] || {};
+                    const pendingCount = visibleSlice.reduce((acc, isSub, idx) => {
+                      if (!isSub) return acc;
+                      const isAppr = Boolean(
+                        facConf[String(idx)] ||
+                        getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
+                        getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
+                        getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
+                        getItemComment(faculty.email, idx)?.includes('[Confirmed by')
+                      );
+                      return isAppr ? acc : acc + 1;
+                    }, 0);
+
                     return (
-                      <tr
+                      <div
                         key={faculty.email}
-                        className="bg-[#141c2c] hover:bg-[#1c273c] transition-colors border-b border-[#24334b]"
+                        className={`rounded-2xl border transition-all duration-200 ${
+                          isExpanded
+                            ? 'bg-[#141c2c] border-blue-500/40 shadow-lg shadow-blue-950/30'
+                            : 'bg-[#111827] border-[#24334b] hover:border-slate-600 hover:bg-[#141d2e]'
+                        }`}
                       >
-                        {/* Faculty Name & Info (Uniform clean styling, no alternating color) */}
-                        <td className="py-3 px-4">
-                          <div className="flex items-center space-x-2.5">
-                            <div
-                              className="w-7 h-7 rounded-xl flex items-center justify-center font-bold text-[11px] text-blue-300 shrink-0 shadow-2xs bg-[#1f2d45] border border-[#2d4060]"
-                            >
+                        {/* Card Header: Clickable to expand & load single faculty */}
+                        <div
+                          onClick={() => handleToggleFacultyCard(faculty.email)}
+                          className="p-3.5 sm:p-4 flex items-center justify-between gap-3 cursor-pointer select-none"
+                        >
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-blue-300 shadow-2xs bg-[#1f2d45] border border-[#2d4060] shrink-0">
                               {faculty.surname.charAt(0)}
                             </div>
                             <div className="min-w-0">
-                              <div className="font-bold text-slate-100 truncate text-xs">
-                                {faculty.surname}, {faculty.name}
+                              <div className="flex items-center space-x-2">
+                                <span className="font-bold text-slate-100 text-sm truncate">
+                                  {faculty.surname}, {faculty.name}
+                                </span>
+                                {faculty.advisoryRole && (
+                                  <span className="hidden sm:inline-block px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                    {faculty.advisoryRole}
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-[10px] text-slate-400 truncate font-mono">
-                                {faculty.email}
+                              <div className="flex items-center space-x-2 text-[11px] text-slate-400 truncate font-mono mt-0.5">
+                                <span>{faculty.department || 'SHS Dept.'}</span>
+                                <span>•</span>
+                                <span className="truncate">{faculty.email}</span>
                               </div>
-                              {activeCategory === 'dll' && isMasterTeacher && completedCount > 0 && (() => {
-                                const cleanFacEmail = faculty.email.toLowerCase().trim();
-                                const facConf = confirmedWeeks[cleanFacEmail] || {};
-                                const pendingCount = visibleSlice.reduce((acc, isSub, idx) => {
-                                  if (!isSub) return acc;
-                                  const isAppr = Boolean(
-                                    facConf[String(idx)] ||
-                                    getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
-                                    getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
-                                    getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
-                                    getItemComment(faculty.email, idx)?.includes('[Confirmed by')
-                                  );
-                                  return isAppr ? acc : acc + 1;
-                                }, 0);
+                            </div>
+                          </div>
 
-                                if (pendingCount > 0) {
+                          <div className="flex items-center space-x-3 shrink-0">
+                            {isCardLoading ? (
+                              <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-mono">
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span className="hidden sm:inline">Downloading (1 read)...</span>
+                              </div>
+                            ) : isCardLoaded || completedCount > 0 ? (
+                              <div className="flex items-center space-x-2">
+                                {activeCategory === 'dll' && pendingCount > 0 && (
+                                  <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono text-[10px] font-bold flex items-center space-x-1">
+                                    <Bell className="w-3 h-3 fill-amber-400 text-amber-400 animate-pulse" />
+                                    <span>{pendingCount} Pending</span>
+                                  </span>
+                                )}
+                                <span
+                                  className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold ${
+                                    isAllChecked
+                                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                      : completedCount > 0
+                                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                                      : 'bg-[#0d1524] text-slate-400 border border-[#24334b]'
+                                  }`}
+                                >
+                                  {completedCount}/{totalItemCount} ({pct}%)
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] font-mono text-slate-400 bg-[#0d1524] px-2.5 py-1 rounded-xl border border-[#24334b] hidden sm:inline-block">
+                                Click to reveal checkboxes
+                              </span>
+                            )}
+
+                            <div className="p-1.5 rounded-lg bg-[#0d1524] border border-[#24334b] text-slate-400">
+                              {isExpanded ? (
+                                <ChevronUp className="w-4 h-4 text-slate-200" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4 text-slate-400" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Card Body: Revealed on Click */}
+                        {isExpanded && (
+                          <div className="px-3.5 pb-4 sm:px-4 sm:pb-4 pt-2 border-t border-[#24334b]/60">
+                            {isCardLoading ? (
+                              <div className="py-6 text-center text-slate-300">
+                                <div className="w-6 h-6 rounded-full border-2 border-blue-500/30 border-t-blue-400 animate-spin mx-auto mb-2" />
+                                <div className="text-xs font-mono text-slate-300 font-bold">
+                                  Retrieving records from Firestore for {faculty.name}...
+                                </div>
+                                <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+                                  Reads exactly 1 Firestore document on demand.
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                {/* Checkboxes Area */}
+                                <div>
+                                  <div className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                                    <span>
+                                      {activeCategory === 'dll'
+                                        ? `DLL Weekly Deliverables (${termsList.find((t) => t.id === effectiveTermId)?.name || 'Term'})`
+                                        : `${currentCategory.fullName} Checkpoints`}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 normal-case">
+                                      {isMasterTeacher ? 'Click week box to view DLL Review Status' : 'Click to update status'}
+                                    </span>
+                                  </div>
+
+                                  {termGroups ? (
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                      {termGroups.map((group, gIdx) => {
+                                        const groupCols = columnItems.filter((col) => {
+                                          if (gIdx === 0) return col.index < 3;
+                                          if (gIdx === 1) return col.index >= 3 && col.index < 6;
+                                          return col.index >= 6;
+                                        });
+                                        return (
+                                          <div key={group.label} className="p-2.5 rounded-xl bg-[#090f1a] border border-[#24334b]">
+                                            <div className="text-[11px] font-bold text-center text-slate-300 pb-1.5 border-b border-[#24334b] mb-2 font-mono">
+                                              {group.label}
+                                            </div>
+                                            <div className="flex items-center justify-around gap-1.5">
+                                              {groupCols.map((col) => {
+                                                const itemStatus = getItemStatus(faculty.email, col.index);
+                                                const itemComment = getItemComment(faculty.email, col.index);
+                                                const isCurrentlySaving = autoSavingItemKey === `${cleanEmail}_${col.index}`;
+                                                const isChecked = itemStatus === 'checked';
+                                                const isWithComments = itemStatus === 'with-comments';
+                                                const isIncomplete = itemStatus === 'incomplete';
+                                                const isLate = itemStatus === 'late';
+
+                                                return (
+                                                  <div key={col.key} className="flex flex-col items-center space-y-1">
+                                                    <span className="text-[10px] font-mono font-bold text-amber-200">
+                                                      {col.headerLabel}
+                                                    </span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (canEditDllTosTq) {
+                                                          handleOpenCellAction(faculty, col);
+                                                        }
+                                                      }}
+                                                      disabled={!canEditDllTosTq}
+                                                      className={`w-8 h-8 rounded-lg border flex items-center justify-center transition-all ${
+                                                        canEditDllTosTq ? 'cursor-pointer active:scale-90' : 'cursor-default'
+                                                      } ${
+                                                        isChecked
+                                                          ? 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600 ring-2 ring-emerald-400/40'
+                                                          : isWithComments
+                                                          ? 'bg-amber-500 border-amber-600 text-white shadow-2xs hover:bg-amber-600 ring-1 ring-amber-400'
+                                                          : isIncomplete
+                                                          ? 'bg-rose-500 border-rose-600 text-white shadow-2xs hover:bg-rose-600 ring-1 ring-rose-400'
+                                                          : isLate
+                                                          ? 'bg-orange-500 border-orange-600 text-white shadow-2xs hover:bg-orange-600 ring-1 ring-orange-400'
+                                                          : 'bg-[#0d1524] border-[#24334b] text-transparent hover:border-slate-500 hover:bg-[#1a2638]'
+                                                      } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
+                                                      title={`${faculty.name} - ${col.fullLabel}: ${
+                                                        isChecked
+                                                          ? 'Checked'
+                                                          : isWithComments
+                                                          ? `With Comments: ${itemComment || ''}`
+                                                          : isIncomplete
+                                                          ? `Incomplete (Lacking): ${itemComment || ''}`
+                                                          : isLate
+                                                          ? `Late: ${itemComment || ''}`
+                                                          : 'Pending / Not Checked'
+                                                      }`}
+                                                    >
+                                                      {isChecked && <Check className="w-4 h-4 stroke-[3]" />}
+                                                      {isWithComments && <MessageSquare className="w-3.5 h-3.5 fill-current" />}
+                                                      {isIncomplete && <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />}
+                                                      {isLate && <Clock className="w-3.5 h-3.5 stroke-[2.5]" />}
+                                                    </button>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {columnItems.map((col) => {
+                                        const itemStatus = getItemStatus(faculty.email, col.index);
+                                        const itemComment = getItemComment(faculty.email, col.index);
+                                        const isCurrentlySaving = autoSavingItemKey === `${cleanEmail}_${col.index}`;
+                                        const isChecked = itemStatus === 'checked';
+                                        const isWithComments = itemStatus === 'with-comments';
+                                        const isIncomplete = itemStatus === 'incomplete';
+                                        const isLate = itemStatus === 'late';
+
+                                        const facultyConfMap = confirmedWeeks[cleanEmail] || confirmedWeeks[faculty.email] || {};
+                                        const isConfirmedApproved = Boolean(
+                                          facultyConfMap[String(col.index)] ||
+                                          itemComment?.includes('Verified and Approved') ||
+                                          itemComment?.includes('Approved & Verified') ||
+                                          itemComment?.includes('Approved and Verified') ||
+                                          itemComment?.includes('[Confirmed by')
+                                        );
+
+                                        const isDll = activeCategory === 'dll';
+                                        const showDllNotificationBell = isDll && isMasterTeacher && isChecked && !isConfirmedApproved;
+
+                                        return (
+                                          <div
+                                            key={col.key}
+                                            className="flex flex-col items-center space-y-1 p-1.5 rounded-xl bg-[#0a101d] border border-[#24334b]/80"
+                                          >
+                                            <span className="text-[10px] font-mono font-bold text-blue-300">
+                                              {col.headerLabel}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (isDll && isMasterTeacher && isChecked) {
+                                                  handleOpenDllReviewStatus(faculty, col.index);
+                                                } else if (canEditDllTosTq) {
+                                                  handleOpenCellAction(faculty, col);
+                                                }
+                                              }}
+                                              disabled={!canEditDllTosTq}
+                                              aria-label={`Review ${col.fullLabel} for ${faculty.name}`}
+                                              className={`w-8 h-8 rounded-lg border flex items-center justify-center transition-all ${
+                                                canEditDllTosTq ? 'cursor-pointer active:scale-90' : 'cursor-default'
+                                              } relative ${
+                                                isChecked
+                                                  ? showDllNotificationBell
+                                                    ? 'bg-gradient-to-br from-amber-500 to-amber-600 border-amber-300 text-white shadow-md ring-2 ring-amber-400/60 hover:from-amber-400 hover:to-amber-500'
+                                                    : 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600 ring-2 ring-emerald-400/40'
+                                                  : isWithComments
+                                                  ? 'bg-amber-500 border-amber-600 text-white shadow-2xs hover:bg-amber-600 ring-1 ring-amber-400'
+                                                  : isIncomplete
+                                                  ? 'bg-rose-500 border-rose-600 text-white shadow-2xs hover:bg-rose-600 ring-1 ring-rose-400'
+                                                  : isLate
+                                                  ? 'bg-orange-500 border-orange-600 text-white shadow-2xs hover:bg-orange-600 ring-1 ring-orange-400'
+                                                  : 'bg-[#0d1524] border-[#24334b] text-transparent hover:border-slate-500 hover:bg-[#1a2638]'
+                                              } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
+                                              title={`${faculty.name} - ${col.fullLabel}: ${
+                                                isChecked
+                                                  ? showDllNotificationBell
+                                                    ? '🔔 All DLL folders uploaded (Submitted)! Click notification bell to view DLL Review Status and confirm final status'
+                                                    : isConfirmedApproved && isMasterTeacher
+                                                    ? '✓ Approved and Verified by Master Teacher! Click to view verified review status or update feedback'
+                                                    : 'Checked (Clean / Approved)'
+                                                  : isWithComments
+                                                  ? `With Comments: "${itemComment || 'Feedback recorded'}"`
+                                                  : isIncomplete
+                                                  ? `Incomplete (Lacking): "${itemComment || 'Lacking requirements'}"`
+                                                  : isLate
+                                                  ? `Late (Submitted Late): "${itemComment || 'Submitted past deadline'}"`
+                                                  : 'Pending / Not Checked'
+                                              }`}
+                                            >
+                                              {isChecked && (
+                                                showDllNotificationBell ? (
+                                                  <div className="relative flex items-center justify-center">
+                                                    <Bell className="w-3.5 h-3.5 fill-white text-white animate-bounce" />
+                                                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-200 opacity-75"></span>
+                                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
+                                                    </span>
+                                                  </div>
+                                                ) : (
+                                                  <Check className="w-4 h-4 stroke-[3]" />
+                                                )
+                                              )}
+                                              {isWithComments && <MessageSquare className="w-3.5 h-3.5 fill-current" />}
+                                              {isIncomplete && <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />}
+                                              {isLate && <Clock className="w-3.5 h-3.5 stroke-[2.5]" />}
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Card Bottom Actions */}
+                                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#24334b]/60 text-xs font-mono">
+                                  <div className="flex items-center space-x-2">
+                                    {activeCategory === 'dll' && isMasterTeacher && completedCount > 0 && (
+                                      pendingCount > 0 ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const firstUnverified = visibleSlice.findIndex((isSub, idx) => {
+                                              if (!isSub) return false;
+                                              return !Boolean(
+                                                facConf[String(idx)] ||
+                                                getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
+                                                getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
+                                                getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
+                                                getItemComment(faculty.email, idx)?.includes('[Confirmed by')
+                                              );
+                                            });
+                                            handleOpenDllReviewStatus(faculty, firstUnverified >= 0 ? firstUnverified : 0);
+                                          }}
+                                          className="px-2.5 py-1 bg-gradient-to-r from-amber-500/20 to-amber-600/30 hover:from-amber-500/30 hover:to-amber-600/40 border border-amber-400/40 rounded-lg text-amber-300 font-bold flex items-center space-x-1.5 cursor-pointer shadow-2xs"
+                                        >
+                                          <Bell className="w-3.5 h-3.5 text-amber-400 fill-amber-400 animate-pulse" />
+                                          <span>Review DLL ({pendingCount} pending)</span>
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const firstSubmitted = visibleSlice.findIndex(Boolean);
+                                            handleOpenDllReviewStatus(faculty, firstSubmitted >= 0 ? firstSubmitted : 0);
+                                          }}
+                                          className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg text-emerald-300 font-bold flex items-center space-x-1.5 cursor-pointer shadow-2xs"
+                                        >
+                                          <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
+                                          <span>Approved & Verified ({completedCount})</span>
+                                        </button>
+                                      )
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center space-x-2">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (canEditDllTosTq) {
+                                          handleCheckAllItems(faculty.email, !isAllChecked);
+                                        }
+                                      }}
+                                      disabled={!canEditDllTosTq}
+                                      className={`px-3 py-1 rounded-xl text-xs font-mono font-bold transition-all ${
+                                        !canEditDllTosTq
+                                          ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border border-slate-700'
+                                          : isAllChecked
+                                          ? 'bg-[#1c273a] text-slate-300 hover:bg-[#25344d] border border-[#2d3e57] cursor-pointer'
+                                          : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/40 cursor-pointer'
+                                      }`}
+                                    >
+                                      {isAllChecked ? 'Reset All' : 'Check All'}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Directory Table / Matrix View */
+            <div className="overflow-x-auto">
+              <table className={`w-full text-left border-collapse ${termGroups ? 'min-w-[1040px]' : 'min-w-[700px]'}`}>
+                <thead>
+                  {termGroups ? (
+                    <>
+                      {/* Tier 1 Header Row: Grouped by TERM 1 TOS/TQ, TERM 2 TOS/TQ, TERM 3 TOS/TQ */}
+                      <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
+                        <th rowSpan={2} className="py-3 px-4 w-52 sm:w-64 border-r border-[#24334b] align-middle text-slate-200">
+                          Faculty Member
+                        </th>
+                        <th rowSpan={2} className="py-3 px-3 w-32 sm:w-40 border-r border-[#24334b] align-middle text-slate-200">
+                          Department
+                        </th>
+                        {termGroups.map((group, gIdx) => (
+                          <th
+                            key={group.label}
+                            colSpan={group.span}
+                            className={`py-2 px-3 text-center border-l-2 border-b border-[#24334b] font-black text-xs tracking-wider ${
+                              activeCategory === 'tos'
+                                ? 'bg-[#151c30] text-purple-300 border-t-2 border-t-purple-500 border-l-purple-500/40'
+                                : 'bg-[#1c1a27] text-amber-300 border-t-2 border-t-amber-500 border-l-amber-500/40'
+                            }`}
+                          >
+                            <div className="flex items-center justify-center space-x-1.5">
+                              <span className="font-extrabold">{group.label}</span>
+                            </div>
+                          </th>
+                        ))}
+                        <th rowSpan={2} className="py-3 px-3 text-center w-24 border-l border-[#24334b] align-middle text-slate-200">
+                          Progress
+                        </th>
+                        <th rowSpan={2} className="py-3 px-3 text-center w-24 border-l border-[#24334b] align-middle text-slate-200">
+                          Quick Action
+                        </th>
+                      </tr>
+                      {/* Tier 2 Sub-column Headers: ST 1, ST 2, TE 1 | ST 1, ST 2, TE 2 | ST 1, ST 2, TE 3 */}
+                      <tr className="bg-[#090f1a] text-slate-300 text-[10px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
+                        {columnItems.map((col) => {
+                          const isTermStart = col.index % 3 === 0;
+                          return (
+                            <th
+                              key={col.key}
+                              className={`py-1.5 px-1 text-center ${
+                                isTermStart ? 'border-l-2 border-l-[#3b4f73]' : 'border-l border-l-[#24334b]'
+                              } w-12 sm:w-14`}
+                              title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
+                            >
+                              <div className="flex flex-col items-center justify-center">
+                                <span
+                                  className={`text-[10.5px] font-black ${
+                                    activeCategory === 'tos' ? 'text-purple-200' : 'text-amber-200'
+                                  }`}
+                                >
+                                  {col.headerLabel}
+                                </span>
+                                {canEditDllTosTq && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveItemToFirebase(col.index)}
+                                    disabled={isSavingIndex === col.index}
+                                    className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
+                                    title={`Save ${col.fullLabel} data to Firebase`}
+                                  >
+                                    {isSavingIndex === col.index ? (
+                                      <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
+                                    ) : (
+                                      <Save className="w-2.5 h-2.5" />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </>
+                  ) : (
+                    /* Standard 1-Tier Header for DLL */
+                    <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
+                      <th className="py-3 px-4 w-60 sm:w-72">Faculty Member</th>
+                      <th className="py-3 px-3 w-36 sm:w-44">Department</th>
+                      {columnItems.map((col) => (
+                        <th
+                          key={col.key}
+                          className="py-2.5 px-2 text-center border-l border-[#24334b] w-12"
+                          title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
+                        >
+                          <div className="flex flex-col items-center justify-center">
+                            <span className="text-[11px] font-extrabold text-blue-400">
+                              {col.headerLabel}
+                            </span>
+                            {canEditDllTosTq && (
+                              <button
+                                type="button"
+                                onClick={() => handleSaveItemToFirebase(col.index)}
+                                disabled={isSavingIndex === col.index}
+                                className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
+                                title={`Save ${col.fullLabel} data to Firebase`}
+                              >
+                                {isSavingIndex === col.index ? (
+                                  <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
+                                ) : (
+                                  <Save className="w-3 h-3" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </th>
+                      ))}
+                      <th className="py-3 px-3 text-center w-28 border-l border-[#24334b]">
+                        Progress
+                      </th>
+                      <th className="py-3 px-3 text-center w-28">Quick Action</th>
+                    </tr>
+                  )}
+                </thead>
+                <tbody className="divide-y divide-[#24334b] text-xs font-mono">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={4 + totalItemCount} className="py-16 text-center text-slate-300 bg-[#141c2c]">
+                        <div className="w-9 h-9 rounded-full border-2 border-emerald-500/30 border-t-emerald-400 animate-spin mx-auto mb-3" />
+                        <div className="font-bold text-sm text-slate-200">Retrieving live submission records...</div>
+                        <div className="text-xs text-slate-400 mt-1">
+                          Fetching latest status and comments from database...
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredFaculty.length === 0 ? (
+                    <tr>
+                      <td colSpan={4 + totalItemCount} className="py-12 text-center text-slate-400 bg-[#141c2c]">
+                        <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                        <div className="font-bold text-sm text-slate-200">No faculty members found</div>
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          Try adjusting your search query or department filter.
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredFaculty.map((faculty) => {
+                      const items = submissions[faculty.email] || Array(totalItemCount).fill(false);
+                      const visibleSlice = items.slice(0, totalItemCount);
+                      const completedCount = visibleSlice.filter(Boolean).length;
+                      const pct = Math.round((completedCount / totalItemCount) * 100);
+                      const isAllChecked = completedCount === totalItemCount;
+
+                      return (
+                        <tr
+                          key={faculty.email}
+                          className="bg-[#141c2c] hover:bg-[#1c273c] transition-colors border-b border-[#24334b]"
+                        >
+                          {/* Faculty Name & Info (Uniform clean styling, no alternating color) */}
+                          <td className="py-3 px-4">
+                            <div className="flex items-center space-x-2.5">
+                              <div
+                                className="w-7 h-7 rounded-xl flex items-center justify-center font-bold text-[11px] text-blue-300 shrink-0 shadow-2xs bg-[#1f2d45] border border-[#2d4060]"
+                              >
+                                {faculty.surname.charAt(0)}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-100 truncate text-xs">
+                                  {faculty.surname}, {faculty.name}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate font-mono">
+                                  {faculty.email}
+                                </div>
+                                {activeCategory === 'dll' && isMasterTeacher && completedCount > 0 && (() => {
+                                  const cleanFacEmail = faculty.email.toLowerCase().trim();
+                                  const facConf = confirmedWeeks[cleanFacEmail] || {};
+                                  const pendingCount = visibleSlice.reduce((acc, isSub, idx) => {
+                                    if (!isSub) return acc;
+                                    const isAppr = Boolean(
+                                      facConf[String(idx)] ||
+                                      getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
+                                      getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
+                                      getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
+                                      getItemComment(faculty.email, idx)?.includes('[Confirmed by')
+                                    );
+                                    return isAppr ? acc : acc + 1;
+                                  }, 0);
+
+                                  if (pendingCount > 0) {
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const firstUnverified = visibleSlice.findIndex((isSub, idx) => {
+                                            if (!isSub) return false;
+                                            return !Boolean(
+                                              facConf[String(idx)] ||
+                                              getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
+                                              getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
+                                              getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
+                                              getItemComment(faculty.email, idx)?.includes('[Confirmed by')
+                                            );
+                                          });
+                                          handleOpenDllReviewStatus(faculty, firstUnverified >= 0 ? firstUnverified : 0);
+                                        }}
+                                        className="mt-1 px-2 py-0.5 bg-gradient-to-r from-amber-500/20 to-amber-600/30 hover:from-amber-500/30 hover:to-amber-600/40 border border-amber-400/40 rounded-lg text-amber-300 font-mono text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition-all shadow-2xs"
+                                        title="Open DLL Review Status to review pending submission"
+                                      >
+                                        <Bell className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
+                                        <span>Review DLL ({pendingCount} pending)</span>
+                                      </button>
+                                    );
+                                  }
+
                                   return (
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        const firstUnverified = visibleSlice.findIndex((isSub, idx) => {
-                                          if (!isSub) return false;
-                                          return !Boolean(
-                                            facConf[String(idx)] ||
-                                            getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
-                                            getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
-                                            getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
-                                            getItemComment(faculty.email, idx)?.includes('[Confirmed by')
-                                          );
-                                        });
-                                        handleOpenDllReviewStatus(faculty, firstUnverified >= 0 ? firstUnverified : 0);
+                                        const firstSubmitted = visibleSlice.findIndex(Boolean);
+                                        handleOpenDllReviewStatus(faculty, firstSubmitted >= 0 ? firstSubmitted : 0);
                                       }}
-                                      className="mt-1 px-2 py-0.5 bg-gradient-to-r from-amber-500/20 to-amber-600/30 hover:from-amber-500/30 hover:to-amber-600/40 border border-amber-400/40 rounded-lg text-amber-300 font-mono text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition-all shadow-2xs"
-                                      title="Open DLL Review Status to review pending submission"
+                                      className="mt-1 px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg text-emerald-300 font-mono text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition-all shadow-2xs"
+                                      title="All submissions approved and verified by Master Teacher"
                                     >
-                                      <Bell className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
-                                      <span>Review DLL ({pendingCount} pending)</span>
+                                      <Check className="w-3 h-3 text-emerald-400 stroke-[3]" />
+                                      <span>Approved & Verified ({completedCount})</span>
                                     </button>
                                   );
-                                }
-
-                                return (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const firstSubmitted = visibleSlice.findIndex(Boolean);
-                                      handleOpenDllReviewStatus(faculty, firstSubmitted >= 0 ? firstSubmitted : 0);
-                                    }}
-                                    className="mt-1 px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg text-emerald-300 font-mono text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition-all shadow-2xs"
-                                    title="All submissions approved and verified by Master Teacher"
-                                  >
-                                    <Check className="w-3 h-3 text-emerald-400 stroke-[3]" />
-                                    <span>Approved & Verified ({completedCount})</span>
-                                  </button>
-                                );
-                              })()}
+                                })()}
+                              </div>
                             </div>
-                          </div>
-                        </td>
+                          </td>
 
-                        {/* Department */}
-                        <td className="py-3 px-3 text-slate-300 text-[11px]">
-                          <span className="bg-[#0d1524] text-slate-300 border border-[#24334b] px-2 py-0.5 rounded-md truncate max-w-[140px] inline-block font-sans font-medium">
-                            {faculty.department || 'SHS Dept.'}
-                          </span>
-                        </td>
+                          {/* Department */}
+                          <td className="py-3 px-3 text-slate-300 text-[11px]">
+                            <span className="bg-[#0d1524] text-slate-300 border border-[#24334b] px-2 py-0.5 rounded-md truncate max-w-[140px] inline-block font-sans font-medium">
+                              {faculty.department || 'SHS Dept.'}
+                            </span>
+                          </td>
 
-                        {/* Checkboxes (Weeks or Term 1, Term 2, Term 3) */}
-                        {columnItems.map((col) => {
-                          const itemStatus = getItemStatus(faculty.email, col.index);
-                          const itemComment = getItemComment(faculty.email, col.index);
-                          const cleanFacultyEmail = faculty.email.toLowerCase().trim();
-                          const isCurrentlySaving = autoSavingItemKey === `${cleanFacultyEmail}_${col.index}`;
-                          const isChecked = itemStatus === 'checked';
-                          const isWithComments = itemStatus === 'with-comments';
-                          const isIncomplete = itemStatus === 'incomplete';
-                          const isLate = itemStatus === 'late';
-                          const isTermStart = termGroups && col.index % 3 === 0;
+                          {/* Checkboxes (Weeks or Term 1, Term 2, Term 3) */}
+                          {columnItems.map((col) => {
+                            const itemStatus = getItemStatus(faculty.email, col.index);
+                            const itemComment = getItemComment(faculty.email, col.index);
+                            const cleanFacultyEmail = faculty.email.toLowerCase().trim();
+                            const isCurrentlySaving = autoSavingItemKey === `${cleanFacultyEmail}_${col.index}`;
+                            const isChecked = itemStatus === 'checked';
+                            const isWithComments = itemStatus === 'with-comments';
+                            const isIncomplete = itemStatus === 'incomplete';
+                            const isLate = itemStatus === 'late';
+                            const isTermStart = termGroups && col.index % 3 === 0;
 
-                          const facultyConfMap = confirmedWeeks[cleanFacultyEmail] || {};
-                          const isConfirmedApproved = Boolean(
-                            facultyConfMap[String(col.index)] ||
-                            itemComment?.includes('Verified and Approved') ||
-                            itemComment?.includes('Approved & Verified') ||
-                            itemComment?.includes('Approved and Verified') ||
-                            itemComment?.includes('[Confirmed by')
-                          );
+                            const facultyConfMap = confirmedWeeks[cleanFacultyEmail] || {};
+                            const isConfirmedApproved = Boolean(
+                              facultyConfMap[String(col.index)] ||
+                              itemComment?.includes('Verified and Approved') ||
+                              itemComment?.includes('Approved & Verified') ||
+                              itemComment?.includes('Approved and Verified') ||
+                              itemComment?.includes('[Confirmed by')
+                            );
 
-                          // In DLL Category for Master Teacher:
-                          // - If submitted ('checked') but not yet confirmed by Master Teacher: Render Notification Bell
-                          // - When Master Teacher confirms "Approved and Verified": Change Notification Bell to Green Check ✓
-                          const isDll = activeCategory === 'dll';
-                          const showDllNotificationBell = isDll && isMasterTeacher && isChecked && !isConfirmedApproved;
+                            // In DLL Category for Master Teacher:
+                            // - If submitted ('checked') but not yet confirmed by Master Teacher: Render Notification Bell
+                            // - When Master Teacher confirms "Approved and Verified": Change Notification Bell to Green Check ✓
+                            const isDll = activeCategory === 'dll';
+                            const showDllNotificationBell = isDll && isMasterTeacher && isChecked && !isConfirmedApproved;
 
-                          return (
-                            <td
-                              key={col.key}
-                              className={`py-2 px-1 text-center ${
-                                isTermStart ? 'border-l-2 border-l-[#3b4f73]' : 'border-l border-l-[#24334b]'
-                              }`}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (isDll && isMasterTeacher && isChecked) {
-                                    handleOpenDllReviewStatus(faculty, col.index);
-                                  } else if (canEditDllTosTq) {
-                                    handleOpenCellAction(faculty, col);
-                                  }
-                                }}
-                                disabled={!canEditDllTosTq}
-                                aria-label={`Review ${col.fullLabel} for ${faculty.name}`}
-                                className={`rounded-lg border flex items-center justify-center mx-auto transition-all ${canEditDllTosTq ? 'cursor-pointer active:scale-90' : 'cursor-default'} relative ${
-                                  isWeeklyCategory ? 'w-7 h-7' : 'w-7 h-7 sm:w-8 sm:h-7'
-                                } ${
-                                  isChecked
-                                    ? showDllNotificationBell
-                                      ? 'bg-gradient-to-br from-amber-500 to-amber-600 border-amber-300 text-white shadow-md ring-2 ring-amber-400/60 hover:from-amber-400 hover:to-amber-500'
-                                      : 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600 ring-2 ring-emerald-400/40'
-                                    : isWithComments
-                                    ? 'bg-amber-500 border-amber-600 text-white shadow-2xs hover:bg-amber-600 ring-1 ring-amber-400'
-                                    : isIncomplete
-                                    ? 'bg-rose-500 border-rose-600 text-white shadow-2xs hover:bg-rose-600 ring-1 ring-rose-400'
-                                    : isLate
-                                    ? 'bg-orange-500 border-orange-600 text-white shadow-2xs hover:bg-orange-600 ring-1 ring-orange-400'
-                                    : 'bg-[#0d1524] border-[#24334b] text-transparent hover:border-slate-500 hover:bg-[#1a2638]'
-                                } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
-                                title={`${faculty.name} - ${col.fullLabel}: ${
-                                  isChecked
-                                    ? showDllNotificationBell
-                                      ? '🔔 All DLL folders uploaded (Submitted)! Click notification bell to view DLL Review Status and confirm final status'
-                                      : isConfirmedApproved && isMasterTeacher
-                                      ? '✓ Approved and Verified by Master Teacher! Click to view verified review status or update feedback'
-                                      : 'Checked (Clean / Approved)'
-                                    : isWithComments
-                                    ? `With Comments: "${itemComment || 'Feedback recorded'}"`
-                                    : isIncomplete
-                                    ? `Incomplete (Lacking): "${itemComment || 'Lacking requirements'}"`
-                                    : isLate
-                                    ? `Late (Submitted Late): "${itemComment || 'Submitted past deadline'}"`
-                                    : 'Pending / Not Checked'
-                                } • Click to review or update status`}
+                            return (
+                              <td
+                                key={col.key}
+                                className={`py-2 px-1 text-center ${
+                                  isTermStart ? 'border-l-2 border-l-[#3b4f73]' : 'border-l border-l-[#24334b]'
+                                }`}
                               >
-                                {isChecked && (
-                                  showDllNotificationBell ? (
-                                    <div className="relative flex items-center justify-center">
-                                      <Bell className="w-3.5 h-3.5 fill-white text-white animate-bounce" />
-                                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-200 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <Check className="w-4 h-4 stroke-[3]" />
-                                  )
-                                )}
-                                {isWithComments && <MessageSquare className="w-3.5 h-3.5 fill-current" />}
-                                {isIncomplete && <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />}
-                                {isLate && <Clock className="w-3.5 h-3.5 stroke-[2.5]" />}
-                              </button>
-                            </td>
-                          );
-                        })}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isDll && isMasterTeacher && isChecked) {
+                                      handleOpenDllReviewStatus(faculty, col.index);
+                                    } else if (canEditDllTosTq) {
+                                      handleOpenCellAction(faculty, col);
+                                    }
+                                  }}
+                                  disabled={!canEditDllTosTq}
+                                  aria-label={`Review ${col.fullLabel} for ${faculty.name}`}
+                                  className={`rounded-lg border flex items-center justify-center mx-auto transition-all ${canEditDllTosTq ? 'cursor-pointer active:scale-90' : 'cursor-default'} relative ${
+                                    isWeeklyCategory ? 'w-7 h-7' : 'w-7 h-7 sm:w-8 sm:h-7'
+                                  } ${
+                                    isChecked
+                                      ? showDllNotificationBell
+                                        ? 'bg-gradient-to-br from-amber-500 to-amber-600 border-amber-300 text-white shadow-md ring-2 ring-amber-400/60 hover:from-amber-400 hover:to-amber-500'
+                                        : 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600 ring-2 ring-emerald-400/40'
+                                      : isWithComments
+                                      ? 'bg-amber-500 border-amber-600 text-white shadow-2xs hover:bg-amber-600 ring-1 ring-amber-400'
+                                      : isIncomplete
+                                      ? 'bg-rose-500 border-rose-600 text-white shadow-2xs hover:bg-rose-600 ring-1 ring-rose-400'
+                                      : isLate
+                                      ? 'bg-orange-500 border-orange-600 text-white shadow-2xs hover:bg-orange-600 ring-1 ring-orange-400'
+                                      : 'bg-[#0d1524] border-[#24334b] text-transparent hover:border-slate-500 hover:bg-[#1a2638]'
+                                  } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
+                                  title={`${faculty.name} - ${col.fullLabel}: ${
+                                    isChecked
+                                      ? showDllNotificationBell
+                                        ? '🔔 All DLL folders uploaded (Submitted)! Click notification bell to view DLL Review Status and confirm final status'
+                                        : isConfirmedApproved && isMasterTeacher
+                                        ? '✓ Approved and Verified by Master Teacher! Click to view verified review status or update feedback'
+                                        : 'Checked (Clean / Approved)'
+                                      : isWithComments
+                                      ? `With Comments: "${itemComment || 'Feedback recorded'}"`
+                                      : isIncomplete
+                                      ? `Incomplete (Lacking): "${itemComment || 'Lacking requirements'}"`
+                                      : isLate
+                                      ? `Late (Submitted Late): "${itemComment || 'Submitted past deadline'}"`
+                                      : 'Pending / Not Checked'
+                                  } • Click to review or update status`}
+                                >
+                                  {isChecked && (
+                                    showDllNotificationBell ? (
+                                      <div className="relative flex items-center justify-center">
+                                        <Bell className="w-3.5 h-3.5 fill-white text-white animate-bounce" />
+                                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-200 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <Check className="w-4 h-4 stroke-[3]" />
+                                    )
+                                  )}
+                                  {isWithComments && <MessageSquare className="w-3.5 h-3.5 fill-current" />}
+                                  {isIncomplete && <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />}
+                                  {isLate && <Clock className="w-3.5 h-3.5 stroke-[2.5]" />}
+                                </button>
+                              </td>
+                            );
+                          })}
 
-                        {/* Progress Bar & Number */}
-                        <td className="py-3 px-3 text-center border-l border-[#24334b]">
-                          <div className="flex flex-col items-center justify-center">
-                            <span
-                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono ${
-                                isAllChecked
-                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                                  : completedCount >= Math.ceil(totalItemCount / 2)
-                                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
-                                  : completedCount > 0
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                  : 'bg-[#0d1524] text-slate-400 border border-[#24334b]'
+                          {/* Progress Bar & Number */}
+                          <td className="py-3 px-3 text-center border-l border-[#24334b]">
+                            <div className="flex flex-col items-center justify-center">
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono ${
+                                  isAllChecked
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                    : completedCount >= Math.ceil(totalItemCount / 2)
+                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                                    : completedCount > 0
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                    : 'bg-[#0d1524] text-slate-400 border border-[#24334b]'
+                                }`}
+                              >
+                                {completedCount} / {totalItemCount}
+                              </span>
+                              <span className="text-[10px] text-slate-400 mt-0.5 font-bold">
+                                {pct}%
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Quick Action Button */}
+                          <td className="py-3 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => canEditDllTosTq && handleCheckAllItems(faculty.email, !isAllChecked)}
+                              disabled={!canEditDllTosTq}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold transition-all ${
+                                !canEditDllTosTq
+                                  ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border border-slate-700'
+                                  : isAllChecked
+                                  ? 'bg-[#1c273a] text-slate-300 hover:bg-[#25344d] border border-[#2d3e57] cursor-pointer'
+                                  : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/40 cursor-pointer'
                               }`}
+                              title={!canEditDllTosTq ? 'Only Principal, Master Teacher, and Master Admin can edit' : isAllChecked ? `Clear all ${currentCategory.name} submissions` : `Mark all ${currentCategory.name} complete (Checked)`}
                             >
-                              {completedCount} / {totalItemCount}
-                            </span>
-                            <span className="text-[10px] text-slate-400 mt-0.5 font-bold">
-                              {pct}%
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Quick Action Button */}
-                        <td className="py-3 px-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => canEditDllTosTq && handleCheckAllItems(faculty.email, !isAllChecked)}
-                            disabled={!canEditDllTosTq}
-                            className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold transition-all ${
-                              !canEditDllTosTq
-                                ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border border-slate-700'
-                                : isAllChecked
-                                ? 'bg-[#1c273a] text-slate-300 hover:bg-[#25344d] border border-[#2d3e57] cursor-pointer'
-                                : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/40 cursor-pointer'
-                            }`}
-                            title={!canEditDllTosTq ? 'Only Principal, Master Teacher, and Master Admin can edit' : isAllChecked ? `Clear all ${currentCategory.name} submissions` : `Mark all ${currentCategory.name} complete (Checked)`}
-                          >
-                            {isAllChecked ? 'Reset' : 'Check All'}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                              {isAllChecked ? 'Reset' : 'Check All'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Directory Footer Info */}
           <div className="p-4 bg-[#0f1725] border-t border-[#24334b] flex flex-col sm:flex-row items-center justify-between text-xs font-mono text-slate-400 gap-2">
@@ -4329,476 +4681,6 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         )
       ) : null}
 
-      {/* SECTION 2: FACULTY SUBMISSION PROGRESS VISUALIZER (ADMINISTRATOR ONLY) */}
-      {isAdmin && activeCategory !== 'class-advisers' ? (
-        <div className="bg-[#141c2c] rounded-3xl border border-[#24334b] shadow-xs p-5 sm:p-6 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#24334b] pb-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2.5 rounded-2xl bg-blue-500/20 text-blue-300">
-                <BarChart3 className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-2 flex-wrap">
-                  <h3 className="text-base sm:text-lg font-bold text-slate-100 font-sans">
-                    {currentCategory.fullName} ({currentCategory.name}) Progress Visualizer
-                  </h3>
-                  <span className="bg-blue-500/20 text-blue-300 text-xs font-mono px-2 py-0.5 rounded-full font-bold border border-blue-500/40">
-                    {isWeeklyCategory ? currentTerm.name : 'Terms 1, 2 & 3'}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 font-mono">
-                  {isWeeklyCategory
-                    ? `Analytical charts representing submitted weeks out of ${currentTermWeeks} for all faculty members.`
-                    : `Visualizer showing Term 1 ${currentCategory.name}, Term 2 ${currentCategory.name}, and Term 3 ${currentCategory.name} compliance.`}
-                </p>
-              </div>
-            </div>
-
-            {/* Toggle View: Admin Visualizer Modes */}
-            <div className="flex items-center space-x-1.5 bg-[#0d1524] p-1 rounded-2xl border border-[#24334b] text-xs font-mono font-bold">
-              <button
-                type="button"
-                onClick={() => setViewMode('faculty-chart')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  viewMode === 'faculty-chart'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                By Faculty Member
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('weekly-chart')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                  viewMode === 'weekly-chart'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                {isWeeklyCategory ? `Weekly Trend (W1–W${currentTermWeeks})` : `Term Trend`}
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('pie-chart')}
-                className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center space-x-1 ${
-                  viewMode === 'pie-chart'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                <PieChartIcon className="w-3.5 h-3.5" />
-                <span>Pie Chart</span>
-              </button>
-            </div>
-          </div>
-
-          {/* ADMIN VISUALIZER PIE CHART VIEW */}
-          {viewMode === 'pie-chart' ? (
-            <div className="space-y-6">
-              {/* Render Selected Pie Charts */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Chart 1: Faculty Compliance Status Pie Chart */}
-                <div className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
-                        <span>Faculty Compliance Status Breakdown</span>
-                      </h4>
-                      <p className="text-[11px] text-slate-400 font-mono">
-                        Distribution across {stats.totalFaculty} teachers ({currentCategory.name})
-                      </p>
-                    </div>
-                    <span className="text-xs font-mono font-bold px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full">
-                      {stats.overallPercentage}% Overall
-                    </span>
-                  </div>
-
-                  <div className="h-[280px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={compliancePieData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={55}
-                          outerRadius={95}
-                          paddingAngle={4}
-                          dataKey="value"
-                          nameKey="name"
-                        >
-                          {compliancePieData.map((entry, index) => (
-                            <Cell key={`cell-comp-${index}`} fill={entry.color} stroke="#141c2c" strokeWidth={2} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (active && payload && payload.length) {
-                              const data = payload[0].payload;
-                              return (
-                                <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl border border-slate-800 text-xs font-mono space-y-1">
-                                  <div className="flex items-center space-x-2">
-                                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: data.color }} />
-                                    <span className="font-bold text-white text-xs">{data.name}</span>
-                                  </div>
-                                  <div className="text-slate-300 text-xs pt-1 border-t border-slate-800">
-                                    Faculty Count: <span className="font-bold text-emerald-400">{data.value}</span> / {stats.totalFaculty} ({data.percentage}%)
-                                  </div>
-                                  <div className="text-[11px] text-slate-400">
-                                    {data.description}
-                                  </div>
-                                </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        <Legend
-                          verticalAlign="bottom"
-                          height={36}
-                          formatter={(value) => <span className="text-xs font-mono font-medium text-slate-700">{value}</span>}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-200/80 text-center font-mono">
-                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-100">
-                      <div className="text-[10px] text-emerald-700 font-bold uppercase">100% Done</div>
-                      <div className="text-sm font-extrabold text-emerald-800">
-                        {stats.completedFacultyCount} <span className="text-[10px] font-normal text-emerald-600">({Math.round((stats.completedFacultyCount / (stats.totalFaculty || 1)) * 100)}%)</span>
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-100">
-                      <div className="text-[10px] text-amber-700 font-bold uppercase">In Progress</div>
-                      <div className="text-sm font-extrabold text-amber-800">
-                        {stats.inProgressFacultyCount} <span className="text-[10px] font-normal text-amber-600">({Math.round((stats.inProgressFacultyCount / (stats.totalFaculty || 1)) * 100)}%)</span>
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200">
-                      <div className="text-[10px] text-slate-600 font-bold uppercase">Pending</div>
-                      <div className="text-sm font-extrabold text-slate-700">
-                        {stats.noSubmissionFacultyCount} <span className="text-[10px] font-normal text-slate-500">({Math.round((stats.noSubmissionFacultyCount / (stats.totalFaculty || 1)) * 100)}%)</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Chart 2: Deliverables Target Ratio Pie Chart */}
-                <div className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block" />
-                        <span>Deliverables Target Volume Ratio</span>
-                      </h4>
-                      <p className="text-[11px] text-slate-400 font-mono">
-                        {stats.totalCompleted} submitted of {stats.totalPossible} expected deliverables
-                      </p>
-                    </div>
-                    <span className="text-xs font-mono font-bold px-2.5 py-1 bg-blue-500/20 text-blue-300 border border-blue-500/40 rounded-full">
-                      {stats.totalCompleted} / {stats.totalPossible}
-                    </span>
-                  </div>
-
-                  <div className="h-[280px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={volumePieData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={55}
-                          outerRadius={95}
-                          paddingAngle={4}
-                          dataKey="value"
-                          nameKey="name"
-                        >
-                          {volumePieData.map((entry, index) => (
-                            <Cell key={`cell-vol-${index}`} fill={entry.color} stroke="#141c2c" strokeWidth={2} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (active && payload && payload.length) {
-                              const data = payload[0].payload;
-                              return (
-                                <div className="bg-[#0d1524] text-white p-3 rounded-2xl shadow-xl border border-[#24334b] text-xs font-mono space-y-1">
-                                  <div className="flex items-center space-x-2">
-                                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: data.color }} />
-                                    <span className="font-bold text-white text-xs">{data.name}</span>
-                                  </div>
-                                  <div className="text-slate-300 text-xs pt-1 border-t border-[#24334b]">
-                                    Deliverables: <span className="font-bold text-blue-400">{data.value}</span> / {stats.totalPossible} ({data.percentage}%)
-                                  </div>
-                                  <div className="text-[11px] text-slate-400">
-                                    {data.description}
-                                  </div>
-                                </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        <Legend
-                          verticalAlign="bottom"
-                          height={36}
-                          formatter={(value) => <span className="text-xs font-mono font-medium text-slate-300">{value}</span>}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-3 border-t border-[#24334b] text-center font-mono">
-                    <div className="p-2.5 rounded-xl bg-[#0d1524] border border-blue-500/30">
-                      <div className="text-[10px] text-blue-300 font-bold uppercase">Submitted Files</div>
-                      <div className="text-sm font-extrabold text-blue-400">
-                        {stats.totalCompleted} <span className="text-[10px] font-normal text-blue-300">({stats.overallPercentage}%)</span>
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-[#0d1524] border border-[#24334b]">
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">Pending Files</div>
-                      <div className="text-sm font-extrabold text-slate-200">
-                        {Math.max(0, stats.totalPossible - stats.totalCompleted)} <span className="text-[10px] font-normal text-slate-400">({100 - stats.overallPercentage}%)</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            {/* Chart 3: Period / Weekly Submissions Pie Breakdown */}
-            <div className="bg-[#0f1725] border border-[#24334b] rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xs">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-purple-400 inline-block" />
-                      <span>
-                        {isWeeklyCategory
-                          ? `Weekly Submission Distribution (${currentTerm.name} • W1 to W${currentTermWeeks})`
-                          : `Term Compliance Distribution (Term 1, Term 2 & Term 3)`}
-                      </span>
-                    </h4>
-                    <p className="text-[11px] text-slate-400 font-mono">
-                      Submissions recorded per {isWeeklyCategory ? 'week' : 'term'} milestone across all faculty
-                    </p>
-                  </div>
-                  <span className="text-xs font-mono font-bold px-2.5 py-1 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded-full">
-                    {totalItemCount} {isWeeklyCategory ? 'Weeks' : 'Terms'}
-                  </span>
-                </div>
-
-                <div className="h-[300px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={periodDistributionPieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={55}
-                        outerRadius={95}
-                        paddingAngle={3}
-                        dataKey="value"
-                        nameKey="name"
-                      >
-                        {periodDistributionPieData.map((entry, index) => (
-                          <Cell key={`cell-period-${index}`} fill={entry.color} stroke="#141c2c" strokeWidth={2} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (active && payload && payload.length) {
-                            const data = payload[0].payload;
-                            return (
-                              <div className="bg-[#0d1524] text-white p-3 rounded-2xl shadow-xl border border-[#24334b] text-xs font-mono space-y-1">
-                                <div className="flex items-center space-x-2">
-                                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: data.color }} />
-                                  <span className="font-bold text-white text-xs">{data.fullName || data.name}</span>
-                                </div>
-                                <div className="text-slate-300 text-xs pt-1 border-t border-[#24334b]">
-                                  Faculty Submitted: <span className="font-bold text-emerald-400">{data.value}</span> / {data.totalFaculty} ({data.percentage}%)
-                                </div>
-                              </div>
-                            );
-                          }
-                          return null;
-                        }}
-                      />
-                      <Legend
-                        verticalAlign="bottom"
-                        height={40}
-                        formatter={(value) => <span className="text-xs font-mono font-medium text-slate-300">{value}</span>}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-            {/* Department Aggregate Summary Stats Footer */}
-            <div className="p-4 bg-slate-900 text-white rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono shadow-md">
-              <div className="flex items-center space-x-2">
-                <FileCheck2 className="w-4 h-4 text-emerald-400" />
-                <span>
-                  Official SVNHS {currentCategory.fullName} ({currentCategory.name}) Compliance Report
-                </span>
-              </div>
-              <div className="text-slate-400">
-                Department Total: <span className="font-bold text-emerald-400">{stats.totalCompleted}</span> / {stats.totalPossible} deliverables ({stats.overallPercentage}%)
-              </div>
-            </div>
-          </div>
-        ) : viewMode === 'faculty-chart' ? (
-          /* ADMIN: BAR CHART BY FACULTY MEMBER */
-          <div className="space-y-3">
-            <div className="h-[380px] w-full pt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={facultyChartData}
-                  margin={{ top: 20, right: 30, left: 0, bottom: 65 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#24334a" vertical={false} />
-                  <XAxis
-                    dataKey="name"
-                    interval={0}
-                    angle={-45}
-                    textAnchor="end"
-                    tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}
-                    height={60}
-                  />
-                  <YAxis
-                    domain={[0, totalItemCount]}
-                    ticks={Array.from({ length: totalItemCount + 1 }, (_, i) => i).filter(
-                      (i) => totalItemCount <= 6 || i % 2 === 0 || i === totalItemCount
-                    )}
-                    tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}
-                    label={{
-                      value: `${currentCategory.name} Submitted (out of ${totalItemCount})`,
-                      angle: -90,
-                      position: 'insideLeft',
-                      fill: '#94a3b8',
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      dy: 70,
-                    }}
-                  />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl border border-slate-800 text-xs font-mono space-y-1">
-                            <div className="font-bold text-sm text-blue-300">{data.fullName}</div>
-                            <div className="text-slate-400 text-[11px]">{data.department}</div>
-                            <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between space-x-3">
-                              <span className="text-slate-300">{currentCategory.name} Submitted:</span>
-                              <span className="font-extrabold text-emerald-400 text-sm">
-                                {data.submittedCount} / {totalItemCount} {isWeeklyCategory ? 'Weeks' : 'Terms'} ({data.percentage}%)
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Bar dataKey="submittedCount" radius={[8, 8, 0, 0]} maxBarSize={45}>
-                    {facultyChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={getBarColor(entry.submittedCount, totalItemCount)} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Legend indicators */}
-            <div className="flex flex-wrap items-center justify-center gap-4 text-xs font-mono text-slate-600 pt-2 border-t border-slate-100">
-              <div className="flex items-center space-x-1.5">
-                <span className="w-3 h-3 rounded-md bg-emerald-500 inline-block" />
-                <span>{totalItemCount} {isWeeklyCategory ? 'Weeks' : 'Terms'} (100% Complete)</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-3 h-3 rounded-md bg-blue-500 inline-block" />
-                <span>≥ 70% (High Compliance)</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-3 h-3 rounded-md bg-amber-500 inline-block" />
-                <span>≥ 40% (Moderate)</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-3 h-3 rounded-md bg-orange-500 inline-block" />
-                <span>1 – {Math.max(1, Math.floor(totalItemCount * 0.4))} (Low)</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-3 h-3 rounded-md bg-slate-400 inline-block" />
-                <span>0 (No Submission)</span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          /* ADMIN: BAR CHART BY WEEKLY / TERM TREND */
-          <div className="space-y-3">
-            <div className="h-[360px] w-full pt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={trendChartData}
-                  margin={{ top: 20, right: 30, left: 0, bottom: 25 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#24334a" vertical={false} />
-                  <XAxis
-                    dataKey="shortLabel"
-                    tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace', fontWeight: 600 }}
-                  />
-                  <YAxis
-                    domain={[0, allFaculty.length > 0 ? allFaculty.length : 10]}
-                    tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}
-                    label={{
-                      value: `Number of Faculty Submitted (${currentCategory.name})`,
-                      angle: -90,
-                      position: 'insideLeft',
-                      fill: '#94a3b8',
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      dy: 80,
-                    }}
-                  />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl border border-slate-800 text-xs font-mono space-y-1">
-                            <div className="font-bold text-sm text-blue-300">{data.itemLabel}</div>
-                            <div className="pt-1 flex items-center justify-between space-x-3">
-                              <span className="text-slate-300">Compliance:</span>
-                              <span className="font-extrabold text-emerald-400">
-                                {data.submittedCount} / {data.totalFaculty} ({data.percentage}%)
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Bar dataKey="submittedCount" fill="#3B82F6" radius={[8, 8, 0, 0]} maxBarSize={55}>
-                    {trendChartData.map((entry, index) => (
-                      <Cell
-                        key={`cell-trend-${index}`}
-                        fill={entry.percentage >= 80 ? '#10B981' : entry.percentage >= 50 ? '#3B82F6' : '#F59E0B'}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="text-center text-xs font-mono text-slate-500 pt-2 border-t border-slate-100">
-              Department-wide {currentCategory.fullName} ({currentCategory.name}) compliance breakdown for{' '}
-              {isWeeklyCategory ? `${currentTerm.name} (Weeks 1 to ${currentTermWeeks})` : 'Term 1, Term 2 and Term 3'}
-            </div>
-          </div>
-        )}
-      </div>
-    ) : null}
 
       {/* ADMIN: SET NUMBER OF WEEKS PER TERM MODAL (1 to 12 Weeks Max) */}
       {isSettingWeeksModalOpen && (
@@ -5085,7 +4967,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               <div className="bg-[#0d1524] border border-blue-500/30 rounded-2xl p-3.5 text-xs text-blue-200 font-mono flex items-start space-x-2.5">
                 <FileCheck2 className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
                 <div>
-                  <strong>Synchronized Dynamic Directory:</strong> Changing and saving the number of weeks automatically updates all DLL checkboxes, matrix tables, progress visualizers, and weekly trend graphs in real-time across both Admin and Faculty portals.
+                  <strong>Synchronized Dynamic Directory:</strong> Changing and saving the number of weeks automatically updates all DLL checkboxes and matrix tables in real-time across both Admin and Faculty portals.
                 </div>
               </div>
             </div>
@@ -5619,21 +5501,33 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             <div className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1 font-mono">
               {/* Submission Overview Status Banner */}
               <div className={`p-4 rounded-2xl border ${
-                dllReviewModalData.isFullySubmitted
+                dllReviewModalData.isLoadingFiles
+                  ? 'bg-blue-500/10 border-blue-500/40 text-blue-200'
+                  : dllReviewModalData.isFullySubmitted
                   ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
                   : 'bg-amber-500/10 border-amber-500/40 text-amber-200'
               } flex items-start justify-between gap-3`}>
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${dllReviewModalData.isFullySubmitted ? 'bg-emerald-400' : 'bg-amber-400'} animate-pulse`} />
+                    <span className={`w-2.5 h-2.5 rounded-full ${
+                      dllReviewModalData.isLoadingFiles
+                        ? 'bg-blue-400'
+                        : dllReviewModalData.isFullySubmitted
+                        ? 'bg-emerald-400'
+                        : 'bg-amber-400'
+                    } animate-pulse`} />
                     <span className="font-bold text-xs uppercase tracking-wider font-sans">
-                      {dllReviewModalData.isFullySubmitted
+                      {dllReviewModalData.isLoadingFiles
+                        ? 'Connecting to Firebase...'
+                        : dllReviewModalData.isFullySubmitted
                         ? 'All DLL Folders Uploaded (Submitted Remark)'
                         : 'Partial / Incomplete Upload'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-300">
-                    {dllReviewModalData.isFullySubmitted
+                    {dllReviewModalData.isLoadingFiles
+                      ? `Downloading Week ${dllReviewModalData.weekNumber} documents for ${dllReviewModalData.facultySurname}, ${dllReviewModalData.facultyName}...`
+                      : dllReviewModalData.isFullySubmitted
                       ? `All ${dllReviewModalData.totalDllFolders} workspace DLL folders have uploaded lesson log files for Week ${dllReviewModalData.weekNumber}. Confirm the final evaluation status below.`
                       : `Uploaded documents in ${dllReviewModalData.allDllFilesForWeek.length} of ${dllReviewModalData.totalDllFolders} DLL folders.`}
                   </p>
@@ -5672,7 +5566,17 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   <span className="text-[11px] text-slate-400 font-normal">Week {dllReviewModalData.weekNumber} Deliverables</span>
                 </div>
 
-                {dllReviewModalData.dllFolders.length === 0 ? (
+                {dllReviewModalData.isLoadingFiles ? (
+                  <div className="p-8 bg-[#0a1120] rounded-2xl border border-amber-500/30 flex flex-col items-center justify-center space-y-3 text-center shadow-inner">
+                    <RefreshCw className="w-6 h-6 animate-spin text-amber-400" />
+                    <p className="text-xs font-bold text-white font-sans">
+                      Downloading Week {dllReviewModalData.weekNumber} DLL Documents...
+                    </p>
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      Querying only {dllReviewModalData.facultyName}'s uploaded files for Week {dllReviewModalData.weekNumber} to conserve read quota
+                    </p>
+                  </div>
+                ) : dllReviewModalData.dllFolders.length === 0 ? (
                   <div className="p-4 bg-[#0d1524] rounded-2xl border border-[#24334b] text-center text-xs text-slate-400">
                     This faculty member has not created any DLL folders yet.
                   </div>
@@ -5866,7 +5770,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmDllReview}
-                disabled={isSubmittingReview}
+                disabled={isSubmittingReview || dllReviewModalData.isLoadingFiles}
                 className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center space-x-2 cursor-pointer disabled:opacity-50 ${
                   reviewStatusChoice === 'checked'
                     ? 'bg-emerald-600 hover:bg-emerald-500 text-white ring-2 ring-emerald-400/40 shadow-emerald-950/40'
@@ -5879,6 +5783,11 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-white" />
                     <span>Saving Confirmation...</span>
+                  </>
+                ) : dllReviewModalData.isLoadingFiles ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Downloading Files...</span>
                   </>
                 ) : (
                   <>
