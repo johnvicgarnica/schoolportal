@@ -1405,171 +1405,32 @@ export const deleteAnnouncementFromFirestore = async (id: string) => {
 };
 
 // Server Aggregation: Count announcements using getCountFromServer
+// Server Aggregation: Count announcements (neutralized: 0 reads)
 export const getAnnouncementsCountFromServer = async (): Promise<number> => {
-  try {
-    const snapshot = await getCountFromServer(collection(db, ANNOUNCEMENTS_COL));
-    return snapshot.data().count;
-  } catch (err) {
-    handleFirestoreError('counting announcements from server', err);
-    return getStoredAnnouncements().length;
-  }
+  return 0;
 };
 
-// One-Time Fetch with Deduplication Cache
-export const fetchAnnouncementsOnce = async (pageSize: number = 20): Promise<Announcement[]> => {
-  return fetchWithCacheDedupe('announcements_once', async () => {
-    try {
-      const q = query(collection(db, ANNOUNCEMENTS_COL), limit(pageSize));
-      const snapshot = await getDocs(q);
-      const list: Announcement[] = snapshot.docs.map((d) => d.data() as Announcement);
-      list.sort((a, b) => {
-        if (a.isPinned && !b.isPinned) return -1;
-        if (!a.isPinned && b.isPinned) return 1;
-        return (b.createdAt || '').localeCompare(a.createdAt || '');
-      });
-      if (list.length > 0) {
-        saveOfflineData(ANNOUNCEMENTS_STORAGE_KEY, list);
-        return list;
-      }
-      return getStoredAnnouncements();
-    } catch (err) {
-      handleFirestoreError('fetching announcements once', err);
-      return getStoredAnnouncements();
-    }
-  });
+// One-Time Fetch with Deduplication Cache (neutralized: 0 reads)
+export const fetchAnnouncementsOnce = async (_pageSize: number = 20): Promise<Announcement[]> => {
+  return [];
 };
 
-// Cursor-based pagination for announcements
-export const fetchAnnouncementsPaginated = async (params: {
+// Cursor-based pagination for announcements (neutralized: 0 reads)
+export const fetchAnnouncementsPaginated = async (_params: {
   pageSize?: number;
   lastDoc?: QueryDocumentSnapshot<DocumentData>;
 }): Promise<{ announcements: Announcement[]; lastDoc: QueryDocumentSnapshot<DocumentData> | null; hasMore: boolean }> => {
-  const size = params.pageSize || 20;
-  try {
-    const constraints: QueryConstraint[] = [limit(size)];
-    if (params.lastDoc) {
-      constraints.push(startAfter(params.lastDoc));
-    }
-    const q = query(collection(db, ANNOUNCEMENTS_COL), ...constraints);
-    const snapshot = await getDocs(q);
-    const announcements: Announcement[] = snapshot.docs.map((d) => d.data() as Announcement);
-    const nextLastDoc = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
-    return {
-      announcements,
-      lastDoc: nextLastDoc,
-      hasMore: snapshot.docs.length === size,
-    };
-  } catch (err) {
-    handleFirestoreError('paginating announcements', err);
-    return { announcements: getStoredAnnouncements(), lastDoc: null, hasMore: false };
-  }
+  return { announcements: [], lastDoc: null, hasMore: false };
 };
 
-// Shared Real-time Subscription for Announcements with Quota Protection and 45s Grace Period
+// Subscription for Announcements (neutralized: zero reads, zero listeners)
 export const subscribeAnnouncements = (onUpdate: (announcements: Announcement[]) => void) => {
-  const shared = createSharedSubscription<Announcement[]>(
-    'shared_announcements',
-    (emit) => {
-      // Bound query to limit(20) to protect free read quota
-      const q = query(collection(db, ANNOUNCEMENTS_COL), limit(20));
-      return onSnapshot(
-        q,
-        (snapshot) => {
-          const list: Announcement[] = snapshot.docs.map((d) => d.data() as Announcement);
-
-          // Sort by pinned first, then by createdAt desc
-          list.sort((a, b) => {
-            if (a.isPinned && !b.isPinned) return -1;
-            if (!a.isPinned && b.isPinned) return 1;
-            return (b.createdAt || '').localeCompare(a.createdAt || '');
-          });
-
-          // Synchronize exact Firestore collection snapshot to IndexedDB and local cache
-          saveOfflineData(ANNOUNCEMENTS_STORAGE_KEY, list);
-          emit(list);
-        },
-        (err) => {
-          handleFirestoreError('subscribing to announcements collection', err);
-          emit(getStoredAnnouncements());
-        }
-      );
-    },
-    getStoredAnnouncements
-  );
-  return shared(onUpdate);
+  onUpdate([]);
+  return () => {};
 };
 
-let isSeedingAnnouncements = false;
 export const seedInitialAnnouncementsIfEmpty = async () => {
-  if (isSeedingAnnouncements) return;
-  if (typeof window !== 'undefined' && localStorage.getItem('svnhs_announcements_seeded') === 'true') {
-    return;
-  }
-  isSeedingAnnouncements = true;
-  try {
-    const seedSnap = await getDoc(doc(db, SETTINGS_COL, 'announcements_seeded'));
-    if (!seedSnap.exists()) {
-      const today = new Date().toISOString().substring(0, 10);
-      const defaultAnnouncements: Announcement[] = [
-        {
-          id: 'ann-1',
-          title: 'Submission of Q1 Daily Lesson Logs (DLL) & Table of Specifications (TOS)',
-          content: 'All Senior High School faculty members are requested to upload their complete Q1 Daily Lesson Logs (DLL), Table of Specifications (TOS), and Test Questions (TQ) to their respective Grade 11 or Grade 12 repositories before Friday 5:00 PM.',
-          priority: 'urgent',
-          targetAudience: 'All SHS Faculty',
-          status: 'published',
-          isPinned: true,
-          authorName: 'John Vic Garnica (Admin)',
-          authorRole: 'SHS Department Head / Admin',
-          createdAt: today,
-          updatedAt: today,
-        },
-        {
-          id: 'ann-2',
-          title: 'Faculty Development Workshop on DepEd SHS Curriculum Updates',
-          content: 'Join our upcoming SHS Curriculum & Assessment Alignment Session in the Audio-Visual Room (AVR). Attendance for all Grade 11 and Grade 12 advisers and subject teachers is required.',
-          priority: 'important',
-          targetAudience: 'All SHS Faculty',
-          status: 'published',
-          isPinned: false,
-          authorName: 'John Vic Garnica (Admin)',
-          authorRole: 'SHS Department Head / Admin',
-          createdAt: today,
-          updatedAt: today,
-        }
-      ];
-
-      for (const ann of defaultAnnouncements) {
-        saveAnnouncementToLocalStorage(ann);
-        await setDoc(doc(db, ANNOUNCEMENTS_COL, ann.id), ann, { merge: true });
-      }
-
-      await setDoc(doc(db, SETTINGS_COL, 'announcements_seeded'), {
-        key: 'announcements_seeded',
-        value: 'true',
-        updatedAt: new Date().toISOString(),
-      });
-    }
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('svnhs_announcements_seeded', 'true');
-    }
-  } catch (err: any) {
-    const errStr = (err?.message || err?.code || String(err) || '').toLowerCase();
-    const isOffline =
-      err?.code === 'unavailable' ||
-      err?.code === 'failed-precondition' ||
-      errStr.includes('offline') ||
-      errStr.includes('backend') ||
-      errStr.includes('failed to get document') ||
-      errStr.includes('network');
-    if (isOffline) {
-      console.warn('Firestore is connecting, deferred announcement seeding.');
-    } else {
-      console.error('Error seeding initial announcements to Firestore:', err);
-    }
-  } finally {
-    isSeedingAnnouncements = false;
-  }
+  // Announcements permanently disabled to conserve Firestore read/write quota
 };
 
 // 8. GOOGLE DRIVE FOLDERS MANAGEMENT
@@ -1764,14 +1625,10 @@ export const seedInitialAdminIfEmpty = async () => {
   }
   isSeedingAdmin = true;
   try {
-    // Seed default announcements if not already seeded
-    await seedInitialAnnouncementsIfEmpty();
     // Seed default drive folders if not already seeded
     await seedInitialDriveFoldersIfEmpty();
     // Seed default school permanent folders if not already seeded
     await seedInitialSchoolPermanentFoldersIfEmpty();
-    // Seed default embedded videos if not already seeded
-    await seedInitialEmbeddedVideosIfEmpty();
 
     // Seed master admin email into Firebase settings if not already present
     const adminEmailSnap = await getDoc(doc(db, SETTINGS_COL, 'svnhs_admin_email'));
@@ -2636,6 +2493,72 @@ export const fetchFacultyDllFilesForWeek = async (
   }
 };
 
+/**
+ * Automatically deletes all uploaded DLL documents for a specific faculty member and week.
+ * Used when Master Teacher marks "Approved & Verified" to conserve database storage quota while keeping green check permanent.
+ */
+export const deleteFacultyDllFilesForWeek = async (
+  facultyEmail: string,
+  weekNumber: number
+): Promise<number> => {
+  const cleanEmail = (facultyEmail || '').toLowerCase().trim();
+  if (!cleanEmail) return 0;
+
+  const cacheKey = `${cleanEmail}_week_${weekNumber}`;
+  facultyWeekFilesCache.delete(cacheKey);
+
+  try {
+    const weekFiles = await fetchFacultyDllFilesForWeek(cleanEmail, weekNumber);
+    for (const file of weekFiles) {
+      await deleteFacultyFileFromFirestore(file.id);
+    }
+    facultyWeekFilesCache.delete(cacheKey);
+    return weekFiles.length;
+  } catch (err) {
+    console.warn(`Error deleting week ${weekNumber} files for ${cleanEmail}:`, err);
+    return 0;
+  }
+};
+
+/**
+ * Extends/sets the 15-day auto purge expiration timestamp for files in a specific faculty member and week.
+ * Used when Master Teacher marks "With Comments" so files are retained for 15 days before auto purge.
+ */
+export const extendFacultyDllFilesExpiration = async (
+  facultyEmail: string,
+  weekNumber: number,
+  days: number = 15
+): Promise<number> => {
+  const cleanEmail = (facultyEmail || '').toLowerCase().trim();
+  if (!cleanEmail) return 0;
+
+  const cacheKey = `${cleanEmail}_week_${weekNumber}`;
+  facultyWeekFilesCache.delete(cacheKey);
+
+  try {
+    const weekFiles = await fetchFacultyDllFilesForWeek(cleanEmail, weekNumber);
+    const purgeDeadline = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    for (const file of weekFiles) {
+      try {
+        file.expiresAt = purgeDeadline;
+        saveFacultyFileToLocalStorage(file);
+        await setDoc(
+          doc(db, FACULTY_FILES_COL, file.id),
+          { expiresAt: purgeDeadline, updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn('Error setting file auto purge expiration:', e);
+      }
+    }
+    facultyWeekFilesCache.delete(cacheKey);
+    return weekFiles.length;
+  } catch (err) {
+    console.warn(`Error updating expiration for week ${weekNumber} files for ${cleanEmail}:`, err);
+    return 0;
+  }
+};
+
 // 10. FACULTY WEEKLY SUBMISSION REPORTS (DLL, TOS, TQ - 11 WEEKS PER TERM)
 export type SubmissionCategory = 'dll' | 'tos' | 'tq';
 export type ItemSubmissionStatus = 'unchecked' | 'checked' | 'with-comments' | 'incomplete' | 'late';
@@ -2745,7 +2668,8 @@ export const saveFacultySubmissionToFirestore = async (
   facultyName?: string,
   department?: string,
   statuses?: ItemSubmissionStatus[],
-  comments?: Record<string, string>
+  comments?: Record<string, string>,
+  confirmedWeeks?: Record<string, boolean>
 ) => {
   try {
     const cleanEmail = facultyEmail.toLowerCase().trim();
@@ -2769,6 +2693,15 @@ export const saveFacultySubmissionToFirestore = async (
       saveFacultyCommentsToLocalStorage(termId, category, cachedComments);
     }
 
+    const cachedConfirmed = getStoredFacultyConfirmedWeeks(termId, category);
+    const effectiveConfirmed = confirmedWeeks
+      ? { ...cachedConfirmed[cleanEmail], ...confirmedWeeks }
+      : cachedConfirmed[cleanEmail] || {};
+    if (confirmedWeeks) {
+      cachedConfirmed[cleanEmail] = effectiveConfirmed;
+      saveFacultyConfirmedWeeksToLocalStorage(termId, category, cachedConfirmed);
+    }
+
     const docPayload: Record<string, any> = {
       id: docId,
       termId,
@@ -2777,6 +2710,7 @@ export const saveFacultySubmissionToFirestore = async (
       facultyName: facultyName || '',
       department: department || '',
       weeks: Array.isArray(weeks) ? [...weeks] : [],
+      confirmedWeeks: effectiveConfirmed,
       updatedAt: new Date().toISOString(),
     };
 
@@ -2933,6 +2867,7 @@ export const syncFacultyDllSubmissionReportOnUpload = async (
     const existingSubmissions = getStoredFacultySubmissions(activeTerm, 'dll');
     const existingStatuses = getStoredFacultyStatuses(activeTerm, 'dll');
     const existingComments = getStoredFacultyComments(activeTerm, 'dll');
+    const existingConfirmed = getStoredFacultyConfirmedWeeks(activeTerm, 'dll');
 
     const facultyWeeks = existingSubmissions[cleanEmail] ? [...existingSubmissions[cleanEmail]] : Array(numberOfWeeks).fill(false);
     while (facultyWeeks.length < numberOfWeeks) facultyWeeks.push(false);
@@ -2952,6 +2887,33 @@ export const syncFacultyDllSubmissionReportOnUpload = async (
     // Evaluate each week (1 to numberOfWeeks)
     for (let w = 1; w <= numberOfWeeks; w++) {
       const idx = w - 1;
+
+      // Check if this week was already verified and approved by Master Teacher
+      const isConfirmedApproved = Boolean(
+        existingConfirmed[cleanEmail]?.[String(idx)] === true ||
+        (existingStatuses[cleanEmail]?.[idx] === 'checked' && existingSubmissions[cleanEmail]?.[idx] === true && (
+          existingComments[cleanEmail]?.[String(idx)]?.includes('Approved & Verified') ||
+          existingComments[cleanEmail]?.[String(idx)]?.includes('Verified and Approved') ||
+          existingComments[cleanEmail]?.[String(idx)]?.includes('[Confirmed by')
+        ))
+      );
+
+      // Check if this week was previously reviewed with comments
+      const isWithComments = Boolean(
+        existingStatuses[cleanEmail]?.[idx] === 'with-comments' ||
+        existingComments[cleanEmail]?.[String(idx)]?.includes('With Comments') ||
+        existingComments[cleanEmail]?.[String(idx)]?.includes('[Reviewed by')
+      );
+
+      // RULE 1: If already Approved & Verified by Master Teacher, leave Green Check ✓ permanent even when files are deleted!
+      if (isConfirmedApproved) {
+        facultyWeeks[idx] = true;
+        facultyStatuses[idx] = 'checked';
+        if (!facultyComm[String(idx)] && existingComments[cleanEmail]?.[String(idx)]) {
+          facultyComm[String(idx)] = existingComments[cleanEmail][String(idx)];
+        }
+        continue;
+      }
 
       // Find which DLL folders have an uploaded file for week w
       const uploadedFolderIds = new Set<string>();
@@ -2981,7 +2943,9 @@ export const syncFacultyDllSubmissionReportOnUpload = async (
         if (facultyStatuses[idx] !== 'checked' || !facultyWeeks[idx]) {
           facultyWeeks[idx] = true;
           facultyStatuses[idx] = 'checked';
-          facultyComm[String(idx)] = `All ${totalDllFoldersCount} DLL folders submitted for Week ${w}.`;
+          facultyComm[String(idx)] = isWithComments
+            ? `All ${totalDllFoldersCount} DLL folders submitted for Week ${w} (Revision submitted for review).`
+            : `All ${totalDllFoldersCount} DLL folders submitted for Week ${w}.`;
           hasChanges = true;
         }
       } else if (uploadedCount > 0 && uploadedCount < totalDllFoldersCount) {
@@ -2996,12 +2960,24 @@ export const syncFacultyDllSubmissionReportOnUpload = async (
         }
       } else {
         // 0 documents uploaded for this week in all DLL folders:
-        // If files were previously uploaded but deleted, reset status to unchecked
-        if (facultyWeeks[idx] || facultyStatuses[idx] === 'checked' || facultyStatuses[idx] === 'incomplete') {
+        // RULE 2: If files were deleted due to 15-day auto purge or cleanup, still leave the "with comments" status intact!
+        if (isWithComments) {
           facultyWeeks[idx] = false;
-          facultyStatuses[idx] = 'unchecked';
-          facultyComm[String(idx)] = '';
-          hasChanges = true;
+          if (facultyStatuses[idx] !== 'with-comments') {
+            facultyStatuses[idx] = 'with-comments';
+            hasChanges = true;
+          }
+          if (!facultyComm[String(idx)] && existingComments[cleanEmail]?.[String(idx)]) {
+            facultyComm[String(idx)] = existingComments[cleanEmail][String(idx)];
+          }
+        } else {
+          // Unreviewed files were deleted -> reset status to unchecked
+          if (facultyWeeks[idx] || facultyStatuses[idx] === 'checked' || facultyStatuses[idx] === 'incomplete') {
+            facultyWeeks[idx] = false;
+            facultyStatuses[idx] = 'unchecked';
+            facultyComm[String(idx)] = '';
+            hasChanges = true;
+          }
         }
       }
     }
@@ -3015,7 +2991,8 @@ export const syncFacultyDllSubmissionReportOnUpload = async (
         facultyName,
         department,
         facultyStatuses,
-        facultyComm
+        facultyComm,
+        existingConfirmed[cleanEmail] || {}
       );
     }
   } catch (err) {
@@ -4276,91 +4253,22 @@ export const cleanPreloadGalleryPhotosFromFirestore = async (): Promise<void> =>
   }
 };
 
-// One-Time Fetch with Deduplication Cache
-export const fetchGalleryPhotosOnce = async (pageSize: number = 20): Promise<GalleryPhoto[]> => {
-  return fetchWithCacheDedupe('gallery_photos_once', async () => {
-    try {
-      const q = query(collection(db, GALLERY_COL), limit(pageSize));
-      const snapshot = await getDocs(q);
-      const list: GalleryPhoto[] = snapshot.docs
-        .map((d) => d.data() as GalleryPhoto)
-        .filter((photo) => !isPreloadPhoto(photo));
-
-      list.sort((a, b) => {
-        const orderA = typeof a.order === 'number' ? a.order : 999;
-        const orderB = typeof b.order === 'number' ? b.order : 999;
-        if (orderA !== orderB) return orderA - orderB;
-        return (b.uploadedAt || '').localeCompare(a.uploadedAt || '');
-      });
-
-      if (list.length > 0) {
-        saveOfflineData(GALLERY_STORAGE_KEY, list);
-        return list;
-      }
-      return getStoredGalleryPhotos();
-    } catch (err) {
-      handleFirestoreError('fetching gallery photos once', err);
-      return getStoredGalleryPhotos();
-    }
-  });
+// One-Time Fetch with Deduplication Cache (neutralized: 0 reads)
+export const fetchGalleryPhotosOnce = async (_pageSize: number = 20): Promise<GalleryPhoto[]> => {
+  return [];
 };
 
 export const subscribeGalleryPhotos = (onUpdate: (photos: GalleryPhoto[]) => void) => {
-  // 1. Deliver cached photos immediately on first load so users can view contents without delay
-  const cached = getStoredGalleryPhotos();
-  if (cached && cached.length > 0) {
-    onUpdate(cached);
-  } else {
-    getOfflineData<GalleryPhoto[]>(GALLERY_STORAGE_KEY).then((idbPhotos) => {
-      if (idbPhotos && idbPhotos.length > 0) {
-        onUpdate(idbPhotos);
-      }
-    });
-  }
-
-  // 2. Bound query to limit(20) to protect free read quota
-  const q = query(collection(db, GALLERY_COL), limit(20));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      if (snapshot.empty) {
-        saveOfflineData(GALLERY_STORAGE_KEY, []);
-        onUpdate([]);
-        return;
-      }
-
-      const list: GalleryPhoto[] = snapshot.docs
-        .map((d) => d.data() as GalleryPhoto)
-        .filter((photo) => !isPreloadPhoto(photo));
-
-      list.sort((a, b) => {
-        const orderA = typeof a.order === 'number' ? a.order : 999;
-        const orderB = typeof b.order === 'number' ? b.order : 999;
-        if (orderA !== orderB) return orderA - orderB;
-        return (b.uploadedAt || '').localeCompare(a.uploadedAt || '');
-      });
-
-      // Synchronize exact Firestore snapshot to IndexedDB and local cache
-      saveOfflineData(GALLERY_STORAGE_KEY, list);
-
-      onUpdate(list);
-    },
-    (err) => {
-      handleFirestoreError('subscribing to gallery photos collection', err);
-      const cached = getStoredGalleryPhotos();
-      onUpdate(cached);
-    }
-  );
+  onUpdate([]);
+  return () => {};
 };
 
 export const seedInitialGalleryPhotosIfEmpty = async () => {
-  // Preload pictures are removed; purge any legacy preloads from Firestore
-  await cleanPreloadGalleryPhotosFromFirestore();
+  // Gallery permanently disabled to conserve Firestore quota
 };
 
 export const reseedDefaultGalleryPhotos = async () => {
-  // Preload pictures are permanently disabled
-  await cleanPreloadGalleryPhotosFromFirestore();
+  // Gallery permanently disabled
 };
 
 // ==========================================
@@ -4379,172 +4287,34 @@ export const isPreloadVideo = (video: EmbeddedVideo | null | undefined): boolean
   if (!video) return false;
   if (video.id && PRELOAD_VIDEO_IDS.has(video.id)) return true;
   if (video.id && video.id.startsWith('video-svnhs-')) return true;
-  if (
-    video.title?.includes('San Vicente National High School - Campus Overview') ||
-    video.title?.includes('DepEd Senior High School Academic & TVL Strands')
-  ) {
-    return true;
-  }
   return false;
 };
 
 export const cleanPreloadVideosFromFirestore = async (): Promise<void> => {
-  try {
-    const snap = await getDocs(query(collection(db, EMBEDDED_VIDEOS_COL), limit(20)));
-    for (const d of snap.docs) {
-      const vid = d.data() as EmbeddedVideo;
-      if (isPreloadVideo(vid) || PRELOAD_VIDEO_IDS.has(d.id) || d.id.startsWith('video-svnhs-')) {
-        await deleteDoc(doc(db, EMBEDDED_VIDEOS_COL, d.id));
-      }
-    }
-  } catch (err) {
-    handleFirestoreError('cleaning preload videos from Firestore', err);
-  }
-
-  // Also clean localStorage cache
-  try {
-    const raw = localStorage.getItem(VIDEOS_STORAGE_KEY);
-    if (raw) {
-      const list = JSON.parse(raw) as EmbeddedVideo[];
-      const filtered = list.filter((v) => !isPreloadVideo(v));
-      localStorage.setItem(VIDEOS_STORAGE_KEY, JSON.stringify(filtered));
-    }
-  } catch (_) {}
+  // Neutralized
 };
 
 export const getStoredEmbeddedVideos = (): EmbeddedVideo[] => {
-  return getOfflineDataSync<EmbeddedVideo[]>(VIDEOS_STORAGE_KEY, []);
+  return [];
 };
 
-export const saveEmbeddedVideoToLocalStorage = (video: EmbeddedVideo) => {
-  try {
-    const list = getStoredEmbeddedVideos();
-    const idx = list.findIndex((v) => v.id === video.id);
-    if (idx >= 0) {
-      list[idx] = video;
-    } else {
-      list.push(video);
-    }
-    saveOfflineData(VIDEOS_STORAGE_KEY, list);
-  } catch (err) {
-    console.error('Error saving embedded video to local cache:', err);
-  }
-};
+export const saveEmbeddedVideoToLocalStorage = (_video: EmbeddedVideo) => {};
+export const deleteEmbeddedVideoFromLocalStorage = (_id: string) => {};
+export const saveEmbeddedVideoToFirestore = async (_video: EmbeddedVideo): Promise<void> => {};
+export const deleteEmbeddedVideoFromFirestore = async (_id: string): Promise<void> => {};
 
-export const deleteEmbeddedVideoFromLocalStorage = (id: string) => {
-  try {
-    const list = getStoredEmbeddedVideos();
-    const filtered = list.filter((v) => v.id !== id);
-    saveOfflineData(VIDEOS_STORAGE_KEY, filtered);
-  } catch (err) {
-    console.error('Error deleting embedded video from local cache:', err);
-  }
-};
-
-export const saveEmbeddedVideoToFirestore = async (video: EmbeddedVideo): Promise<void> => {
-  const cleanVideo: EmbeddedVideo = {
-    id: video.id || `video-${Date.now()}`,
-    title: video.title?.trim() || 'SVNHS Video Presentation',
-    embedCode: (video.embedCode || '')
-      .trim()
-      .replace(/&amp;/g, '&')
-      .replace(/https?:\/\/(?:web|m|touch)\.facebook\.com/gi, 'https://www.facebook.com')
-      .replace(/href=https%3A%2F%2F(?:web|m|touch)\.facebook\.com/gi, 'href=https%3A%2F%2Fwww.facebook.com'),
-    description: video.description?.trim() || '',
-    createdAt: video.createdAt || new Date().toISOString().substring(0, 10),
-    createdBy: video.createdBy || 'Master Admin',
-    order: typeof video.order === 'number' ? video.order : 1,
-  };
-
-  await setDoc(doc(db, EMBEDDED_VIDEOS_COL, cleanVideo.id), cleanVideo, { merge: true });
-  saveEmbeddedVideoToLocalStorage(cleanVideo);
-};
-
-export const deleteEmbeddedVideoFromFirestore = async (id: string): Promise<void> => {
-  await deleteDoc(doc(db, EMBEDDED_VIDEOS_COL, id));
-  deleteEmbeddedVideoFromLocalStorage(id);
-};
-
-// One-Time Fetch with Deduplication Cache
-export const fetchEmbeddedVideosOnce = async (pageSize: number = 20): Promise<EmbeddedVideo[]> => {
-  return fetchWithCacheDedupe('embedded_videos_once', async () => {
-    try {
-      const q = query(collection(db, EMBEDDED_VIDEOS_COL), limit(pageSize));
-      const snapshot = await getDocs(q);
-      const list: EmbeddedVideo[] = snapshot.docs
-        .map((d) => d.data() as EmbeddedVideo)
-        .filter((vid) => !isPreloadVideo(vid));
-
-      list.sort((a, b) => {
-        const orderA = typeof a.order === 'number' ? a.order : 999;
-        const orderB = typeof b.order === 'number' ? b.order : 999;
-        if (orderA !== orderB) return orderA - orderB;
-        return (b.createdAt || '').localeCompare(a.createdAt || '');
-      });
-
-      if (list.length > 0) {
-        saveOfflineData(VIDEOS_STORAGE_KEY, list);
-        return list;
-      }
-      return getStoredEmbeddedVideos();
-    } catch (err) {
-      handleFirestoreError('fetching embedded videos once', err);
-      return getStoredEmbeddedVideos();
-    }
-  });
+// One-Time Fetch with Deduplication Cache (neutralized: 0 reads)
+export const fetchEmbeddedVideosOnce = async (_pageSize: number = 20): Promise<EmbeddedVideo[]> => {
+  return [];
 };
 
 export const subscribeEmbeddedVideos = (onUpdate: (videos: EmbeddedVideo[]) => void) => {
-  // 1. Deliver cached videos immediately on first load so users can view contents without delay
-  const cached = getStoredEmbeddedVideos();
-  if (cached && cached.length > 0) {
-    onUpdate(cached);
-  } else {
-    getOfflineData<EmbeddedVideo[]>(VIDEOS_STORAGE_KEY).then((idbVideos) => {
-      if (idbVideos && idbVideos.length > 0) {
-        onUpdate(idbVideos);
-      }
-    });
-  }
-
-  // 2. Bound query to limit(20) to protect free read quota
-  const q = query(collection(db, EMBEDDED_VIDEOS_COL), limit(20));
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      if (snapshot.empty) {
-        saveOfflineData(VIDEOS_STORAGE_KEY, []);
-        onUpdate([]);
-        return;
-      }
-
-      const list: EmbeddedVideo[] = snapshot.docs
-        .map((d) => d.data() as EmbeddedVideo)
-        .filter((vid) => !isPreloadVideo(vid));
-
-      list.sort((a, b) => {
-        const orderA = typeof a.order === 'number' ? a.order : 999;
-        const orderB = typeof b.order === 'number' ? b.order : 999;
-        if (orderA !== orderB) return orderA - orderB;
-        return (b.createdAt || '').localeCompare(a.createdAt || '');
-      });
-
-      // Synchronize exact Firestore snapshot to IndexedDB and local cache
-      saveOfflineData(VIDEOS_STORAGE_KEY, list);
-
-      onUpdate(list);
-    },
-    (err) => {
-      handleFirestoreError('subscribing to embedded videos collection', err);
-      const cached = getStoredEmbeddedVideos();
-      onUpdate(cached);
-    }
-  );
+  onUpdate([]);
+  return () => {};
 };
 
 export const seedInitialEmbeddedVideosIfEmpty = async (): Promise<void> => {
-  // Preload videos are permanently removed; purge any legacy preloads from Firestore & cache
-  await cleanPreloadVideosFromFirestore();
+  // Videos permanently disabled to conserve Firestore quota
 };
 
 // ==========================================

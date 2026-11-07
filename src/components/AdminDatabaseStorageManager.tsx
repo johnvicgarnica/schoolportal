@@ -14,7 +14,6 @@ import {
   FIRESTORE_UPGRADE_URL,
   getFacultyFilesCountFromServer,
   getFacultyCountFromServer,
-  getAnnouncementsCountFromServer,
 } from '../lib/firebase';
 import {
   Database,
@@ -50,7 +49,7 @@ interface AdminDatabaseStorageManagerProps {
   currentUser: UserProfile;
   facultyFiles: FacultyPersonalFile[];
   facultyFolders: FacultyFolder[];
-  announcements: Announcement[];
+  announcements?: Announcement[];
   galleryPhotos?: GalleryPhoto[];
   embeddedVideos?: EmbeddedVideo[];
   facultyList?: FacultyDoc[];
@@ -88,7 +87,7 @@ export const AdminDatabaseStorageManager: React.FC<AdminDatabaseStorageManagerPr
   }>({
     files: null,
     faculty: null,
-    announcements: null,
+    announcements: 0,
     lastUpdated: null,
     isLoading: false,
   });
@@ -96,20 +95,19 @@ export const AdminDatabaseStorageManager: React.FC<AdminDatabaseStorageManagerPr
   const fetchServerAggregations = async () => {
     setServerCounts((prev) => ({ ...prev, isLoading: true }));
     try {
-      const [filesCount, facultyCount, announcementsCount] = await Promise.all([
+      const [filesCount, facultyCount] = await Promise.all([
         getFacultyFilesCountFromServer(),
         getFacultyCountFromServer(),
-        getAnnouncementsCountFromServer(),
       ]);
       setServerCounts({
         files: filesCount,
         faculty: facultyCount,
-        announcements: announcementsCount,
+        announcements: 0,
         lastUpdated: new Date().toLocaleTimeString(),
         isLoading: false,
       });
       showNotice(
-        `Server aggregation complete via getCountFromServer(): ${filesCount} files, ${facultyCount} faculty, ${announcementsCount} bulletins.`
+        `Server aggregation complete via getCountFromServer(): ${filesCount} files, ${facultyCount} faculty.`
       );
     } catch (err) {
       console.error('Failed to get server aggregation count:', err);

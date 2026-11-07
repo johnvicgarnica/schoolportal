@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { UserProfile, GalleryPhoto, EmbeddedVideo, Announcement } from '../types';
+import React, { useState, useEffect } from 'react';
+import { UserProfile } from '../types';
 import {
   FacultyDoc,
   AdminDoc,
@@ -11,22 +11,9 @@ import {
   seedInitialAdminIfEmpty,
   PasswordResetReqDoc,
   savePasswordResetRequestToFirestore,
-  fetchGalleryPhotosOnce,
-  getStoredGalleryPhotos,
-  GALLERY_STORAGE_KEY,
-  seedInitialGalleryPhotosIfEmpty,
-  fetchEmbeddedVideosOnce,
-  getStoredEmbeddedVideos,
-  VIDEOS_STORAGE_KEY,
-  fetchAnnouncementsOnce,
-  getStoredAnnouncements,
   verifyUserDirectlyFromFirestore,
   FIRESTORE_UPGRADE_URL,
 } from '../lib/firebase';
-import { subscribeOfflineCache } from '../lib/offlineStore';
-import { AutoSwipingGallery } from './AutoSwipingGallery';
-import { ScrollableVideoSection } from './ScrollableVideoSection';
-import { ScrollableAnnouncementSection } from './ScrollableAnnouncementSection';
 import { HeatIndexMonitor } from './HeatIndexMonitor';
 import {
   Lock,
@@ -78,16 +65,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       : true;
   });
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
-
-  // Dynamic height synchronization between ScrollableVideoSection and ScrollableAnnouncementSection
-  const [videoSectionHeight, setVideoSectionHeight] = useState<number | null>(null);
-
-  const handleVideoSectionHeightChange = useCallback((height: number) => {
-    setVideoSectionHeight((prev) => {
-      if (prev !== null && Math.abs(prev - height) < 2) return prev;
-      return height;
-    });
-  }, []);
 
   useEffect(() => {
     let pollTimer: NodeJS.Timeout | null = null;
@@ -187,82 +164,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     department?: string;
   } | null>(null);
 
-  // Load auto-swiping gallery photos from local cache on first load
-  const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>(() => {
-    return getStoredGalleryPhotos();
-  });
-  const [isLoadingGallery, setIsLoadingGallery] = useState<boolean>(() => {
-    const cached = getStoredGalleryPhotos();
-    return !cached || cached.length === 0;
-  });
-
-  // Load embedded videos provided by Master Admin from local cache on first load
-  const [embeddedVideos, setEmbeddedVideos] = useState<EmbeddedVideo[]>(() => {
-    return getStoredEmbeddedVideos();
-  });
-  const [isLoadingVideos, setIsLoadingVideos] = useState<boolean>(() => {
-    const cached = getStoredEmbeddedVideos();
-    return !cached || cached.length === 0;
-  });
-
-  // Load announcements
-  const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
-    return getStoredAnnouncements();
-  });
-  const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState<boolean>(true);
-
   useEffect(() => {
-    // Seed initial admin account and default collections into Firestore if needed (runs once)
+    // Seed initial admin account into Firestore if needed (runs once)
     seedInitialAdminIfEmpty();
-    seedInitialGalleryPhotosIfEmpty();
-
-    // One-Time Fetches with Deduplication Cache: Strictly minimizes server reads
-    fetchGalleryPhotosOnce().then((photos) => {
-      if (photos && photos.length > 0) {
-        setGalleryPhotos(photos);
-      }
-      setIsLoadingGallery(false);
-    });
-
-    fetchEmbeddedVideosOnce().then((videos) => {
-      if (videos && videos.length > 0) {
-        setEmbeddedVideos(videos);
-      }
-      setIsLoadingVideos(false);
-    });
-
-    fetchAnnouncementsOnce().then((list) => {
-      if (list && list.length > 0) {
-        setAnnouncements(list);
-      }
-      setIsLoadingAnnouncements(false);
-    });
-
-    // In-memory cross-tab broadcast listeners (0 database reads)
-    const unsubGalleryCache = subscribeOfflineCache<GalleryPhoto[]>(
-      GALLERY_STORAGE_KEY,
-      (photos) => {
-        if (Array.isArray(photos)) {
-          setGalleryPhotos(photos);
-          setIsLoadingGallery(false);
-        }
-      }
-    );
-
-    const unsubVideosCache = subscribeOfflineCache<EmbeddedVideo[]>(
-      VIDEOS_STORAGE_KEY,
-      (videos) => {
-        if (Array.isArray(videos)) {
-          setEmbeddedVideos(videos);
-          setIsLoadingVideos(false);
-        }
-      }
-    );
-
-    return () => {
-      unsubGalleryCache();
-      unsubVideosCache();
-    };
   }, []);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [regName, setRegName] = useState('');
@@ -904,18 +808,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       <div className="absolute bottom-10 right-10 w-[450px] h-[450px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
 
       {/* TOP SECTION: Real-Time Heat Index Monitoring Dashboard */}
-      <div className="w-full max-w-6xl relative z-10 mb-2 sm:mb-2.5 animate-fadeIn">
+      <div className="w-full max-w-6xl relative z-10 mb-4 sm:mb-6 animate-fadeIn">
         <HeatIndexMonitor />
       </div>
 
-      {/* Auto-Swiping Gallery of Pictures (Only pictures uploaded by Master Admin) */}
-      {(isLoadingGallery || (galleryPhotos && galleryPhotos.length > 0)) && (
-        <div className="w-full max-w-6xl relative z-10 mb-6 sm:mb-8 animate-fadeIn">
-          <AutoSwipingGallery photos={galleryPhotos} isLoading={isLoadingGallery} />
-        </div>
-      )}
-
-      {/* Main Grid Wrapper (Left: Intro + Message + Videos, Right: Login Card) */}
+      {/* Main Grid Wrapper (Left: Intro + Message, Right: Login Card) */}
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-stretch relative z-10 my-auto">
         
         {/* LEFT COLUMN: SVNHS Introduction & Principal Message + Videos Below */}
@@ -1009,14 +906,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
             {/* End of Left Card Content */}
           </div>
-
-          {/* NEW SECTION BELOW THE SELECTED COMPONENT: Scrollable Embedded Videos */}
-          <ScrollableVideoSection
-            videos={embeddedVideos}
-            isLoading={isLoadingVideos}
-            onHeightChange={handleVideoSectionHeightChange}
-            className="shrink-0"
-          />
         </div>
 
         {/* RIGHT COLUMN: Main Login Portal Card + Announcements Below */}
@@ -1392,14 +1281,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
 
         </div>
-
-        {/* Scrollable Announcement Viewer below the Login Portal Card (Same Size as Scrollable Video Section) */}
-        <ScrollableAnnouncementSection
-          announcements={announcements}
-          isLoading={isLoadingAnnouncements}
-          targetHeight={videoSectionHeight}
-          className="shrink-0"
-        />
       </div>
 
     </div>

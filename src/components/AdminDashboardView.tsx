@@ -1,23 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Announcement,
-  AnnouncementPriority,
-  AnnouncementTarget,
-  AnnouncementStatus,
   UserProfile,
   DriveFolder,
   FacultyFolder,
   FacultyPersonalFile,
   SchoolPermanentFolder,
-  GalleryPhoto,
-  EmbeddedVideo,
 } from '../types';
 import { GoogleDocsSpreadsheetEditor } from './GoogleDocsSpreadsheetEditor';
 import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
 import { GoogleDriveWebview } from './GoogleDriveWebview';
 import { SubmissionReportView } from './SubmissionReportView';
-import { AdminGalleryManager } from './AdminGalleryManager';
-import { AdminVideoManager } from './AdminVideoManager';
 import { AdminDatabaseStorageManager } from './AdminDatabaseStorageManager';
 import {
   saveFacultyToFirestore,
@@ -52,11 +44,6 @@ import {
   subscribePasswordResetRequests,
   updatePasswordResetRequestStatus,
   deletePasswordResetRequestFromFirestore,
-  subscribeGalleryPhotos,
-  getStoredGalleryPhotos,
-  seedInitialGalleryPhotosIfEmpty,
-  subscribeEmbeddedVideos,
-  getStoredEmbeddedVideos,
   getStoredAdmins,
   getStoredFacultyRequests,
   getStoredAdminRequests,
@@ -103,15 +90,12 @@ import {
   Copy,
   Check,
   FileCheck2,
-  Images,
-  Video,
   Activity,
   Radio,
   HardDrive,
 } from 'lucide-react';
 
 interface AdminDashboardViewProps {
-  announcements: Announcement[];
   currentUser: UserProfile;
   driveFolders?: DriveFolder[];
   facultyFolders?: FacultyFolder[];
@@ -128,25 +112,17 @@ interface AdminDashboardViewProps {
     updatedBy?: string;
   }) => Promise<void> | void;
   onDeleteSchoolPermanentFolder?: (id: string) => Promise<void> | void;
-  onAddAnnouncement: (announcement: Omit<Announcement, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  onEditAnnouncement: (id: string, updated: Partial<Announcement>) => void;
-  onDeleteAnnouncement: (id: string) => void;
-  onTogglePin: (id: string) => void;
-  onToggleStatus: (id: string) => void;
   onAddDriveFolder?: (folder: Omit<DriveFolder, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onEditDriveFolder?: (id: string, updated: Partial<DriveFolder>) => void;
   onDeleteDriveFolder?: (id: string) => void;
   onAddFacultyFolder?: (folder: Omit<FacultyFolder, 'id' | 'createdAt' | 'updatedAt' | 'itemCount'>) => void;
   onDeleteFacultyFolder?: (id: string) => void;
   onDeleteFacultyFile?: (id: string) => void;
-  shouldOpenModal?: boolean;
-  onModalOpened?: () => void;
   onNavigateToSubmissionReport?: () => void;
   facultyList?: FacultyDoc[];
 }
 
 export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
-  announcements,
   currentUser,
   driveFolders = [],
   facultyFolders = [],
@@ -155,57 +131,34 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   onUpdateSchoolPermanentFolder,
   onAddSchoolPermanentFolder,
   onDeleteSchoolPermanentFolder,
-  onAddAnnouncement,
-  onEditAnnouncement,
-  onDeleteAnnouncement,
-  onTogglePin,
-  onToggleStatus,
   onAddDriveFolder,
   onEditDriveFolder,
   onDeleteDriveFolder,
   onAddFacultyFolder,
   onDeleteFacultyFolder,
   onDeleteFacultyFile,
-  shouldOpenModal,
-  onModalOpened,
   onNavigateToSubmissionReport,
   facultyList: propFacultyList,
 }) => {
   const isAdmin = currentUser.role === 'Admin';
+  const isMasterAdmin =
+    (currentUser.email || '').toLowerCase().trim() === 'johnvic.garnica@deped.gov.ph' ||
+    (currentUser.email || '').toLowerCase().trim() === 'admin@svnhs.edu.ph' ||
+    currentUser.designation === 'Web Developer' ||
+    currentUser.name?.toLowerCase().includes('garnica');
 
-  // Admin Sub-Section Tab ('passwords', 'announcements', 'school-folders', 'submission-report', 'gallery', 'videos', or 'database-storage')
-  // Default to 'announcements' so passwords page is not exposed by default
-  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'announcements' | 'school-folders' | 'submission-report' | 'gallery' | 'videos' | 'database-storage'>('announcements');
+  const isCoordinator =
+    currentUser.designation === 'Coordinator' ||
+    (currentUser.designation?.toLowerCase().includes('coordinator') ?? false) ||
+    currentUser.role === 'Coordinator' ||
+    (currentUser.role?.toLowerCase() === 'coordinator') ||
+    (currentUser.email?.toLowerCase().includes('coordinator') ?? false);
+
+  // Admin Sub-Section Tab ('passwords', 'school-folders', 'submission-report', or 'database-storage')
+  const [adminSubTab, setAdminSubTab] = useState<'passwords' | 'school-folders' | 'submission-report' | 'database-storage'>(
+    isMasterAdmin ? 'passwords' : isCoordinator ? 'submission-report' : 'school-folders'
+  );
   const [adminStatusFilter, setAdminStatusFilter] = useState<string>('all');
-
-  // Login Page Gallery Photos State (Master Admin)
-  const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>(() => {
-    return getStoredGalleryPhotos();
-  });
-
-  useEffect(() => {
-    // Only subscribe to gallery photos when the 'gallery' manager tab is active
-    if (adminSubTab !== 'gallery') return;
-    seedInitialGalleryPhotosIfEmpty();
-    const unsub = subscribeGalleryPhotos((photos) => {
-      setGalleryPhotos(photos || []);
-    });
-    return () => unsub();
-  }, [adminSubTab]);
-
-  // Login Page Embedded Videos State (Master Admin)
-  const [embeddedVideos, setEmbeddedVideos] = useState<EmbeddedVideo[]>(() => {
-    return getStoredEmbeddedVideos();
-  });
-
-  useEffect(() => {
-    // Only subscribe to videos when the 'videos' manager tab is active
-    if (adminSubTab !== 'videos') return;
-    const unsubVideos = subscribeEmbeddedVideos((videos) => {
-      setEmbeddedVideos(videos || []);
-    });
-    return () => unsubVideos();
-  }, [adminSubTab]);
 
   // School Permanent Folders State (SCHOOL FORMS & SCHOOL DOCUMENTS)
   const [schoolFolders, setSchoolFolders] = useState<SchoolPermanentFolder[]>(() => {
@@ -670,36 +623,21 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   // Security Check: Verify if logged-in admin is the Master Admin
   const userEmailClean = (currentUser.email || '').toLowerCase().trim();
   const masterEmailClean = (masterAdminEmail || 'johnvic.garnica@deped.gov.ph').toLowerCase().trim();
-  const isMasterAdmin = currentUser.role === 'Admin' && (
-    userEmailClean === masterEmailClean ||
-    userEmailClean === 'johnvic.garnica@deped.gov.ph' ||
-    userEmailClean === 'johnvicgarnica@deped.gov.ph' ||
-    userEmailClean === 'garjohn@deped.gov.ph' ||
-    userEmailClean === 'johnvicgarnica1@gmail.com' ||
-    (currentUser.designation?.toLowerCase().includes('master admin') ?? false) ||
-    currentUser.name.toLowerCase().includes('garnica')
-  );
-  const isCoordinator =
-    currentUser.designation === 'Coordinator' ||
-    (currentUser.designation?.toLowerCase().includes('coordinator') ?? false) ||
-    currentUser.role === 'Coordinator' ||
-    (currentUser.role?.toLowerCase() === 'coordinator') ||
-    (currentUser.email?.toLowerCase().includes('coordinator') ?? false);
-
   // Restrict Accounts & Passwords tab strictly to Master Admin
   // Ensure non-coordinator admin does not have submission-report subtab in Admin Dashboard (redundant since there is outer Submission Report)
   useEffect(() => {
-    if (!isMasterAdmin && (adminSubTab === 'passwords' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'database-storage')) {
-      setAdminSubTab('announcements');
+    const fallbackTab = isCoordinator ? 'submission-report' : 'school-folders';
+    if (!isMasterAdmin && (adminSubTab === 'passwords' || (adminSubTab as string) === 'gallery' || (adminSubTab as string) === 'videos' || adminSubTab === 'database-storage')) {
+      setAdminSubTab(fallbackTab);
     }
-    if (isCoordinator && (adminSubTab === 'passwords' || (adminSubTab as string) === 'faculty-folders' || adminSubTab === 'gallery' || adminSubTab === 'videos' || adminSubTab === 'database-storage')) {
-      setAdminSubTab('announcements');
+    if (isCoordinator && (adminSubTab === 'passwords' || (adminSubTab as string) === 'faculty-folders' || (adminSubTab as string) === 'gallery' || (adminSubTab as string) === 'videos' || adminSubTab === 'database-storage')) {
+      setAdminSubTab('submission-report');
     }
     if (!isCoordinator && adminSubTab === 'submission-report') {
-      setAdminSubTab('announcements');
+      setAdminSubTab('school-folders');
     }
     if ((adminSubTab as string) === 'faculty-folders') {
-      setAdminSubTab('announcements');
+      setAdminSubTab(fallbackTab);
     }
   }, [isMasterAdmin, isCoordinator, adminSubTab]);
 
@@ -1333,124 +1271,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     }
   };
 
-  // Modal for Announcement Editing/Creating inside Admin Dashboard
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const [formTitle, setFormTitle] = useState<string>('');
-  const [formContent, setFormContent] = useState<string>('');
-  const [formPriority, setFormPriority] = useState<AnnouncementPriority>('important');
-  const [formTarget, setFormTarget] = useState<AnnouncementTarget>('All SHS Faculty');
-  const [formStatus, setFormStatus] = useState<AnnouncementStatus>('published');
-  const [formIsPinned, setFormIsPinned] = useState<boolean>(false);
-  const [formAttachmentName, setFormAttachmentName] = useState<string>('');
-  const [formAttachmentUrl, setFormAttachmentUrl] = useState<string>('');
-
-  const openCreateModal = () => {
-    setEditingId(null);
-    setFormTitle('');
-    setFormContent('');
-    setFormPriority('important');
-    setFormTarget('All SHS Faculty');
-    setFormStatus('published');
-    setFormIsPinned(false);
-    setFormAttachmentName('');
-    setFormAttachmentUrl('');
-    setIsModalOpen(true);
-  };
-
-  useEffect(() => {
-    if (shouldOpenModal) {
-      openCreateModal();
-      onModalOpened?.();
-    }
-  }, [shouldOpenModal, onModalOpened]);
-
-  const openEditModal = (item: Announcement) => {
-    setEditingId(item.id);
-    setFormTitle(item.title);
-    setFormContent(item.content);
-    setFormPriority(item.priority);
-    setFormTarget(item.targetAudience);
-    setFormStatus(item.status);
-    setFormIsPinned(item.isPinned);
-    setFormAttachmentName(item.attachmentName || '');
-    setFormAttachmentUrl(item.attachmentUrl || '');
-    setIsModalOpen(true);
-  };
-
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formTitle.trim() || !formContent.trim()) return;
-
-    if (editingId) {
-      onEditAnnouncement(editingId, {
-        title: formTitle,
-        content: formContent,
-        priority: formPriority,
-        targetAudience: formTarget,
-        status: formStatus,
-        isPinned: formIsPinned,
-        attachmentName: formAttachmentName.trim() || undefined,
-        attachmentUrl: formAttachmentUrl.trim() || undefined,
-        updatedAt: new Date().toISOString().substring(0, 10),
-      });
-    } else {
-      onAddAnnouncement({
-        title: formTitle,
-        content: formContent,
-        priority: formPriority,
-        targetAudience: formTarget,
-        status: formStatus,
-        isPinned: formIsPinned,
-        authorName: currentUser.name || 'SHS Dept Admin',
-        authorRole: 'SHS Department Head / Admin',
-        attachmentName: formAttachmentName.trim() || undefined,
-        attachmentUrl: formAttachmentUrl.trim() || undefined,
-      });
-    }
-
-    setIsModalOpen(false);
-  };
-
-  const adminFilteredAnnouncements = announcements.filter((item) => {
-    if (adminStatusFilter === 'all') return true;
-    return item.status === adminStatusFilter;
-  });
-
-  const getPriorityBadge = (priority: AnnouncementPriority) => {
-    switch (priority) {
-      case 'urgent':
-        return (
-          <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-mono px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider flex items-center space-x-1 shadow-2xs">
-            <AlertTriangle className="w-3 h-3 text-rose-600" />
-            <span>Urgent Alert</span>
-          </span>
-        );
-      case 'important':
-        return (
-          <span className="bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-mono px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider flex items-center space-x-1 shadow-2xs">
-            <Megaphone className="w-3 h-3 text-amber-600" />
-            <span>Important Notice</span>
-          </span>
-        );
-      case 'event':
-        return (
-          <span className="bg-sky-50 text-sky-800 border border-sky-200 text-[10px] font-mono px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider flex items-center space-x-1 shadow-2xs">
-            <Calendar className="w-3 h-3 text-sky-600" />
-            <span>School Event</span>
-          </span>
-        );
-      case 'general':
-      default:
-        return (
-          <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-mono px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider flex items-center space-x-1 shadow-2xs">
-            <Info className="w-3 h-3 text-emerald-600" />
-            <span>General Advisory</span>
-          </span>
-        );
-    }
-  };
 
   if (!isAdmin) {
     return (
@@ -1549,20 +1370,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
           <button
             type="button"
-            onClick={() => setAdminSubTab('announcements')}
-            className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
-              adminSubTab === 'announcements'
-                ? 'bg-blue-700 text-white shadow-md ring-2 ring-blue-400/60 border border-blue-500'
-                : 'bg-blue-600/90 hover:bg-blue-600 text-white border border-blue-500/60 hover:shadow-xs'
-            }`}
-          >
-            <Megaphone className="w-3.5 h-3.5 text-blue-200 shrink-0" />
-            <span>Bulletins</span>
-            <span className="opacity-80 font-normal ml-0.5">({announcements.length})</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setAdminSubTab('school-folders')}
             className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
               adminSubTab === 'school-folders'
@@ -1574,46 +1381,6 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             <span>School Forms</span>
             <span className="opacity-80 font-normal ml-0.5">({schoolFolders.length})</span>
           </button>
-
-          {/* Master Admin Login Page Gallery Pictures Tab */}
-          {isMasterAdmin && !isCoordinator && (
-            <button
-              type="button"
-              onClick={() => setAdminSubTab('gallery')}
-              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
-                adminSubTab === 'gallery'
-                  ? 'bg-rose-700 text-white shadow-md ring-2 ring-rose-400/60 border border-rose-500'
-                  : 'bg-rose-600/90 hover:bg-rose-600 text-white border border-rose-500/60 hover:shadow-xs'
-              }`}
-            >
-              <Images className="w-3.5 h-3.5 text-rose-200 shrink-0" />
-              <span>Login Gallery</span>
-              <span className="opacity-80 font-normal ml-0.5">({galleryPhotos.length})</span>
-              <span className="bg-rose-950/60 text-rose-300 border border-rose-500/30 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5 hidden xl:inline">
-                Master
-              </span>
-            </button>
-          )}
-
-          {/* Master Admin Login Page Embedded Videos Tab */}
-          {isMasterAdmin && !isCoordinator && (
-            <button
-              type="button"
-              onClick={() => setAdminSubTab('videos')}
-              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl font-mono text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs shrink-0 ${
-                adminSubTab === 'videos'
-                  ? 'bg-purple-700 text-white shadow-md ring-2 ring-purple-400/60 border border-purple-500'
-                  : 'bg-purple-600/90 hover:bg-purple-600 text-white border border-purple-500/60 hover:shadow-xs'
-              }`}
-            >
-              <Video className="w-3.5 h-3.5 text-purple-200 shrink-0" />
-              <span>Login Videos</span>
-              <span className="opacity-80 font-normal ml-0.5">({embeddedVideos.length})</span>
-              <span className="bg-purple-950/60 text-purple-300 border border-purple-500/30 text-[8px] px-1.5 py-0.2 rounded font-bold uppercase ml-0.5 hidden xl:inline">
-                Master
-              </span>
-            </button>
-          )}
 
           {/* Master Admin Firebase Database Storage & Data Usage Subtab */}
           {isMasterAdmin && !isCoordinator && (
@@ -2736,170 +2503,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
       )}
 
-      {/* SUB-TAB 2: ANNOUNCEMENTS & BULLETINS MANAGEMENT */}
-      {adminSubTab === 'announcements' && (
-        <div className="space-y-6">
-          {/* Admin Banner Info */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-600 flex-shrink-0">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold font-mono text-slate-900 flex items-center space-x-2">
-                  <span>Administrator Bulletin Management Panel</span>
-                  <span className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] px-2 py-0.5 rounded font-mono font-bold">
-                    AUTHORITY: OFFICIAL ADMIN
-                  </span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Publish, edit, pin priority advisories, or archive outdated department bulletins.
-                </p>
-              </div>
-            </div>
 
-            <button
-              onClick={openCreateModal}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-mono font-bold text-xs rounded-xl shadow-xs transition-all flex items-center space-x-2 border border-blue-600 cursor-pointer flex-shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Post New Announcement</span>
-            </button>
-          </div>
-
-          {/* Admin Table Controls */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-              <div className="flex items-center space-x-2 font-mono text-xs">
-                <span className="text-slate-500 uppercase tracking-widest font-bold">Filter Status:</span>
-                {['all', 'published', 'draft', 'archived'].map((st) => (
-                  <button
-                    key={st}
-                    onClick={() => setAdminStatusFilter(st)}
-                    className={`px-3 py-1 rounded-lg text-xs font-mono font-bold capitalize transition-all cursor-pointer ${
-                      adminStatusFilter === st
-                        ? 'bg-blue-600 text-white shadow-2xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    {st}
-                  </button>
-                ))}
-              </div>
-
-              <div className="text-xs font-mono text-slate-500">
-                Total Bulletins: <span className="text-slate-900 font-bold">{announcements.length}</span>
-              </div>
-            </div>
-
-            {/* Admin Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-mono text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 text-[10px] uppercase tracking-wider">
-                  <tr>
-                    <th className="p-3">Priority / Pinned</th>
-                    <th className="p-3">Title & Target</th>
-                    <th className="p-3">Author</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Date</th>
-                    <th className="p-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {adminFilteredAnnouncements.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-slate-500 font-mono">
-                        No announcements matching filter criteria.
-                      </td>
-                    </tr>
-                  ) : (
-                    adminFilteredAnnouncements.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="p-3">
-                          <div className="flex items-center space-x-2">
-                            {getPriorityBadge(item.priority)}
-                            {item.isPinned && (
-                              <span className="p-1 bg-amber-50 text-amber-700 rounded border border-amber-200" title="Pinned to Top">
-                                <Pin className="w-3 h-3 fill-amber-500" />
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        <td className="p-3 max-w-xs">
-                          <div className="font-bold text-slate-900 line-clamp-1">{item.title}</div>
-                          <div className="text-[10px] text-slate-500 font-sans mt-0.5">
-                            Target: <span className="font-mono text-slate-700">{item.targetAudience}</span>
-                          </div>
-                        </td>
-
-                        <td className="p-3 text-slate-700">
-                          <div className="font-bold text-[11px]">{item.authorName}</div>
-                          <div className="text-[9px] text-slate-500">{item.authorRole}</div>
-                        </td>
-
-                        <td className="p-3">
-                          <button
-                            onClick={() => onToggleStatus(item.id)}
-                            className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase transition-all cursor-pointer ${
-                              item.status === 'published'
-                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                : item.status === 'draft'
-                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                                : 'bg-slate-100 text-slate-600 border border-slate-200'
-                            }`}
-                            title="Click to toggle status"
-                          >
-                            {item.status}
-                          </button>
-                        </td>
-
-                        <td className="p-3 text-slate-500 text-[11px]">{item.createdAt}</td>
-
-                        <td className="p-3 text-right">
-                          <div className="flex items-center justify-end space-x-1.5">
-                            <button
-                              onClick={() => onTogglePin(item.id)}
-                              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
-                                item.isPinned
-                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                  : 'bg-slate-100 text-slate-600 border-slate-200 hover:text-slate-900 hover:bg-slate-200'
-                              }`}
-                              title={item.isPinned ? 'Unpin from Top' : 'Pin to Top of Board'}
-                            >
-                              <Pin className={`w-3.5 h-3.5 ${item.isPinned ? 'fill-amber-500' : ''}`} />
-                            </button>
-
-                            <button
-                              onClick={() => openEditModal(item)}
-                              className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 transition-all cursor-pointer"
-                              title="Edit Announcement"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                if (confirm(`Are you sure you want to delete "${item.title}"?`)) {
-                                  onDeleteAnnouncement(item.id);
-                                }
-                              }}
-                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg border border-rose-200 transition-all cursor-pointer"
-                              title="Delete Announcement"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* MODAL: Individual Faculty Custom Password Set */}
       {editingFaculty && (
@@ -3157,165 +2761,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
       )}
 
-      {/* MODAL: Create / Edit Announcement */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-xl w-full border border-slate-200 shadow-2xl p-6 space-y-5 my-8">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center space-x-2">
-                <Megaphone className="w-5 h-5 text-blue-600" />
-                <h3 className="font-mono font-bold text-sm text-slate-900 uppercase">
-                  {editingId ? 'Edit Department Announcement' : 'Post Official Department Advisory'}
-                </h3>
-              </div>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <form onSubmit={handleFormSubmit} className="space-y-4 font-mono text-xs">
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">
-                  Advisory Title *
-                </label>
-                <input
-                  type="text"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder="e.g. Mandatory Faculty Meeting for Q3 Assessment Review"
-                  required
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-bold"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">
-                    Priority Level
-                  </label>
-                  <select
-                    value={formPriority}
-                    onChange={(e) => setFormPriority(e.target.value as AnnouncementPriority)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 font-bold cursor-pointer"
-                  >
-                    <option value="important">Important Notice</option>
-                    <option value="urgent">Urgent Alert</option>
-                    <option value="event">School Event</option>
-                    <option value="general">General Advisory</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">
-                    Target Audience
-                  </label>
-                  <select
-                    value={formTarget}
-                    onChange={(e) => setFormTarget(e.target.value as AnnouncementTarget)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-500 font-bold cursor-pointer"
-                  >
-                    <option value="All SHS Faculty">All SHS Faculty</option>
-                    <option value="Department Heads">Department Heads</option>
-                    <option value="Grade 11 Teachers">Grade 11 Teachers</option>
-                    <option value="Grade 12 Teachers">Grade 12 Teachers</option>
-                    <option value="All Students">All Students</option>
-                    <option value="Public">Public / All Users</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">
-                  Advisory Details & Content *
-                </label>
-                <textarea
-                  value={formContent}
-                  onChange={(e) => setFormContent(e.target.value)}
-                  rows={5}
-                  placeholder="Provide complete guidelines, dates, instructions, or venue details..."
-                  required
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-sans leading-relaxed"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">
-                    Attachment File Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={formAttachmentName}
-                    onChange={(e) => setFormAttachmentName(e.target.value)}
-                    placeholder="e.g. Q3_Assessment_Schedule.pdf"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">
-                    Attachment Download Link (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={formAttachmentUrl}
-                    onChange={(e) => setFormAttachmentUrl(e.target.value)}
-                    placeholder="e.g. https://deped.gov.ph/docs/file.pdf"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="pinNotice"
-                    checked={formIsPinned}
-                    onChange={(e) => setFormIsPinned(e.target.checked)}
-                    className="w-4 h-4 rounded text-blue-600 cursor-pointer"
-                  />
-                  <label htmlFor="pinNotice" className="text-xs font-bold text-slate-800 cursor-pointer">
-                    Pin Advisory to Top of Bulletin Board
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <span className="text-[10px] uppercase font-bold text-slate-500">Status:</span>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as AnnouncementStatus)}
-                    className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold cursor-pointer"
-                  >
-                    <option value="published">Published</option>
-                    <option value="draft">Draft</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl cursor-pointer shadow-2xs flex items-center space-x-1.5"
-                >
-                  <Megaphone className="w-4 h-4 text-white" />
-                  <span>{editingId ? 'Save Advisory Changes' : 'Publish Advisory Now'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* ADD NEW ADMINISTRATOR MODAL */}
       {isAddAdminOpen && isMasterAdmin && (
@@ -4168,37 +3614,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         </div>
       )}
 
-      {/* SUB-TAB 6: MASTER ADMIN LOGIN PAGE GALLERY PICTURES */}
-      {adminSubTab === 'gallery' && isMasterAdmin && (
-        <div className="space-y-6 animate-fadeIn">
-          <AdminGalleryManager
-            currentUser={currentUser}
-            photos={galleryPhotos}
-          />
-        </div>
-      )}
-
-      {/* SUB-TAB 7: MASTER ADMIN LOGIN PAGE EMBEDDED VIDEOS */}
-      {adminSubTab === 'videos' && isMasterAdmin && (
-        <div className="space-y-6 animate-fadeIn">
-          <AdminVideoManager
-            currentUser={currentUser}
-            videos={embeddedVideos}
-            onSwitchToGallery={() => setAdminSubTab('gallery')}
-          />
-        </div>
-      )}
-
-      {/* SUB-TAB 8: MASTER ADMIN FIREBASE DATABASE STORAGE & DATA USAGE */}
+      {/* MASTER ADMIN FIREBASE DATABASE STORAGE & DATA USAGE */}
       {adminSubTab === 'database-storage' && isMasterAdmin && (
         <div className="space-y-6 animate-fadeIn">
           <AdminDatabaseStorageManager
             currentUser={currentUser}
             facultyFiles={facultyFiles}
             facultyFolders={facultyFolders}
-            announcements={announcements}
-            galleryPhotos={galleryPhotos}
-            embeddedVideos={embeddedVideos}
             facultyList={facultyList}
             onDeleteFacultyFile={onDeleteFacultyFile}
           />

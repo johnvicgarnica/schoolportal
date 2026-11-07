@@ -9,7 +9,6 @@ import {
   AccessLevel,
   StorageTier,
   UserProfile,
-  Announcement,
   DriveFolder,
   FacultyFolder,
   FacultyPersonalFile,
@@ -20,7 +19,6 @@ import {
   INITIAL_REPOSITORIES,
   INITIAL_TELEMETRY,
   INITIAL_API_KEYS,
-  INITIAL_ANNOUNCEMENTS,
   INITIAL_DRIVE_FOLDERS,
 } from './mockData';
 import { Header } from './components/Header';
@@ -29,7 +27,6 @@ import { RepositoriesView } from './components/RepositoriesView';
 import { StorageTelemetryDashboard } from './components/StorageTelemetryDashboard';
 import { ApiKeysAndCliView } from './components/ApiKeysAndCliView';
 import { AiCopilot } from './components/AiCopilot';
-import { AnnouncementsView } from './components/AnnouncementsView';
 import { AdminDashboardView } from './components/AdminDashboardView';
 import { FacultyPersonalDashboard } from './components/FacultyPersonalDashboard';
 import { SubmissionReportView } from './components/SubmissionReportView';
@@ -37,10 +34,6 @@ import { LoginScreen } from './components/LoginScreen';
 import { HeatIndexMonitor } from './components/HeatIndexMonitor';
 import buildingBg from './assets/images/svnhs_shs_building_1785313106378.jpg';
 import {
-  subscribeAnnouncements,
-  saveAnnouncementToFirestore,
-  deleteAnnouncementFromFirestore,
-  getStoredAnnouncements,
   subscribeDriveFolders,
   saveDriveFolderToFirestore,
   deleteDriveFolderFromFirestore,
@@ -54,6 +47,7 @@ import {
   deleteFacultyFileFromFirestore,
   getStoredFacultyFiles,
   purgeNonPdfFacultyFiles,
+  cleanupExpiredFacultyFiles,
   seedInitialAdminIfEmpty,
   subscribeSchoolPermanentFolders,
   getStoredSchoolPermanentFolders,
@@ -88,41 +82,27 @@ export function App() {
     return null;
   });
 
-  const [activeTab, setActiveTab] = useState<'files' | 'my-workspace' | 'announcements' | 'admin' | 'submission-report' | 'copilot'>(() => {
+  const [activeTab, setActiveTab] = useState<'files' | 'my-workspace' | 'admin' | 'submission-report' | 'copilot'>(() => {
     try {
       const saved = sessionStorage.getItem('svnhs_active_session');
       if (saved) {
         const u = JSON.parse(saved);
         if (u && (u.designation === 'Coordinator' || u.designation?.toLowerCase().includes('coordinator'))) {
-          return 'announcements';
+          return 'admin';
         }
         if (u && u.role === 'Faculty') return 'my-workspace';
         if (u && u.role === 'Admin') return 'admin';
       }
     } catch (_) {}
-    return 'announcements';
+    return 'files';
   });
   const [isAdminDemoMode, setIsAdminDemoMode] = useState<boolean>(false);
-  const [shouldOpenAnnouncementModal, setShouldOpenAnnouncementModal] = useState<boolean>(false);
-
-  const handlePostAnnouncementClick = () => {
-    if (currentUser?.role === 'Admin') {
-      setActiveTab('admin');
-    } else {
-      setActiveTab('announcements');
-    }
-    setShouldOpenAnnouncementModal(true);
-  };
 
   // Application Data States
   const [files, setFiles] = useState<RepositoryItem[]>(INITIAL_FILES);
   const [repositories, setRepositories] = useState<RepositoryCollection[]>(INITIAL_REPOSITORIES);
   const [telemetryHistory, setTelemetryHistory] = useState<StorageTelemetry[]>(INITIAL_TELEMETRY);
   const [apiKeys, setApiKeys] = useState<ApiAccessKey[]>(INITIAL_API_KEYS);
-  const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
-    const cached = getStoredAnnouncements();
-    return cached.length > 0 ? cached : INITIAL_ANNOUNCEMENTS;
-  });
 
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>(() => {
     const cached = getStoredDriveFolders();
@@ -158,13 +138,7 @@ export function App() {
     initializeOfflineDatabase();
   }, []);
 
-  // Subscribe to Announcements in Firebase
-  useEffect(() => {
-    const unsub = subscribeAnnouncements((list) => {
-      setAnnouncements(list || []);
-    });
-    return () => unsub();
-  }, []);
+
 
   // Subscribe to Google Drive Folders in Firebase (only when logged in)
   useEffect(() => {
@@ -192,11 +166,26 @@ export function App() {
   useEffect(() => {
     if (!currentUser) return;
     purgeNonPdfFacultyFiles();
+    cleanupExpiredFacultyFiles();
+
     const emailScope = currentUser.email;
     const unsub = subscribeFacultyFiles((list) => {
       setFacultyFiles(list || []);
     }, emailScope);
-    return () => unsub();
+
+    const handleFilesUpdated = () => {
+      const email = currentUser.email.toLowerCase().trim();
+      const updated = getStoredFacultyFiles().filter(
+        (f) => (f.facultyEmail || '').toLowerCase().trim() === email
+      );
+      setFacultyFiles(updated);
+    };
+    window.addEventListener('svnhs-faculty-files-updated', handleFilesUpdated);
+
+    return () => {
+      unsub();
+      window.removeEventListener('svnhs-faculty-files-updated', handleFilesUpdated);
+    };
   }, [currentUser]);
 
   // School Permanent Folders (only when logged in)
@@ -400,65 +389,7 @@ export function App() {
     }, 850);
   };
 
-  // Announcement Handlers
-  const handleAddAnnouncement = (
-    newAnnouncementData: Omit<Announcement, 'id' | 'createdAt' | 'updatedAt'>
-  ) => {
-    const today = new Date().toISOString().substring(0, 10);
-    const newAnnouncement: Announcement = {
-      ...newAnnouncementData,
-      id: `ann-${Date.now()}`,
-      createdAt: today,
-      updatedAt: today,
-    };
-    setAnnouncements((prev) => [newAnnouncement, ...prev]);
-    saveAnnouncementToFirestore(newAnnouncement);
-  };
 
-  const handleEditAnnouncement = (id: string, updated: Partial<Announcement>) => {
-    setAnnouncements((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const updatedItem = { ...item, ...updated, updatedAt: new Date().toISOString().substring(0, 10) };
-          saveAnnouncementToFirestore(updatedItem);
-          return updatedItem;
-        }
-        return item;
-      })
-    );
-  };
-
-  const handleDeleteAnnouncement = (id: string) => {
-    setAnnouncements((prev) => prev.filter((item) => item.id !== id));
-    deleteAnnouncementFromFirestore(id);
-  };
-
-  const handleTogglePinAnnouncement = (id: string) => {
-    setAnnouncements((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const updatedItem = { ...item, isPinned: !item.isPinned };
-          saveAnnouncementToFirestore(updatedItem);
-          return updatedItem;
-        }
-        return item;
-      })
-    );
-  };
-
-  const handleToggleStatusAnnouncement = (id: string) => {
-    setAnnouncements((prev) =>
-      prev.map((item) => {
-        if (item.id === id) {
-          const nextStatus = item.status === 'published' ? 'draft' : 'published';
-          const updatedItem = { ...item, status: nextStatus };
-          saveAnnouncementToFirestore(updatedItem);
-          return updatedItem;
-        }
-        return item;
-      })
-    );
-  };
 
   // Google Drive Folders Handlers
   const handleAddDriveFolder = (
@@ -595,7 +526,6 @@ export function App() {
   const latestTelemetry = telemetryHistory[telemetryHistory.length - 1] || {
     totalEgressGbps: 34.2,
   };
-  const publishedAnnouncementsCount = announcements.filter((a) => a.status === 'published').length;
 
   const isCoordinator =
     currentUser?.designation === 'Coordinator' ||
@@ -672,7 +602,7 @@ export function App() {
     } else if (user.role === 'Faculty') {
       setActiveTab('my-workspace');
     } else {
-      setActiveTab('announcements');
+      setActiveTab('files');
     }
   };
 
@@ -746,9 +676,7 @@ export function App() {
           totalStorageUsedGb={totalStorageUsedGb}
           totalEgressGbps={latestTelemetry.totalEgressGbps}
           totalFilesCount={files.length}
-          announcementsCount={publishedAnnouncementsCount}
           onOpenUploadModal={() => setIsUploadModalOpen(true)}
-          onPostAnnouncementClick={handlePostAnnouncementClick}
           globalSearchQuery={searchTerm}
           setGlobalSearchQuery={setSearchTerm}
           currentUser={currentUser}
@@ -794,33 +722,14 @@ export function App() {
               isUploadModalOpen={isUploadModalOpen}
               setIsUploadModalOpen={setIsUploadModalOpen}
               currentUser={currentUser}
-              onPostAnnouncementClick={handlePostAnnouncementClick}
               driveFolders={driveFolders}
               onNavigateToAdminFolders={() => setActiveTab('admin')}
               onDeleteDriveFolder={handleDeleteDriveFolder}
             />
           )}
 
-          {activeTab === 'announcements' && (
-            <AnnouncementsView
-              announcements={announcements}
-              currentUser={currentUser}
-              onAddAnnouncement={handleAddAnnouncement}
-              onEditAnnouncement={handleEditAnnouncement}
-              onDeleteAnnouncement={handleDeleteAnnouncement}
-              onTogglePin={handleTogglePinAnnouncement}
-              onToggleStatus={handleToggleStatusAnnouncement}
-              isAdminDemoMode={isAdminDemoMode}
-              setIsAdminDemoMode={setIsAdminDemoMode}
-              shouldOpenModal={shouldOpenAnnouncementModal}
-              onModalOpened={() => setShouldOpenAnnouncementModal(false)}
-              facultyList={facultyList}
-            />
-          )}
-
           {activeTab === 'admin' && (
             <AdminDashboardView
-              announcements={announcements}
               currentUser={currentUser}
               driveFolders={driveFolders}
               facultyFolders={facultyFolders}
@@ -829,19 +738,12 @@ export function App() {
               onUpdateSchoolPermanentFolder={handleUpdateSchoolPermanentFolder}
               onAddSchoolPermanentFolder={handleAddSchoolPermanentFolder}
               onDeleteSchoolPermanentFolder={handleDeleteSchoolPermanentFolder}
-              onAddAnnouncement={handleAddAnnouncement}
-              onEditAnnouncement={handleEditAnnouncement}
-              onDeleteAnnouncement={handleDeleteAnnouncement}
-              onTogglePin={handleTogglePinAnnouncement}
-              onToggleStatus={handleToggleStatusAnnouncement}
               onAddDriveFolder={handleAddDriveFolder}
               onEditDriveFolder={handleEditDriveFolder}
               onDeleteDriveFolder={handleDeleteDriveFolder}
               onAddFacultyFolder={handleAddFacultyFolder}
               onDeleteFacultyFolder={handleDeleteFacultyFolder}
               onDeleteFacultyFile={handleDeleteFacultyFile}
-              shouldOpenModal={shouldOpenAnnouncementModal}
-              onModalOpened={() => setShouldOpenAnnouncementModal(false)}
               onNavigateToSubmissionReport={() => setActiveTab('submission-report')}
               facultyList={facultyList}
             />

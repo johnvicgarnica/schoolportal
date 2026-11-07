@@ -24,14 +24,12 @@ import svnhsLogo from '../assets/images/svnhs_school_logo_1784856263175.jpg';
 import { SyncStatusWidget } from './SyncStatusWidget';
 
 interface HeaderProps {
-  activeTab: 'files' | 'my-workspace' | 'announcements' | 'admin' | 'submission-report' | 'copilot';
-  setActiveTab: (tab: 'files' | 'my-workspace' | 'announcements' | 'admin' | 'submission-report' | 'copilot') => void;
+  activeTab: 'files' | 'my-workspace' | 'admin' | 'submission-report' | 'copilot';
+  setActiveTab: (tab: 'files' | 'my-workspace' | 'admin' | 'submission-report' | 'copilot') => void;
   totalStorageUsedGb: number;
   totalEgressGbps: number;
   totalFilesCount: number;
-  announcementsCount?: number;
   onOpenUploadModal: () => void;
-  onPostAnnouncementClick?: () => void;
   globalSearchQuery: string;
   setGlobalSearchQuery: (query: string) => void;
   currentUser?: UserProfile | null;
@@ -44,9 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   totalStorageUsedGb,
   totalEgressGbps,
   totalFilesCount,
-  announcementsCount = 0,
   onOpenUploadModal,
-  onPostAnnouncementClick,
   globalSearchQuery,
   setGlobalSearchQuery,
   currentUser,
@@ -139,23 +135,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
-              <button
-                onClick={() => setActiveTab('announcements')}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 whitespace-nowrap cursor-pointer relative ${
-                  activeTab === 'announcements'
-                    ? 'bg-blue-600 text-white shadow-2xs scale-[1.02]'
-                    : 'text-slate-300 hover:text-white hover:bg-[#1a2638] hover:scale-[1.01]'
-                }`}
-              >
-                <Megaphone className={`w-4 h-4 ${activeTab === 'announcements' ? 'text-amber-300' : 'text-amber-400'}`} />
-                <span>Announcements</span>
-                {announcementsCount !== undefined && announcementsCount > 0 && (
-                  <span className="bg-amber-500 text-slate-950 font-mono text-xs font-bold px-2 py-0.5 rounded-full ml-1">
-                    {announcementsCount}
-                  </span>
-                )}
-              </button>
-
               {(currentUser?.role === 'Admin' || isCoordinator) && (
                 <button
                   onClick={() => setActiveTab('admin')}
@@ -185,17 +164,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
             </nav>
-
-            {/* Action Buttons */}
-            {currentUser?.role === 'Admin' && onPostAnnouncementClick && (
-              <button
-                onClick={onPostAnnouncementClick}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-mono font-bold rounded-xl transition-all duration-200 shadow-2xs flex items-center space-x-2 shrink-0 cursor-pointer border border-blue-600 hover:scale-[1.02] active:scale-95"
-              >
-                <Megaphone className="w-4 h-4 text-white" />
-                <span>Post</span>
-              </button>
-            )}
 
             {/* Persistent Local Cache Status & Manual Sync Button */}
             <SyncStatusWidget />
@@ -247,28 +215,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
-              <button
-                onClick={() => {
-                  setActiveTab('announcements');
-                  setIsMobileMenuOpen(false);
-                }}
-                className={`flex flex-col items-center justify-center py-2.5 rounded-xl text-xs font-bold transition-all duration-200 min-h-[44px] cursor-pointer relative ${
-                  activeTab === 'announcements'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-300 hover:bg-[#1a2638]'
-                }`}
-              >
-                <div className="relative flex items-center">
-                  <Megaphone className={`w-4 h-4 mb-1 ${activeTab === 'announcements' ? 'text-amber-300' : 'text-amber-400'}`} />
-                  {announcementsCount !== undefined && announcementsCount > 0 && (
-                    <span className="absolute -top-1 -right-3 bg-amber-500 text-slate-950 font-mono text-[9px] font-extrabold px-1 rounded-full">
-                      {announcementsCount}
-                    </span>
-                  )}
-                </div>
-                <span>Announcements</span>
-              </button>
-
               {(currentUser?.role === 'Admin' || isCoordinator) && (
                 <button
                   onClick={() => {
@@ -303,22 +249,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
             </div>
-
-            {/* Mobile Action Buttons */}
-            {currentUser?.role === 'Admin' && onPostAnnouncementClick && (
-              <div className="flex items-center space-x-2 pt-1">
-                <button
-                  onClick={() => {
-                    onPostAnnouncementClick();
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all duration-200 shadow-2xs flex items-center justify-center space-x-1.5 min-h-[44px] cursor-pointer border border-blue-600"
-                >
-                  <Megaphone className="w-4 h-4 text-white" />
-                  <span>Post Announcement</span>
-                </button>
-              </div>
-            )}
 
             {/* Mobile Local Cache Status & Sync Button */}
             <div className="flex items-center justify-between bg-[#0d1524] border border-[#24334b] p-2 rounded-xl">

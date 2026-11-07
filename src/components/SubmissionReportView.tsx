@@ -39,6 +39,9 @@ import {
   fetchFacultyDllFoldersByEmail,
   fetchFacultyDllFilesForWeek,
   fetchSingleFacultySubmission,
+  deleteFacultyDllFilesForWeek,
+  extendFacultyDllFilesExpiration,
+  deleteFacultyFileFromFirestore,
 } from '../lib/firebase';
 import { FacultyPersonalFile } from '../types';
 import { FacultyDocumentViewerModal } from './FacultyDocumentViewerModal';
@@ -246,7 +249,8 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     currentUser.role === 'Admin' ||
     (currentUser as any).isAdmin === true ||
     currentUser.role?.toLowerCase() === 'admin' ||
-    isCoordinator;
+    isCoordinator ||
+    isMasterTeacher;
 
   // Registered faculty state from props / Firebase & localStorage cache
   const [registeredFaculty, setRegisteredFaculty] = useState<FacultyDoc[]>(() => {
@@ -360,16 +364,16 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
   // Class Adviser School Forms Data Map (SF 1, 3, 4, 5, 6, 8, 10 & SF 2 Monthly)
   const [classAdviserData, setClassAdviserData] = useState<Record<string, ClassAdviserSchoolFormsRecord>>(() => getStoredClassAdviserSchoolForms());
 
-  // Subscribe to real-time Class Adviser School Forms from Firebase (strictly scoped to active tab or authorized roles)
+  // Real-time Class Adviser School Forms subscription (stopped for Admin and Master Teacher to conserve reads)
   useEffect(() => {
-    if (activeCategory !== 'class-advisers' && !canManageClassAdvisers && !isClassAdviser) {
+    if (activeCategory !== 'class-advisers' || !isClassAdviser || isAdmin || isMasterTeacher) {
       return;
     }
     const unsub = subscribeClassAdviserSchoolForms((map) => {
       setClassAdviserData(map || {});
     });
     return () => unsub();
-  }, [activeCategory, canManageClassAdvisers, isClassAdviser]);
+  }, [activeCategory, isClassAdviser, isAdmin, isMasterTeacher]);
 
   // Term Weeks Configuration (Max 12 weeks per term)
   const [termWeeksConfig, setTermWeeksConfig] = useState<TermWeeksConfig>(() => getStoredTermWeeksConfig());
@@ -392,11 +396,16 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       setTermWeeksConfig(propTermWeeksConfig);
       return;
     }
+    if (isMasterTeacher || isAdmin || canEditDllTosTq || currentUser.role === 'Faculty') {
+      const stored = getStoredTermWeeksConfig();
+      if (stored) setTermWeeksConfig(stored);
+      return;
+    }
     const unsub = subscribeTermWeeksConfig((config) => {
       setTermWeeksConfig(config);
     });
     return () => unsub();
-  }, [propTermWeeksConfig]);
+  }, [propTermWeeksConfig, isMasterTeacher, isAdmin, canEditDllTosTq, currentUser.role]);
 
   // Subscribe to real-time active default academic term from Firebase
   useEffect(() => {
@@ -404,11 +413,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       setActiveDefaultTermId(propActiveTermId);
       return;
     }
+    if (isMasterTeacher || isAdmin || canEditDllTosTq || currentUser.role === 'Faculty') {
+      return;
+    }
     const unsub = subscribeActiveTermId((termId) => {
       setActiveDefaultTermId(termId);
     });
     return () => unsub();
-  }, [propActiveTermId]);
+  }, [propActiveTermId, isMasterTeacher, isAdmin, canEditDllTosTq, currentUser.role]);
 
   // Compute active term storage ID
   // DLL is per academic term (term-1, term-2, term-3)
@@ -472,8 +484,36 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     comment: string;
   } | null>(null);
 
-  // Subscribe to faculty list (skip duplicate Firestore listener if passed via props)
+  // Load registered faculty
   useEffect(() => {
+    if (currentUser.role === 'Faculty' && !isMasterTeacher && !isMasterAdmin) {
+      // In Faculty Role: Do NOT fetch all faculty users! Personalize to current user only!
+      setRegisteredFaculty([{
+        id: currentUser.id || currentUser.email,
+        name: currentUser.name,
+        email: currentUser.email,
+        role: currentUser.role,
+        department: currentUser.department || 'Senior High School Dept.',
+        advisoryRole: currentUser.advisoryRole || 'Non-Adviser',
+      }]);
+      setIsLoading(false);
+      return;
+    }
+
+    // In Master Teacher and Master Admin roles:
+    // ALWAYS force NOT to fetch data every time opening the submission report tab.
+    // Read strictly from passed props or offline local storage. 0 Firestore reads on open!
+    if (isMasterTeacher || isAdmin || canEditDllTosTq) {
+      if (propFacultyList && propFacultyList.length > 0) {
+        setRegisteredFaculty(propFacultyList);
+      } else {
+        const stored = getStoredFaculty();
+        setRegisteredFaculty(stored || []);
+      }
+      setIsLoading(false);
+      return;
+    }
+
     if (propFacultyList && propFacultyList.length > 0) {
       setRegisteredFaculty(propFacultyList);
       setIsLoading(false);
@@ -484,19 +524,12 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       setIsLoading(false);
     });
     return () => unsub();
-  }, [propFacultyList]);
+  }, [propFacultyList, currentUser, isMasterTeacher, isAdmin, canEditDllTosTq, isMasterAdmin]);
 
-  // Master Teacher Individualized Faculty Cards on-demand download states:
-  const [directoryLayout, setDirectoryLayout] = useState<'cards' | 'table'>(() => (isMasterTeacher ? 'cards' : 'table'));
+  // Individualized Faculty Cards on-demand download states (Cards View is permanent):
   const [expandedFacultyMap, setExpandedFacultyMap] = useState<Record<string, boolean>>({});
   const [loadingFacultyMap, setLoadingFacultyMap] = useState<Record<string, boolean>>({});
   const [loadedFacultyMap, setLoadedFacultyMap] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    if (isMasterTeacher) {
-      setDirectoryLayout('cards');
-    }
-  }, [isMasterTeacher]);
 
   // Reset expanded / loaded map when switching terms or categories so data stays fresh
   useEffect(() => {
@@ -566,17 +599,18 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     setConfirmedWeeks(cachedConf || {});
     setIsLoading(true);
 
-    // If Master Teacher, DO NOT automatically download all submissions from the database!
-    // Per requirement: "In master teacher role submission report dashboard, do not download all the files of faculty only download and show the uploaded files in a certain week when notification bell is clicked and only download the file of a certain faculty"
-    // "Individualize list in the submission report dashboard in master teacher role by making a card like with the name of the faculty member, when the card is clicked it will show the checkboxes. Do not download automatically the data in the database, only download when the card is clicked and only download the data of the certain faculty"
-    if (isMasterTeacher) {
+    // Stop all automatic bulk snapshot listeners to conserve Firestore read quota
+    // Neither Master Teacher nor Admin runs background listeners that download all faculty submissions
+    if (isMasterTeacher || isAdmin || canEditDllTosTq) {
       setIsLoading(false);
       return;
     }
 
-    const teacherScope = (!canEditDllTosTq && !isAdmin && currentUser.role === 'Faculty')
-      ? currentUser.email
-      : undefined;
+    const teacherScope = currentUser.role === 'Faculty' ? currentUser.email : undefined;
+    if (!teacherScope) {
+      setIsLoading(false);
+      return;
+    }
 
     const unsub = subscribeFacultySubmissions(
       effectiveTermId,
@@ -705,20 +739,51 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     if (!dllReviewModalData) return;
     setIsSubmittingReview(true);
     try {
+      const cleanEmail = dllReviewModalData.facultyEmail.toLowerCase().trim();
+      const isApproved = reviewStatusChoice === 'checked';
+      const isWithComments = reviewStatusChoice === 'with-comments';
+
+      const effectiveFeedback = reviewFeedback.trim()
+        ? reviewFeedback.trim()
+        : isApproved
+        ? `All learning objectives and competencies verified and approved by ${currentUser.name || 'Norma Jabagat'} (${currentUser.designation || 'Master Teacher'}). Documents archived and removed to conserve storage.`
+        : isWithComments
+        ? `Reviewed by ${currentUser.name || 'Norma Jabagat'} (${currentUser.designation || 'Master Teacher'}): Revisions or comments noted. Files retained for 15-day revision window.`
+        : `Reviewed by ${currentUser.name || 'Norma Jabagat'} (${currentUser.designation || 'Master Teacher'}): Incomplete deliverable.`;
+
+      // 1. Save confirmed status & comments to Firestore
       await confirmDllReviewStatusInFirestore(
         dllReviewModalData.termId,
         dllReviewModalData.facultyEmail,
         dllReviewModalData.weekIndex,
         reviewStatusChoice,
-        reviewFeedback,
+        effectiveFeedback,
         currentUser.name || 'Norma Jabagat',
         currentUser.designation || 'Master Teacher'
       );
 
-      const cleanEmail = dllReviewModalData.facultyEmail.toLowerCase().trim();
+      // 2. Per requirement:
+      // "When the notification bell is clicked and marked with 'Approved & Verified' automatically delete the documents in that certain week but leave the green check permanent in the submission status of the faculty even the file is deleted"
+      if (isApproved) {
+        // Automatically delete documents uploaded for this week in Firestore & local caches
+        await deleteFacultyDllFilesForWeek(cleanEmail, dllReviewModalData.weekNumber);
+        if (dllReviewModalData.allDllFilesForWeek && dllReviewModalData.allDllFilesForWeek.length > 0) {
+          for (const f of dllReviewModalData.allDllFilesForWeek) {
+            await deleteFacultyFileFromFirestore(f.id);
+          }
+        }
+        window.dispatchEvent(new CustomEvent('svnhs-faculty-files-updated'));
+      } else if (isWithComments) {
+        // "and if the status is 'With Comments' retain the files and will be subjected to auto purge for 15 days and when the file is deleted due to the auto purge still leave the 'with comments' status even if the file is already deleted."
+        // Retain files and schedule them for 15-day auto purge
+        await extendFacultyDllFilesExpiration(cleanEmail, dllReviewModalData.weekNumber, 15);
+        window.dispatchEvent(new CustomEvent('svnhs-faculty-files-updated'));
+      }
+
+      // 3. Update local state: Keep green check permanent for approved, or with-comments status
       const currentWeeks = submissions[cleanEmail] ? [...submissions[cleanEmail]] : [];
       while (currentWeeks.length <= dllReviewModalData.weekIndex) currentWeeks.push(false);
-      currentWeeks[dllReviewModalData.weekIndex] = reviewStatusChoice === 'checked';
+      currentWeeks[dllReviewModalData.weekIndex] = isApproved;
       setSubmissions((prev) => ({ ...prev, [cleanEmail]: currentWeeks }));
 
       const currentStatuses = itemStatuses[cleanEmail] ? [...itemStatuses[cleanEmail]] : [];
@@ -727,11 +792,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
       setItemStatuses((prev) => ({ ...prev, [cleanEmail]: currentStatuses }));
 
       const currentComments = itemComments[cleanEmail] ? { ...itemComments[cleanEmail] } : {};
-      currentComments[String(dllReviewModalData.weekIndex)] = reviewFeedback;
+      currentComments[String(dllReviewModalData.weekIndex)] = effectiveFeedback;
       setItemComments((prev) => ({ ...prev, [cleanEmail]: currentComments }));
 
-      // Immediately mark this week as confirmed & approved so notification bell instantly turns into Green Check ✓
-      const isApproved = reviewStatusChoice === 'checked';
+      // Track confirmed approved week permanently
       setConfirmedWeeks((prev) => {
         const curFac = prev[cleanEmail] ? { ...prev[cleanEmail] } : {};
         curFac[String(dllReviewModalData.weekIndex)] = isApproved;
@@ -743,8 +807,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
       showToast(
         isApproved
-          ? `⭐ DLL Approved & Verified! Notification bell changed to Green Check ✓ for ${dllReviewModalData.facultyName} (Week ${dllReviewModalData.weekNumber})`
-          : `⭐ DLL Review Status updated to ${reviewStatusChoice} for ${dllReviewModalData.facultyName} (Week ${dllReviewModalData.weekNumber})`
+          ? `⭐ DLL Approved & Verified! Documents deleted to conserve storage and Green Check ✓ marked permanently for ${dllReviewModalData.facultyName} (Week ${dllReviewModalData.weekNumber}).`
+          : isWithComments
+          ? `💬 Marked With Comments for ${dllReviewModalData.facultyName} (Week ${dllReviewModalData.weekNumber}). Files retained and scheduled for 15-day auto purge.`
+          : `⚠️ Marked Incomplete for ${dllReviewModalData.facultyName} (Week ${dllReviewModalData.weekNumber}).`
       );
       setDllReviewModalData(null);
     } catch (err) {
@@ -789,6 +855,18 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
 
   // Combine registered faculty from Firestore with any unique faculty found in facultyFolders & liveFacultyFolders
   const allFaculty = useMemo(() => {
+    if (currentUser.role === 'Faculty' && !isMasterTeacher && !isMasterAdmin) {
+      // Personalize to current user only: never expose or compute across other faculty members
+      return [{
+        id: currentUser.id || currentUser.email,
+        name: currentUser.name,
+        email: currentUser.email.toLowerCase().trim(),
+        department: currentUser.department || 'Senior High School Dept.',
+        surname: extractFacultySurname(currentUser.name || currentUser.email),
+        advisoryRole: currentUser.advisoryRole || 'Non-Adviser',
+      }];
+    }
+
     const map = new Map<string, { id: string; name: string; email: string; department: string; surname: string; advisoryRole?: 'Class Adviser' | 'Non-Adviser' }>();
 
     // Add registered faculty from collection
@@ -838,7 +916,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
     const list = Array.from(map.values());
     // Sort alphabetically by surname
     return list.sort((a, b) => a.surname.localeCompare(b.surname));
-  }, [registeredFaculty, facultyFolders, liveFacultyFolders]);
+  }, [registeredFaculty, facultyFolders, liveFacultyFolders, currentUser, isMasterTeacher, isMasterAdmin]);
 
   // Class Advisers list: ONLY faculty members designated as "Class Adviser"
   const classAdvisersList = useMemo(() => {
@@ -1518,12 +1596,30 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         const fStatuses = itemStatuses[cleanEmail] || [];
         matchStatus = fStatuses.slice(0, totalItemCount).some((s) => s === 'late');
       }
-      else if (statusFilter === 'in-progress') matchStatus = count > 0 && count < totalItemCount;
+      else if (statusFilter === 'in-progress') {
+        // Only faculty with active notification bell (DLL submitted and pending approval)
+        // "With Comments" do NOT count as pending!
+        const cleanEmail = f.email.toLowerCase().trim();
+        const facConf = confirmedWeeks[cleanEmail] || confirmedWeeks[f.email] || {};
+        matchStatus = visibleSlice.some((_, idx) => {
+          const itemStatus = getItemStatus(f.email, idx);
+          if (itemStatus !== 'checked') return false;
+          const itemComment = getItemComment(f.email, idx);
+          const isApproved = Boolean(
+            facConf[String(idx)] ||
+            itemComment?.includes('Verified and Approved') ||
+            itemComment?.includes('Approved & Verified') ||
+            itemComment?.includes('Approved and Verified') ||
+            itemComment?.includes('[Confirmed by')
+          );
+          return !isApproved;
+        });
+      }
       else if (statusFilter === 'none') matchStatus = count === 0;
 
       return matchSearch && matchDept && matchStatus;
     });
-  }, [allFaculty, searchTerm, departmentFilter, statusFilter, submissions, itemStatuses, totalItemCount]);
+  }, [allFaculty, searchTerm, departmentFilter, statusFilter, submissions, itemStatuses, itemComments, confirmedWeeks, totalItemCount]);
 
   // Calculate Progress Stats
   const stats = useMemo(() => {
@@ -2896,267 +2992,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
         </div>
       </div>
 
-      {/* Top Metrics Cards (Administrator Only) */}
-      {isAdmin && (
-        activeCategory === 'class-advisers' ? (
-          canManageClassAdvisers ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-            {/* Metric 1: Total Class Advisers */}
-            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-                <span>Class Advisers</span>
-                <div className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
-                  <GraduationCap className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
-                  {adviserStats.totalAdvisers}
-                </span>
-                <span className="text-xs text-slate-400 font-mono">advisers</span>
-              </div>
-              <p className="text-[11px] text-emerald-400 truncate font-mono">
-                Designated Class Advisers
-              </p>
-            </div>
 
-            {/* Metric 2: Section 1 Compliance (SF 1, 3, 4, 5, 6, 8, 10) */}
-            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-                <span>Section 1 (SF 1-10)</span>
-                <div className="p-1.5 bg-blue-500/20 text-blue-400 rounded-xl">
-                  <CheckSquare className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
-                  {adviserStats.sfPercentage}%
-                </span>
-                <span className="text-xs text-slate-400 font-mono">
-                  ({adviserStats.sfTotalComplied}/{adviserStats.sfTotalPossible})
-                </span>
-              </div>
-              <div className="w-full bg-[#0d1524] rounded-full h-2 overflow-hidden border border-[#24334b]">
-                <div
-                  className="bg-blue-600 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${adviserStats.sfPercentage}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Metric 3: Section 2 Compliance (SF 2 June to April) */}
-            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-                <span>Section 2 (SF 2 Monthly)</span>
-                <div className="p-1.5 bg-purple-500/20 text-purple-400 rounded-xl">
-                  <CalendarDays className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
-                  {adviserStats.sf2Percentage}%
-                </span>
-                <span className="text-xs text-slate-400 font-mono">
-                  ({adviserStats.sf2TotalComplied}/{adviserStats.sf2TotalPossible})
-                </span>
-              </div>
-              <div className="w-full bg-[#0d1524] rounded-full h-2 overflow-hidden border border-[#24334b]">
-                <div
-                  className="bg-purple-600 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${adviserStats.sf2Percentage}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Metric 4: 100% Fully Compliant Advisers */}
-            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-                <span>100% Compliant</span>
-                <div className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono">
-                  {adviserStats.fullyCompliantAdvisers}
-                </span>
-                <span className="text-xs text-slate-400 font-mono">
-                  / {adviserStats.totalAdvisers}
-                </span>
-              </div>
-              <p className="text-[11px] text-emerald-300 font-mono truncate font-medium">
-                Completed all SF & SF 2
-              </p>
-            </div>
-
-            {/* Metric 5: SF 1 to 10 Forms */}
-            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-                <span>Forms Monitored</span>
-                <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-xl">
-                  <FileText className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-amber-400 font-mono">
-                  7 Forms
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 font-mono truncate">
-                SF 1, 3, 4, 5, 6, 8, 10
-              </p>
-            </div>
-
-            {/* Metric 6: SF 2 Attendance Months */}
-            <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2 col-span-2 sm:col-span-1">
-              <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-                <span>SF 2 Months</span>
-                <div className="p-1.5 bg-teal-500/20 text-teal-400 rounded-xl">
-                  <Clock className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline space-x-2">
-                <span className="text-2xl sm:text-3xl font-extrabold text-teal-300 font-mono">
-                  11 Months
-                </span>
-              </div>
-              <p className="text-[11px] text-teal-400 truncate font-mono font-medium">
-                June to April School Year
-              </p>
-            </div>
-          </div>
-          ) : null
-        ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-          {/* Metric 1: Overall Compliance */}
-          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-              <span>{currentCategory.name} Compliance</span>
-              <div className="p-1.5 bg-blue-500/20 text-blue-400 rounded-xl">
-                <BarChart3 className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
-                {stats.overallPercentage}%
-              </span>
-              <span className="text-xs text-slate-400 font-mono">
-                ({stats.totalCompleted}/{stats.totalPossible} {isWeeklyCategory ? 'wks' : 'terms'})
-              </span>
-            </div>
-            <div className="w-full bg-[#0d1524] rounded-full h-2 overflow-hidden border border-[#24334b]">
-              <div
-                className="bg-blue-600 h-full rounded-full transition-all duration-500"
-                style={{ width: `${stats.overallPercentage}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Metric 2: Registered Faculty */}
-          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-              <span>Registered Faculty</span>
-              <div className="p-1.5 bg-indigo-500/20 text-indigo-400 rounded-xl">
-                <Users className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-slate-100 font-mono">
-                {stats.totalFaculty}
-              </span>
-              <span className="text-xs text-slate-400 font-mono">teachers</span>
-            </div>
-            <p className="text-[11px] text-slate-400 truncate">
-              JHS & SHS Teachers
-            </p>
-          </div>
-
-          {/* Metric 3: Checked Clean */}
-          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-              <span>Checked (Clean)</span>
-              <div className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono">
-                {stats.totalCleanChecked}
-              </span>
-              <span className="text-xs text-slate-400 font-mono">
-                / {stats.totalCompleted} submitted
-              </span>
-            </div>
-            <p className="text-[11px] text-emerald-300 font-mono font-medium truncate">
-              {stats.completedFacultyCount} teacher(s) 100% compliant ({isWeeklyCategory ? `Weeks 1–${currentTermWeeks}` : 'Terms 1, 2 & 3'})
-            </p>
-          </div>
-
-          {/* Metric 4: With Comments (Corrections) */}
-          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-              <span>With Comments</span>
-              <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-xl">
-                <MessageSquare className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-amber-400 font-mono">
-                {stats.totalWithComments}
-              </span>
-              <span className="text-xs text-slate-400 font-mono">
-                deliverables
-              </span>
-            </div>
-            <p className="text-[11px] text-amber-300 truncate font-mono font-medium">
-              {stats.facultyWithCommentsCount} faculty member(s) have corrections
-            </p>
-          </div>
-
-          {/* Metric 5: Incomplete (Lacking Requirements) */}
-          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2">
-            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-              <span>Incomplete (Lacking)</span>
-              <div className="p-1.5 bg-rose-500/20 text-rose-400 rounded-xl">
-                <AlertCircle className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-rose-400 font-mono">
-                {stats.totalIncomplete}
-              </span>
-              <span className="text-xs text-slate-400 font-mono">
-                lacking
-              </span>
-            </div>
-            <p className="text-[11px] text-rose-300 truncate font-mono font-medium">
-              {stats.facultyWithIncompleteCount} faculty member(s) have lacking items
-            </p>
-          </div>
-
-          {/* Metric 6: Late Submissions */}
-          <div className="bg-[#141c2c] p-4 sm:p-5 rounded-3xl border border-[#24334b] shadow-2xs space-y-2 col-span-2 sm:col-span-1">
-            <div className="flex items-center justify-between text-slate-400 text-xs font-mono font-medium">
-              <span>Late Submissions</span>
-              <div className="p-1.5 bg-orange-500/20 text-orange-400 rounded-xl">
-                <Clock className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-2xl sm:text-3xl font-extrabold text-orange-400 font-mono">
-                {stats.totalLate}
-              </span>
-              <span className="text-xs text-slate-400 font-mono">
-                late
-              </span>
-            </div>
-            <p className="text-[11px] text-orange-300 truncate font-mono font-medium">
-              {stats.facultyWithLateCount} faculty member(s) have late deliveries
-            </p>
-          </div>
-        </div>
-        )
-      )}
 
       {/* NON-ADMIN FACULTY HIGHLIGHT CARD (When Directory Table is Hidden) */}
       {!isAdmin && (
@@ -3822,90 +3658,62 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
             </div>
           </div>
 
-          {/* View Mode Switcher Header */}
-          <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 bg-[#0a101d] border-b border-[#24334b]">
-            <div className="text-xs font-mono text-slate-300 font-bold flex items-center space-x-2">
-              <span className="text-slate-400">Display Layout:</span>
-              <span className="text-blue-400 font-bold">
-                {directoryLayout === 'cards' ? 'Individualized Faculty Cards' : 'Matrix Table'}
-              </span>
+          {/* Individualized Faculty Cards View (Read Quota Optimized - Permanent View) */}
+          <div className="p-4 sm:p-6 space-y-3.5 bg-[#0f1725]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-[#24334b] text-xs font-mono text-slate-400">
+              <div className="flex items-center space-x-2">
+                <Users className="w-4 h-4 text-blue-400" />
+                <span className="font-bold text-slate-200">Individualized Faculty Directory</span>
+                <span className="text-slate-400">({filteredFaculty.length} faculty members)</span>
+              </div>
+              <div className="flex items-center space-x-2 text-[11px]">
+                <span className="px-2.5 py-0.5 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                  💡 Click card to view checkboxes & download records on demand (0 reads on load, 1 read per teacher expanded)
+                </span>
+              </div>
             </div>
-            <div className="flex items-center space-x-1.5 bg-[#0d1524] p-1 rounded-xl border border-[#24334b]">
-              <button
-                type="button"
-                onClick={() => setDirectoryLayout('cards')}
-                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
-                  directoryLayout === 'cards'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Cards View
-              </button>
-              <button
-                type="button"
-                onClick={() => setDirectoryLayout('table')}
-                className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
-                  directoryLayout === 'table'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Matrix Table
-              </button>
-            </div>
-          </div>
 
-          {directoryLayout === 'cards' ? (
-            /* Individualized Faculty Cards View (Read Quota Optimized) */
-            <div className="p-4 sm:p-6 space-y-3.5 bg-[#0f1725]">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-[#24334b] text-xs font-mono text-slate-400">
-                <div className="flex items-center space-x-2">
-                  <Users className="w-4 h-4 text-blue-400" />
-                  <span className="font-bold text-slate-200">Individualized Faculty Directory</span>
-                  <span className="text-slate-400">({filteredFaculty.length} faculty members)</span>
-                </div>
-                <div className="flex items-center space-x-2 text-[11px]">
-                  <span className="px-2.5 py-0.5 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/20">
-                    💡 Click card to view checkboxes & download records on demand (0 reads on load, 1 read per teacher expanded)
-                  </span>
+            {filteredFaculty.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 bg-[#141c2c] rounded-2xl border border-[#24334b]">
+                <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                <div className="font-bold text-sm text-slate-200">No faculty members found</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  Try adjusting your search query or department filter.
                 </div>
               </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {filteredFaculty.map((faculty) => {
+                  const cleanEmail = faculty.email.toLowerCase().trim();
+                  const isExpanded = !!expandedFacultyMap[cleanEmail];
+                  const isCardLoading = !!loadingFacultyMap[cleanEmail];
+                  const isCardLoaded = !!loadedFacultyMap[cleanEmail];
 
-              {filteredFaculty.length === 0 ? (
-                <div className="py-12 text-center text-slate-400 bg-[#141c2c] rounded-2xl border border-[#24334b]">
-                  <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
-                  <div className="font-bold text-sm text-slate-200">No faculty members found</div>
-                  <div className="text-xs text-slate-400 mt-0.5">
-                    Try adjusting your search query or department filter.
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3">
-                  {filteredFaculty.map((faculty) => {
-                    const cleanEmail = faculty.email.toLowerCase().trim();
-                    const isExpanded = !!expandedFacultyMap[cleanEmail];
-                    const isCardLoading = !!loadingFacultyMap[cleanEmail];
-                    const isCardLoaded = !!loadedFacultyMap[cleanEmail];
+                  const items = submissions[cleanEmail] || submissions[faculty.email] || Array(totalItemCount).fill(false);
+                  const visibleSlice = items.slice(0, totalItemCount);
+                  const completedCount = visibleSlice.filter(Boolean).length;
+                  const pct = Math.round((completedCount / totalItemCount) * 100);
+                  const isAllChecked = completedCount === totalItemCount;
 
-                    const items = submissions[cleanEmail] || submissions[faculty.email] || Array(totalItemCount).fill(false);
-                    const visibleSlice = items.slice(0, totalItemCount);
-                    const completedCount = visibleSlice.filter(Boolean).length;
-                    const pct = Math.round((completedCount / totalItemCount) * 100);
-                    const isAllChecked = completedCount === totalItemCount;
-
-                    const facConf = confirmedWeeks[cleanEmail] || confirmedWeeks[faculty.email] || {};
-                    const pendingCount = visibleSlice.reduce((acc, isSub, idx) => {
-                      if (!isSub) return acc;
-                      const isAppr = Boolean(
-                        facConf[String(idx)] ||
-                        getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
-                        getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
-                        getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
-                        getItemComment(faculty.email, idx)?.includes('[Confirmed by')
-                      );
-                      return isAppr ? acc : acc + 1;
-                    }, 0);
+                  const facConf = confirmedWeeks[cleanEmail] || confirmedWeeks[faculty.email] || {};
+                  const isDll = activeCategory === 'dll';
+                  const pendingCount = isDll
+                    ? visibleSlice.reduce((acc, _, idx) => {
+                        const itemStatus = getItemStatus(faculty.email, idx);
+                        // Notification bell only triggers when the item was submitted ('checked') and NOT yet confirmed approved
+                        // "With Comments", "incomplete", "late", "unchecked" NEVER count as pending!
+                        if (itemStatus !== 'checked') return acc;
+                        const itemComment = getItemComment(faculty.email, idx);
+                        const isAppr = Boolean(
+                          facConf[String(idx)] ||
+                          itemComment?.includes('Verified and Approved') ||
+                          itemComment?.includes('Approved & Verified') ||
+                          itemComment?.includes('Approved and Verified') ||
+                          itemComment?.includes('[Confirmed by')
+                        );
+                        return isAppr ? acc : acc + 1;
+                      }, 0)
+                    : 0;
 
                     return (
                       <div
@@ -4262,385 +4070,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                 </div>
               )}
             </div>
-          ) : (
-            /* Directory Table / Matrix View */
-            <div className="overflow-x-auto">
-              <table className={`w-full text-left border-collapse ${termGroups ? 'min-w-[1040px]' : 'min-w-[700px]'}`}>
-                <thead>
-                  {termGroups ? (
-                    <>
-                      {/* Tier 1 Header Row: Grouped by TERM 1 TOS/TQ, TERM 2 TOS/TQ, TERM 3 TOS/TQ */}
-                      <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
-                        <th rowSpan={2} className="py-3 px-4 w-52 sm:w-64 border-r border-[#24334b] align-middle text-slate-200">
-                          Faculty Member
-                        </th>
-                        <th rowSpan={2} className="py-3 px-3 w-32 sm:w-40 border-r border-[#24334b] align-middle text-slate-200">
-                          Department
-                        </th>
-                        {termGroups.map((group, gIdx) => (
-                          <th
-                            key={group.label}
-                            colSpan={group.span}
-                            className={`py-2 px-3 text-center border-l-2 border-b border-[#24334b] font-black text-xs tracking-wider ${
-                              activeCategory === 'tos'
-                                ? 'bg-[#151c30] text-purple-300 border-t-2 border-t-purple-500 border-l-purple-500/40'
-                                : 'bg-[#1c1a27] text-amber-300 border-t-2 border-t-amber-500 border-l-amber-500/40'
-                            }`}
-                          >
-                            <div className="flex items-center justify-center space-x-1.5">
-                              <span className="font-extrabold">{group.label}</span>
-                            </div>
-                          </th>
-                        ))}
-                        <th rowSpan={2} className="py-3 px-3 text-center w-24 border-l border-[#24334b] align-middle text-slate-200">
-                          Progress
-                        </th>
-                        <th rowSpan={2} className="py-3 px-3 text-center w-24 border-l border-[#24334b] align-middle text-slate-200">
-                          Quick Action
-                        </th>
-                      </tr>
-                      {/* Tier 2 Sub-column Headers: ST 1, ST 2, TE 1 | ST 1, ST 2, TE 2 | ST 1, ST 2, TE 3 */}
-                      <tr className="bg-[#090f1a] text-slate-300 text-[10px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
-                        {columnItems.map((col) => {
-                          const isTermStart = col.index % 3 === 0;
-                          return (
-                            <th
-                              key={col.key}
-                              className={`py-1.5 px-1 text-center ${
-                                isTermStart ? 'border-l-2 border-l-[#3b4f73]' : 'border-l border-l-[#24334b]'
-                              } w-12 sm:w-14`}
-                              title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
-                            >
-                              <div className="flex flex-col items-center justify-center">
-                                <span
-                                  className={`text-[10.5px] font-black ${
-                                    activeCategory === 'tos' ? 'text-purple-200' : 'text-amber-200'
-                                  }`}
-                                >
-                                  {col.headerLabel}
-                                </span>
-                                {canEditDllTosTq && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSaveItemToFirebase(col.index)}
-                                    disabled={isSavingIndex === col.index}
-                                    className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
-                                    title={`Save ${col.fullLabel} data to Firebase`}
-                                  >
-                                    {isSavingIndex === col.index ? (
-                                      <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
-                                    ) : (
-                                      <Save className="w-2.5 h-2.5" />
-                                    )}
-                                  </button>
-                                )}
-                              </div>
-                            </th>
-                          );
-                        })}
-                      </tr>
-                    </>
-                  ) : (
-                    /* Standard 1-Tier Header for DLL */
-                    <tr className="bg-[#0d1524] text-slate-300 text-[11px] font-mono font-bold uppercase tracking-wider border-b border-[#24334b]">
-                      <th className="py-3 px-4 w-60 sm:w-72">Faculty Member</th>
-                      <th className="py-3 px-3 w-36 sm:w-44">Department</th>
-                      {columnItems.map((col) => (
-                        <th
-                          key={col.key}
-                          className="py-2.5 px-2 text-center border-l border-[#24334b] w-12"
-                          title={`${col.fullLabel}. Click save icon to persist to Firebase.`}
-                        >
-                          <div className="flex flex-col items-center justify-center">
-                            <span className="text-[11px] font-extrabold text-blue-400">
-                              {col.headerLabel}
-                            </span>
-                            {canEditDllTosTq && (
-                              <button
-                                type="button"
-                                onClick={() => handleSaveItemToFirebase(col.index)}
-                                disabled={isSavingIndex === col.index}
-                                className="mt-0.5 p-0.5 rounded text-slate-400 hover:text-blue-400 hover:bg-[#1c273a] transition-all cursor-pointer"
-                                title={`Save ${col.fullLabel} data to Firebase`}
-                              >
-                                {isSavingIndex === col.index ? (
-                                  <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
-                                ) : (
-                                  <Save className="w-3 h-3" />
-                                )}
-                              </button>
-                            )}
-                          </div>
-                        </th>
-                      ))}
-                      <th className="py-3 px-3 text-center w-28 border-l border-[#24334b]">
-                        Progress
-                      </th>
-                      <th className="py-3 px-3 text-center w-28">Quick Action</th>
-                    </tr>
-                  )}
-                </thead>
-                <tbody className="divide-y divide-[#24334b] text-xs font-mono">
-                  {isLoading ? (
-                    <tr>
-                      <td colSpan={4 + totalItemCount} className="py-16 text-center text-slate-300 bg-[#141c2c]">
-                        <div className="w-9 h-9 rounded-full border-2 border-emerald-500/30 border-t-emerald-400 animate-spin mx-auto mb-3" />
-                        <div className="font-bold text-sm text-slate-200">Retrieving live submission records...</div>
-                        <div className="text-xs text-slate-400 mt-1">
-                          Fetching latest status and comments from database...
-                        </div>
-                      </td>
-                    </tr>
-                  ) : filteredFaculty.length === 0 ? (
-                    <tr>
-                      <td colSpan={4 + totalItemCount} className="py-12 text-center text-slate-400 bg-[#141c2c]">
-                        <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
-                        <div className="font-bold text-sm text-slate-200">No faculty members found</div>
-                        <div className="text-xs text-slate-400 mt-0.5">
-                          Try adjusting your search query or department filter.
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredFaculty.map((faculty) => {
-                      const items = submissions[faculty.email] || Array(totalItemCount).fill(false);
-                      const visibleSlice = items.slice(0, totalItemCount);
-                      const completedCount = visibleSlice.filter(Boolean).length;
-                      const pct = Math.round((completedCount / totalItemCount) * 100);
-                      const isAllChecked = completedCount === totalItemCount;
 
-                      return (
-                        <tr
-                          key={faculty.email}
-                          className="bg-[#141c2c] hover:bg-[#1c273c] transition-colors border-b border-[#24334b]"
-                        >
-                          {/* Faculty Name & Info (Uniform clean styling, no alternating color) */}
-                          <td className="py-3 px-4">
-                            <div className="flex items-center space-x-2.5">
-                              <div
-                                className="w-7 h-7 rounded-xl flex items-center justify-center font-bold text-[11px] text-blue-300 shrink-0 shadow-2xs bg-[#1f2d45] border border-[#2d4060]"
-                              >
-                                {faculty.surname.charAt(0)}
-                              </div>
-                              <div className="min-w-0">
-                                <div className="font-bold text-slate-100 truncate text-xs">
-                                  {faculty.surname}, {faculty.name}
-                                </div>
-                                <div className="text-[10px] text-slate-400 truncate font-mono">
-                                  {faculty.email}
-                                </div>
-                                {activeCategory === 'dll' && isMasterTeacher && completedCount > 0 && (() => {
-                                  const cleanFacEmail = faculty.email.toLowerCase().trim();
-                                  const facConf = confirmedWeeks[cleanFacEmail] || {};
-                                  const pendingCount = visibleSlice.reduce((acc, isSub, idx) => {
-                                    if (!isSub) return acc;
-                                    const isAppr = Boolean(
-                                      facConf[String(idx)] ||
-                                      getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
-                                      getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
-                                      getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
-                                      getItemComment(faculty.email, idx)?.includes('[Confirmed by')
-                                    );
-                                    return isAppr ? acc : acc + 1;
-                                  }, 0);
-
-                                  if (pendingCount > 0) {
-                                    return (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const firstUnverified = visibleSlice.findIndex((isSub, idx) => {
-                                            if (!isSub) return false;
-                                            return !Boolean(
-                                              facConf[String(idx)] ||
-                                              getItemComment(faculty.email, idx)?.includes('Verified and Approved') ||
-                                              getItemComment(faculty.email, idx)?.includes('Approved & Verified') ||
-                                              getItemComment(faculty.email, idx)?.includes('Approved and Verified') ||
-                                              getItemComment(faculty.email, idx)?.includes('[Confirmed by')
-                                            );
-                                          });
-                                          handleOpenDllReviewStatus(faculty, firstUnverified >= 0 ? firstUnverified : 0);
-                                        }}
-                                        className="mt-1 px-2 py-0.5 bg-gradient-to-r from-amber-500/20 to-amber-600/30 hover:from-amber-500/30 hover:to-amber-600/40 border border-amber-400/40 rounded-lg text-amber-300 font-mono text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition-all shadow-2xs"
-                                        title="Open DLL Review Status to review pending submission"
-                                      >
-                                        <Bell className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
-                                        <span>Review DLL ({pendingCount} pending)</span>
-                                      </button>
-                                    );
-                                  }
-
-                                  return (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const firstSubmitted = visibleSlice.findIndex(Boolean);
-                                        handleOpenDllReviewStatus(faculty, firstSubmitted >= 0 ? firstSubmitted : 0);
-                                      }}
-                                      className="mt-1 px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg text-emerald-300 font-mono text-[10px] font-bold flex items-center space-x-1 cursor-pointer transition-all shadow-2xs"
-                                      title="All submissions approved and verified by Master Teacher"
-                                    >
-                                      <Check className="w-3 h-3 text-emerald-400 stroke-[3]" />
-                                      <span>Approved & Verified ({completedCount})</span>
-                                    </button>
-                                  );
-                                })()}
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Department */}
-                          <td className="py-3 px-3 text-slate-300 text-[11px]">
-                            <span className="bg-[#0d1524] text-slate-300 border border-[#24334b] px-2 py-0.5 rounded-md truncate max-w-[140px] inline-block font-sans font-medium">
-                              {faculty.department || 'SHS Dept.'}
-                            </span>
-                          </td>
-
-                          {/* Checkboxes (Weeks or Term 1, Term 2, Term 3) */}
-                          {columnItems.map((col) => {
-                            const itemStatus = getItemStatus(faculty.email, col.index);
-                            const itemComment = getItemComment(faculty.email, col.index);
-                            const cleanFacultyEmail = faculty.email.toLowerCase().trim();
-                            const isCurrentlySaving = autoSavingItemKey === `${cleanFacultyEmail}_${col.index}`;
-                            const isChecked = itemStatus === 'checked';
-                            const isWithComments = itemStatus === 'with-comments';
-                            const isIncomplete = itemStatus === 'incomplete';
-                            const isLate = itemStatus === 'late';
-                            const isTermStart = termGroups && col.index % 3 === 0;
-
-                            const facultyConfMap = confirmedWeeks[cleanFacultyEmail] || {};
-                            const isConfirmedApproved = Boolean(
-                              facultyConfMap[String(col.index)] ||
-                              itemComment?.includes('Verified and Approved') ||
-                              itemComment?.includes('Approved & Verified') ||
-                              itemComment?.includes('Approved and Verified') ||
-                              itemComment?.includes('[Confirmed by')
-                            );
-
-                            // In DLL Category for Master Teacher:
-                            // - If submitted ('checked') but not yet confirmed by Master Teacher: Render Notification Bell
-                            // - When Master Teacher confirms "Approved and Verified": Change Notification Bell to Green Check ✓
-                            const isDll = activeCategory === 'dll';
-                            const showDllNotificationBell = isDll && isMasterTeacher && isChecked && !isConfirmedApproved;
-
-                            return (
-                              <td
-                                key={col.key}
-                                className={`py-2 px-1 text-center ${
-                                  isTermStart ? 'border-l-2 border-l-[#3b4f73]' : 'border-l border-l-[#24334b]'
-                                }`}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (isDll && isMasterTeacher && isChecked) {
-                                      handleOpenDllReviewStatus(faculty, col.index);
-                                    } else if (canEditDllTosTq) {
-                                      handleOpenCellAction(faculty, col);
-                                    }
-                                  }}
-                                  disabled={!canEditDllTosTq}
-                                  aria-label={`Review ${col.fullLabel} for ${faculty.name}`}
-                                  className={`rounded-lg border flex items-center justify-center mx-auto transition-all ${canEditDllTosTq ? 'cursor-pointer active:scale-90' : 'cursor-default'} relative ${
-                                    isWeeklyCategory ? 'w-7 h-7' : 'w-7 h-7 sm:w-8 sm:h-7'
-                                  } ${
-                                    isChecked
-                                      ? showDllNotificationBell
-                                        ? 'bg-gradient-to-br from-amber-500 to-amber-600 border-amber-300 text-white shadow-md ring-2 ring-amber-400/60 hover:from-amber-400 hover:to-amber-500'
-                                        : 'bg-emerald-500 border-emerald-600 text-white shadow-2xs hover:bg-emerald-600 ring-2 ring-emerald-400/40'
-                                      : isWithComments
-                                      ? 'bg-amber-500 border-amber-600 text-white shadow-2xs hover:bg-amber-600 ring-1 ring-amber-400'
-                                      : isIncomplete
-                                      ? 'bg-rose-500 border-rose-600 text-white shadow-2xs hover:bg-rose-600 ring-1 ring-rose-400'
-                                      : isLate
-                                      ? 'bg-orange-500 border-orange-600 text-white shadow-2xs hover:bg-orange-600 ring-1 ring-orange-400'
-                                      : 'bg-[#0d1524] border-[#24334b] text-transparent hover:border-slate-500 hover:bg-[#1a2638]'
-                                  } ${isCurrentlySaving ? 'ring-2 ring-blue-400 ring-offset-1 scale-95' : ''}`}
-                                  title={`${faculty.name} - ${col.fullLabel}: ${
-                                    isChecked
-                                      ? showDllNotificationBell
-                                        ? '🔔 All DLL folders uploaded (Submitted)! Click notification bell to view DLL Review Status and confirm final status'
-                                        : isConfirmedApproved && isMasterTeacher
-                                        ? '✓ Approved and Verified by Master Teacher! Click to view verified review status or update feedback'
-                                        : 'Checked (Clean / Approved)'
-                                      : isWithComments
-                                      ? `With Comments: "${itemComment || 'Feedback recorded'}"`
-                                      : isIncomplete
-                                      ? `Incomplete (Lacking): "${itemComment || 'Lacking requirements'}"`
-                                      : isLate
-                                      ? `Late (Submitted Late): "${itemComment || 'Submitted past deadline'}"`
-                                      : 'Pending / Not Checked'
-                                  } • Click to review or update status`}
-                                >
-                                  {isChecked && (
-                                    showDllNotificationBell ? (
-                                      <div className="relative flex items-center justify-center">
-                                        <Bell className="w-3.5 h-3.5 fill-white text-white animate-bounce" />
-                                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-200 opacity-75"></span>
-                                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <Check className="w-4 h-4 stroke-[3]" />
-                                    )
-                                  )}
-                                  {isWithComments && <MessageSquare className="w-3.5 h-3.5 fill-current" />}
-                                  {isIncomplete && <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />}
-                                  {isLate && <Clock className="w-3.5 h-3.5 stroke-[2.5]" />}
-                                </button>
-                              </td>
-                            );
-                          })}
-
-                          {/* Progress Bar & Number */}
-                          <td className="py-3 px-3 text-center border-l border-[#24334b]">
-                            <div className="flex flex-col items-center justify-center">
-                              <span
-                                className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono ${
-                                  isAllChecked
-                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                                    : completedCount >= Math.ceil(totalItemCount / 2)
-                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
-                                    : completedCount > 0
-                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                    : 'bg-[#0d1524] text-slate-400 border border-[#24334b]'
-                                }`}
-                              >
-                                {completedCount} / {totalItemCount}
-                              </span>
-                              <span className="text-[10px] text-slate-400 mt-0.5 font-bold">
-                                {pct}%
-                              </span>
-                            </div>
-                          </td>
-
-                          {/* Quick Action Button */}
-                          <td className="py-3 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => canEditDllTosTq && handleCheckAllItems(faculty.email, !isAllChecked)}
-                              disabled={!canEditDllTosTq}
-                              className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold transition-all ${
-                                !canEditDllTosTq
-                                  ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 border border-slate-700'
-                                  : isAllChecked
-                                  ? 'bg-[#1c273a] text-slate-300 hover:bg-[#25344d] border border-[#2d3e57] cursor-pointer'
-                                  : 'bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/40 cursor-pointer'
-                              }`}
-                              title={!canEditDllTosTq ? 'Only Principal, Master Teacher, and Master Admin can edit' : isAllChecked ? `Clear all ${currentCategory.name} submissions` : `Mark all ${currentCategory.name} complete (Checked)`}
-                            >
-                              {isAllChecked ? 'Reset' : 'Check All'}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
 
           {/* Directory Footer Info */}
           <div className="p-4 bg-[#0f1725] border-t border-[#24334b] flex flex-col sm:flex-row items-center justify-between text-xs font-mono text-slate-400 gap-2">
@@ -5585,12 +5015,26 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     {dllReviewModalData.dllFolders.map((folder) => {
                       const files = dllReviewModalData.uploadedFilesByFolder[folder.id] || [];
                       const hasUploadedFile = files.length > 0;
+                      const isConfirmedApprovedWeek =
+                        dllReviewModalData.currentStatus === 'checked' &&
+                        Boolean(
+                          confirmedWeeks[dllReviewModalData.facultyEmail]?.[String(dllReviewModalData.weekIndex)] ||
+                          dllReviewModalData.currentComment?.includes('Verified and Approved') ||
+                          dllReviewModalData.currentComment?.includes('Approved & Verified') ||
+                          dllReviewModalData.currentComment?.includes('[Confirmed by')
+                        );
+                      const isWithCommentsWeek = dllReviewModalData.currentStatus === 'with-comments';
+
                       return (
                         <div
                           key={folder.id}
                           className={`p-3.5 rounded-2xl border transition-all ${
                             hasUploadedFile
                               ? 'bg-[#0d1524] border-emerald-500/40 shadow-xs'
+                              : isConfirmedApprovedWeek
+                              ? 'bg-emerald-950/20 border-emerald-500/30'
+                              : isWithCommentsWeek
+                              ? 'bg-amber-950/20 border-amber-500/30'
                               : 'bg-rose-500/10 border-rose-500/30'
                           } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
                         >
@@ -5600,6 +5044,16 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                               {hasUploadedFile ? (
                                 <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-bold border border-emerald-500/40">
                                   ✓ Uploaded
+                                </span>
+                              ) : isConfirmedApprovedWeek ? (
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-bold border border-emerald-500/40 flex items-center space-x-1">
+                                  <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                  <span>Document Cleared (Approved)</span>
+                                </span>
+                              ) : isWithCommentsWeek ? (
+                                <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold border border-amber-500/40 flex items-center space-x-1">
+                                  <MessageSquare className="w-2.5 h-2.5 fill-current" />
+                                  <span>Auto-Purged (15 Days)</span>
                                 </span>
                               ) : (
                                 <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full font-bold border border-rose-500/40">
@@ -5611,6 +5065,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                             {hasUploadedFile ? (
                               <p className="text-[11px] text-slate-300 font-mono">
                                 <span className="text-white font-semibold">{files[0].title}</span> ({files[0].fileName}) • {files[0].fileSizeFormatted} • Uploaded {files[0].uploadedAt?.substring(0, 10)}
+                              </p>
+                            ) : isConfirmedApprovedWeek ? (
+                              <p className="text-[11px] text-emerald-400 font-mono">
+                                Document was verified and automatically removed to conserve database storage. Permanent Green Check ✓ is retained.
+                              </p>
+                            ) : isWithCommentsWeek ? (
+                              <p className="text-[11px] text-amber-400 font-mono">
+                                Document was auto-purged after 15 days. "With Comments" status and feedback remarks remain permanent.
                               </p>
                             ) : (
                               <p className="text-[11px] text-rose-300 italic">
@@ -5666,14 +5128,14 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                       {reviewStatusChoice === 'checked' ? (
                         <span className="text-[10px] bg-emerald-500 text-white font-mono font-bold px-2 py-0.5 rounded-full flex items-center space-x-1 shadow-2xs">
                           <Check className="w-3 h-3 stroke-[3]" />
-                          <span>Sets Green Check ✓</span>
+                          <span>Permanent Green Check ✓</span>
                         </span>
                       ) : (
                         <span className="text-[10px] text-emerald-400 font-mono font-medium">Click to approve</span>
                       )}
                     </div>
                     <p className="text-[11px] text-slate-400 leading-tight">
-                      Confirmed clean compliance. All DLL requirements met. Changes the notification bell to a Green Check.
+                      Confirmed clean compliance. Automatically deletes Week {dllReviewModalData.weekNumber} documents from Firestore while leaving the Green Check ✓ permanent.
                     </p>
                   </button>
 
@@ -5695,7 +5157,7 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                       {reviewStatusChoice === 'with-comments' && <span className="w-2 h-2 rounded-full bg-amber-400" />}
                     </div>
                     <p className="text-[11px] text-slate-400 leading-tight">
-                      Approve with feedback or minor revisions needed.
+                      Feedback or revisions needed. Files are retained for 15 days before auto purge; status remains "With Comments" even after files are purged.
                     </p>
                   </button>
 
@@ -5794,8 +5256,10 @@ export const SubmissionReportView: React.FC<SubmissionReportViewProps> = ({
                     <Check className="w-4 h-4 stroke-[3]" />
                     <span>
                       {reviewStatusChoice === 'checked'
-                        ? 'Approve & Mark with Green Check ✓'
-                        : 'Confirm Final Status'}
+                        ? 'Approve, Delete Documents & Keep Permanent Green Check ✓'
+                        : reviewStatusChoice === 'with-comments'
+                        ? 'Confirm With Comments (15-Day Auto Purge)'
+                        : 'Confirm Incomplete Status'}
                     </span>
                   </>
                 )}
